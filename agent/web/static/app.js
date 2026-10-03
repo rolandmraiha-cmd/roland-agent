@@ -4,13 +4,12 @@
 const $ = (id) => document.getElementById(id);
 let currentChat = null;
 let sending = false;
+let csrf = "";
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    credentials: "same-origin",
-    headers: options.body ? { "Content-Type": "application/json" } : {},
-    ...options,
-  });
+  const headers = { "X-CSRF-Token": csrf };
+  if (options.body) headers["Content-Type"] = "application/json";
+  const res = await fetch(path, { credentials: "same-origin", ...options, headers });
   if (res.status === 401) { location.href = "/login"; throw new Error("logged out"); }
   if (!res.ok) {
     let msg = res.statusText;
@@ -42,6 +41,7 @@ $("scrim").onclick = () => openSidebar(false);
 async function loadStatus() {
   try {
     const s = await (await api("/api/status")).json();
+    csrf = s.csrf;
     document.title = s.name;
     $("status").textContent = `${s.model} · ${s.calls_left}/${s.daily_limit} calls left today`;
   } catch (_) {}
@@ -230,9 +230,14 @@ $("job-form").onsubmit = async (e) => {
   } catch (err) { $("job-error").textContent = err.message; }
 };
 
+$("logout").onclick = async () => {
+  try { await api("/logout", { method: "POST" }); } catch (_) {}
+  location.href = "/login";
+};
+
 // ---------- start ----------
 (async () => {
-  loadStatus();
+  await loadStatus();
   const chats = await loadChats();
   if (chats.length) openChat(chats[0].id);
 })();

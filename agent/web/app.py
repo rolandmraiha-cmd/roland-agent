@@ -16,7 +16,11 @@ from pydantic import BaseModel, Field
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import execute, scheduler_loop
-from .auth import COOKIE, LoginLimiter, Sessions, password_ok
+import hmac
+
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+
+from .auth import COOKIE, LoginLimiter, Sessions, csrf_token, password_ok
 
 STATIC = Path(__file__).parent / "static"
 
@@ -25,7 +29,9 @@ SECURITY_HEADERS = {
                                "base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
-    "Referrer-Policy": "no-referrer",
+    # "no-referrer" would make browsers send "Origin: null" on the login form and break the
+    # Origin check; "same-origin" sends it to this site only.
+    "Referrer-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
 
@@ -61,13 +67,19 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
-        # CSRF: every state-changing request must come from this site's own page.
+        path = request.url.path
+        # CSRF, two layers: every state-changing request must come from this site's own page
+        # (Origin check), and once logged in it must also carry the session's CSRF token.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin") or request.headers.get("referer")
             host = request.headers.get("host", "")
             if not origin or urlparse(origin).netloc != host:
                 return JSONResponse({"error": "bad origin"}, status_code=403)
-        path = request.url.path
+            token = request.cookies.get(COOKIE)
+            if path != "/login" and token:
+                sent = request.headers.get("x-csrf-token", "")
+                if not hmac.compare_digest(sent, csrf_token(token)):
+                    return JSONResponse({"error": "bad csrf token"}, status_code=403)
         public = path in {"/login", "/favicon.ico"} or path.startswith("/static/")
         if not public and not logged_in(request):
             if path.startswith("/api/"):
@@ -79,6 +91,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         if path.startswith("/api/") or path in {"/", "/login"}:
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    if config.allowed_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=config.allowed_hosts)
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -116,7 +131,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     @app.post("/logout")
     async def logout(request: Request):
         sessions.end(request.cookies.get(COOKIE))
-        response = RedirectResponse("/login", status_code=303)
+        response = JSONResponse({"ok": True})
         response.delete_cookie(COOKIE, path="/")
         return response
 
@@ -126,8 +141,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     # --- chats ---
     @app.get("/api/status")
-    async def status():
+    async def status(request: Request):
         return {"name": config.agent_name, "model": config.model_name,
+                "csrf": csrf_token(request.cookies.get(COOKIE, "")),
                 "calls_left": agent.calls_left(), "daily_limit": config.daily_call_limit,
                 "shell": agent.allow_shell}
 

@@ -30,6 +30,7 @@ class Config:
     agent_name: str
     timezone: str
     data_dir: Path
+    allowed_hosts: tuple[str, ...] = ()
 
     @property
     def db_path(self) -> Path:
@@ -63,4 +64,6 @@ class Config:
             agent_name=os.getenv("AGENT_NAME", "Agent"),
             timezone=os.getenv("TIMEZONE", "Europe/Helsinki"),
             data_dir=Path(os.getenv("DATA_DIR", "./data")).resolve(),
+            allowed_hosts=tuple(h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",")
+                                if h.strip()),
         )

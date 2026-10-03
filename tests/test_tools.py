@@ -40,7 +40,8 @@ async def test_shell_off_outside_container(ctx):
 @pytest.mark.asyncio
 async def test_fetch_blocks_private_addresses(ctx):
     for url in ["http://127.0.0.1:8080/", "http://localhost/", "http://169.254.169.254/latest",
-                "http://10.0.0.1/", "file:///etc/passwd"]:
+                "http://10.0.0.1/", "http://[::1]/", "http://[::ffff:127.0.0.1]/",
+                "http://[fe80::1]/", "http://192.168.1.1/", "file:///etc/passwd"]:
         out = await call_tool(ctx, "fetch_url", {"url": url})
         assert out.startswith("Error"), url
 

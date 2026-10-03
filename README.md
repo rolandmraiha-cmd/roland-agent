@@ -67,10 +67,13 @@ Let's Encrypt, and keep `COOKIE_SECURE=true`. Never expose port 8080 directly.
 - **Lockout:** 5 wrong passwords from one address, or 20 from all addresses together, within
   15 minutes lock logins for 15 minutes.
 - **Cross-site requests:** every request that changes something must come from the page's own
-  origin. Strict security headers (CSP, no framing) are set.
+  origin and carry the session's CSRF token in an `X-CSRF-Token` header. Strict security headers
+  (CSP, no framing) are set, and `ALLOWED_HOSTS` limits which hostnames the page answers to.
 - **Shell:**
   - It runs as a non-root user in the agent's container, which has no Docker socket, no host
-    folders and no Linux capabilities.
+    folders, no Linux capabilities and a read-only filesystem apart from `/data` and `/tmp`.
+  - It's a normal shell, not a list of allowed commands, because a fixed list would block most
+    real tasks. The container itself is the boundary.
   - It has CPU, memory and process limits, and each command is stopped after 60 seconds.
   - Commands don't get the API key or password hash in their environment.
 - **Web fetch:** local and private addresses (localhost, 10.x, 192.168.x, 169.254.x and so on)

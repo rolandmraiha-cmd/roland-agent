@@ -63,7 +63,11 @@ def _is_public_host(host: str) -> bool:
         return False
     for info in infos:
         ip = ipaddress.ip_address(info[4][0].split("%")[0])
-        if not ip.is_global:
+        if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+            ip = ip.ipv4_mapped  # e.g. ::ffff:127.0.0.1
+        # is_global is False for loopback, private, link-local (169.254.x, fe80::), unique-local
+        # (fc00::/7), shared, reserved and other non-public ranges.
+        if not ip.is_global or ip.is_multicast:
             return False
     return True
 

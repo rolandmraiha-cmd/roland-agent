@@ -19,7 +19,10 @@ def client(make_agent):
 
 
 def login(c, pw=PW):
-    return c.post("/login", data={"password": pw}, headers=ORIGIN, follow_redirects=False)
+    r = c.post("/login", data={"password": pw}, headers=ORIGIN, follow_redirects=False)
+    if r.status_code == 303:
+        c.headers["X-CSRF-Token"] = c.get("/api/status").json()["csrf"]
+    return r
 
 
 def test_pages_need_login(client):
@@ -34,7 +37,7 @@ def test_login_sets_safe_cookie_and_logout(client):
     cookie = r.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=strict" in cookie
     assert client.get("/api/chats").status_code == 200
-    assert client.post("/logout", headers=ORIGIN, follow_redirects=False).status_code == 303
+    assert client.post("/logout", headers=ORIGIN).status_code == 200
     assert client.get("/api/chats").status_code == 401
 
 
@@ -53,6 +56,14 @@ def test_limiter_global_lock_and_expiry():
         lim.failed(f"10.0.0.{i}", now)
     assert lim.locked("1.2.3.4", now) > 0
     assert lim.locked("1.2.3.4", now + auth.LOCKOUT + 1) == 0
+
+
+def test_csrf_token_required(client):
+    login(client)
+    good = client.headers.pop("X-CSRF-Token")
+    assert client.post("/api/chats", headers=ORIGIN).status_code == 403
+    assert client.post("/api/chats", headers={**ORIGIN, "X-CSRF-Token": "x" * 64}).status_code == 403
+    assert client.post("/api/chats", headers={**ORIGIN, "X-CSRF-Token": good}).status_code == 200
 
 
 def test_csrf_origin_required(client):
@@ -107,3 +118,10 @@ def test_password_hashing():
     assert not auth.password_ok("wrong", h)
     assert not auth.password_ok("a long password here", "not-a-hash")
     assert not auth.password_ok("", h)
+
+
+def test_trusted_hosts(make_agent):
+    agent = make_agent(allowed_hosts=("agent.example.com",))
+    with TestClient(create_app(agent, run_scheduler=False)) as c:
+        assert c.get("/login").status_code == 400
+        assert c.get("/login", headers={"Host": "agent.example.com"}).status_code == 200

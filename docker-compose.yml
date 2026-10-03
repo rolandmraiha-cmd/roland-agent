@@ -9,6 +9,10 @@ services:
     volumes:
       - agent-data:/data
     # No Docker socket and no host folders: the agent's shell can only touch its own container.
+    # The container's own files are read-only; only /data (and a small /tmp) can be written.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
     security_opt:
       - no-new-privileges:true
     cap_drop: [ALL]

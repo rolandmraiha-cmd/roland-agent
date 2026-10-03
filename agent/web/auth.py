@@ -40,6 +40,12 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def csrf_token(session_token: str) -> str:
+    """A per-session anti-CSRF token. The page reads it from /api/status and sends it back in the
+    X-CSRF-Token header on every change; other sites can neither read nor guess it."""
+    return hashlib.sha256(b"csrf:" + session_token.encode()).hexdigest()
+
+
 class LoginLimiter:
     def __init__(self) -> None:
         self.fails: dict[str, deque[float]] = defaultdict(deque)
