@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#111418">
+<title>Agent</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="app">
+  <aside id="sidebar" class="sidebar">
+    <button id="new-chat" class="primary wide">+ New chat</button>
+    <nav id="chat-list" class="chat-list" aria-label="Chats"></nav>
+    <div class="sidebar-foot">
+      <div id="status" class="status"></div>
+      <form method="post" action="/logout"><button class="ghost wide" type="submit">Log out</button></form>
+    </div>
+  </aside>
+  <div id="scrim" class="scrim" hidden></div>
+  <main class="main">
+    <header class="topbar">
+      <button id="menu" class="icon" aria-label="Chats">☰</button>
+      <h1 id="title">Chat</h1>
+      <div class="tabs" role="tablist">
+        <button id="tab-chat" class="tab active" role="tab">Chat</button>
+        <button id="tab-jobs" class="tab" role="tab">Jobs</button>
+      </div>
+    </header>
+
+    <section id="chat-view" class="view">
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="composer" class="composer">
+        <textarea id="input" rows="1" placeholder="Message your agent…" maxlength="20000"></textarea>
+        <button id="send" class="primary" type="submit">Send</button>
+      </form>
+    </section>
+
+    <section id="jobs-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Scheduled jobs</h2>
+        <p class="hint">Jobs run on their own while you're away. Ask the agent in chat ("every morning at 7, summarise …") or add one here.</p>
+        <div id="job-list"></div>
+        <details class="card">
+          <summary>Add a job</summary>
+          <form id="job-form" class="job-form">
+            <label>Name <input name="name" required maxlength="80" placeholder="Morning news"></label>
+            <label>Schedule (cron, <span id="tz"></span>) <input name="cron" required placeholder="0 7 * * *"></label>
+            <label>What to do <textarea name="prompt" required rows="3" maxlength="5000"></textarea></label>
+            <button class="primary" type="submit">Add job</button>
+            <p id="job-error" class="error"></p>
+          </form>
+        </details>
+        <h2>Recent results</h2>
+        <div id="run-list"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

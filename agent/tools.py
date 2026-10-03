@@ -1,0 +1,257 @@
+"""Tools the agent can use. Each tool is a plain function plus a JSON schema for the model."""
+
+from __future__ import annotations
+
+import asyncio
+import ipaddress
+import json
+import os
+import socket
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Awaitable, Callable
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from bs4 import BeautifulSoup
+
+from .memory import Memory
+from .schedule import next_run_after, valid_cron
+
+MAX_OUTPUT = 8000          # characters of tool output the model sees
+MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
+SHELL_TIMEOUT = 60         # seconds
+# Environment variables the shell never gets, so commands can't print the agent's secrets.
+SECRET_ENV = {"AGENT_PASSWORD_HASH", "MODEL_API_KEY"}
+
+
+def clip(text: str, limit: int = MAX_OUTPUT) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n... [cut, {len(text) - limit} more characters]"
+
+
+def in_container() -> bool:
+    return Path("/.dockerenv").exists() or os.getenv("AGENT_IN_CONTAINER") == "1"
+
+
+@dataclass
+class ToolContext:
+    memory: Memory
+    workspace: Path
+    timezone: str
+    allow_shell: bool
+
+
+Handler = Callable[[ToolContext, dict], Awaitable[str]]
+
+
+def _workspace_path(ctx: ToolContext, path: str) -> Path:
+    """Resolves a path inside the workspace and refuses anything that points outside it."""
+    root = ctx.workspace.resolve()
+    target = (root / (path or ".")).resolve()
+    if target != root and root not in target.parents:
+        raise ValueError("Path is outside the workspace.")
+    return target
+
+
+# --- web ---
+def _is_public_host(host: str) -> bool:
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if not ip.is_global:
+            return False
+    return True
+
+
+async def fetch_url(ctx: ToolContext, args: dict) -> str:
+    url = str(args.get("url", "")).strip()
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False,
+                                 headers={"User-Agent": "roland-agent/0.1"}) as client:
+        for _ in range(6):
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                return "Error: only http and https URLs are allowed."
+            # Blocks local and private addresses (the agent's own machine, home network,
+            # cloud metadata), checked again on every redirect.
+            if not await asyncio.to_thread(_is_public_host, parsed.hostname):
+                return "Error: that address is private or can't be resolved."
+            async with client.stream("GET", url) as resp:
+                if resp.is_redirect and "location" in resp.headers:
+                    url = urljoin(url, resp.headers["location"])
+                    continue
+                body = b""
+                async for part in resp.aiter_bytes():
+                    body += part
+                    if len(body) > MAX_DOWNLOAD:
+                        break
+                ctype = resp.headers.get("content-type", "")
+                text = body.decode(resp.encoding or "utf-8", errors="replace")
+                if "html" in ctype:
+                    soup = BeautifulSoup(text, "html.parser")
+                    for tag in soup(["script", "style", "noscript", "svg"]):
+                        tag.decompose()
+                    title = soup.title.get_text(strip=True) if soup.title else ""
+                    lines = [l.strip() for l in soup.get_text("\n").splitlines() if l.strip()]
+                    text = (f"Title: {title}\n\n" if title else "") + "\n".join(lines)
+                return clip(f"HTTP {resp.status_code} {url}\n\n{text}")
+    return "Error: too many redirects."
+
+
+# --- shell ---
+async def run_shell(ctx: ToolContext, args: dict) -> str:
+    if not ctx.allow_shell:
+        return ("Error: shell commands are turned off. They only run inside the agent's Docker "
+                "container (or with ALLOW_SHELL=true).")
+    command = str(args.get("command", ""))
+    ctx.workspace.mkdir(parents=True, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
+    proc = await asyncio.create_subprocess_shell(
+        command, cwd=ctx.workspace, env=env,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        start_new_session=True,
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=SHELL_TIMEOUT)
+    except asyncio.TimeoutError:
+        try:
+            os.killpg(proc.pid, 9)
+        except ProcessLookupError:
+            pass
+        return f"Error: the command took longer than {SHELL_TIMEOUT} seconds and was stopped."
+    return clip(f"exit code {proc.returncode}\n{out.decode(errors='replace')}")
+
+
+# --- files ---
+async def read_file(ctx: ToolContext, args: dict) -> str:
+    try:
+        target = _workspace_path(ctx, str(args.get("path", "")))
+        return clip(target.read_text(errors="replace"))
+    except (ValueError, OSError) as e:
+        return f"Error: {e}"
+
+
+async def write_file(ctx: ToolContext, args: dict) -> str:
+    try:
+        target = _workspace_path(ctx, str(args.get("path", "")))
+        if target == ctx.workspace.resolve():
+            return "Error: give a file name."
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = str(args.get("content", ""))
+        if args.get("append"):
+            with target.open("a") as f:
+                f.write(content)
+        else:
+            target.write_text(content)
+        return f"Saved {target.relative_to(ctx.workspace.resolve())} ({len(content)} characters)."
+    except (ValueError, OSError) as e:
+        return f"Error: {e}"
+
+
+async def list_files(ctx: ToolContext, args: dict) -> str:
+    try:
+        ctx.workspace.mkdir(parents=True, exist_ok=True)
+        target = _workspace_path(ctx, str(args.get("path", ".")))
+        root = ctx.workspace.resolve()
+        items = sorted(target.iterdir())
+        lines = [f"{p.relative_to(root)}{'/' if p.is_dir() else ''}" for p in items[:300]]
+        return "\n".join(lines) or "(empty)"
+    except (ValueError, OSError) as e:
+        return f"Error: {e}"
+
+
+# --- memory ---
+async def remember(ctx: ToolContext, args: dict) -> str:
+    fact_id = ctx.memory.remember(str(args.get("fact", "")))
+    return f"Remembered as fact {fact_id}."
+
+
+async def forget(ctx: ToolContext, args: dict) -> str:
+    ok = ctx.memory.forget(int(args.get("fact_id", 0)))
+    return "Forgotten." if ok else "No fact with that id."
+
+
+# --- background jobs ---
+async def schedule_job(ctx: ToolContext, args: dict) -> str:
+    cron = str(args.get("cron", "")).strip()
+    if not valid_cron(cron):
+        return "Error: that is not a valid 5-field cron schedule, e.g. '0 7 * * *'."
+    name = str(args.get("name", "Job")).strip() or "Job"
+    prompt = str(args.get("prompt", "")).strip()
+    if not prompt:
+        return "Error: the job needs a prompt."
+    nxt = next_run_after(cron, ctx.timezone)
+    job_id = ctx.memory.add_job(name, cron, prompt, nxt)
+    return f"Scheduled job {job_id} '{name}' ({cron}, {ctx.timezone})."
+
+
+async def list_jobs(ctx: ToolContext, args: dict) -> str:
+    jobs = ctx.memory.jobs()
+    if not jobs:
+        return "No jobs."
+    return "\n".join(
+        f"{j.id}: {j.name} [{j.cron}] {'on' if j.enabled else 'paused'} - {j.prompt}" for j in jobs
+    )
+
+
+async def cancel_job(ctx: ToolContext, args: dict) -> str:
+    ok = ctx.memory.delete_job(int(args.get("job_id", 0)))
+    return "Job deleted." if ok else "No job with that id."
+
+
+def _fn(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    return {"type": "function", "function": {
+        "name": name, "description": description,
+        "parameters": {"type": "object", "properties": properties, "required": required},
+    }}
+
+
+S = {"type": "string"}
+I = {"type": "integer"}
+
+TOOLS: dict[str, tuple[dict, Handler]] = {
+    "fetch_url": (_fn("fetch_url", "Download a public web page and return its text.",
+                      {"url": S}, ["url"]), fetch_url),
+    "run_shell": (_fn("run_shell", "Run a shell command in your own container, in your workspace "
+                      "folder. 60 second limit.", {"command": S}, ["command"]), run_shell),
+    "read_file": (_fn("read_file", "Read a text file from your workspace. Paths are relative to the workspace, e.g. 'notes/todo.txt'.",
+                      {"path": S}, ["path"]), read_file),
+    "write_file": (_fn("write_file", "Write (or append to) a text file in your workspace. Paths are relative to the workspace, e.g. 'notes/todo.txt'.",
+                       {"path": S, "content": S, "append": {"type": "boolean"}},
+                       ["path", "content"]), write_file),
+    "list_files": (_fn("list_files", "List files in a workspace folder (relative path, default the workspace itself).",
+                       {"path": S}, []), list_files),
+    "remember": (_fn("remember", "Save a lasting fact about Roland or your work.",
+                     {"fact": S}, ["fact"]), remember),
+    "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": I}, ["fact_id"]), forget),
+    "schedule_job": (_fn("schedule_job", "Schedule a background job: a prompt you will run on a "
+                         "5-field cron schedule in Roland's time zone, e.g. '0 7 * * *' for every "
+                         "day at 07:00.", {"name": S, "cron": S, "prompt": S},
+                         ["name", "cron", "prompt"]), schedule_job),
+    "list_jobs": (_fn("list_jobs", "List scheduled background jobs.", {}, []), list_jobs),
+    "cancel_job": (_fn("cancel_job", "Delete a scheduled job by its id.",
+                       {"job_id": I}, ["job_id"]), cancel_job),
+}
+
+
+def schemas(exclude: set[str] = frozenset()) -> list[dict]:
+    return [schema for name, (schema, _) in TOOLS.items() if name not in exclude]
+
+
+async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
+    if name not in TOOLS:
+        return f"Error: there is no tool called {name}."
+    try:
+        return await TOOLS[name][1](ctx, args)
+    except Exception as e:  # a broken tool call should never crash the agent
+        return f"Error: {type(e).__name__}: {e}"
+
+
+def describe(name: str, args: dict) -> str:
+    """A short line for the chat page showing which tool ran."""
+    text = json.dumps(args, ensure_ascii=False)
+    return f"{name} {clip(text, 160)}"
