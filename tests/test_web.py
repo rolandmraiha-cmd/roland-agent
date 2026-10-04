@@ -317,3 +317,56 @@ def test_trusted_hosts(make_agent):
     with TestClient(create_app(agent, run_scheduler=False)) as c:
         assert c.get("/login").status_code == 400
         assert c.get("/login", headers={"Host": "agent.example.com"}).status_code == 200
+
+
+@pytest.mark.parametrize("text", [" ", "\n\t", "\u2003"])
+def test_blank_message_rejected_without_history_or_usage(client, text):
+    login(client)
+    chat = client.post("/api/chats", headers=ORIGIN).json()["id"]
+    response = client.post(f"/api/chats/{chat}/send", json={"text": text}, headers=ORIGIN)
+    assert response.status_code == 422
+    assert client.agent.memory.messages(chat) == []
+    assert client.agent.calls_left() == client.agent.config.daily_call_limit
+
+
+@pytest.mark.parametrize("field", ["name", "prompt"])
+def test_blank_job_rejected(client, field):
+    login(client)
+    body = {"name": "Morning", "cron": "0 7 * * *", "prompt": "Summarise"}
+    body[field] = " \n\t"
+    assert client.post("/api/jobs", json=body, headers=ORIGIN).status_code == 422
+    assert client.agent.memory.jobs() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scheduled", [False, True])
+async def test_shutdown_cancels_and_awaits_job(make_agent, monkeypatch, scheduled):
+    import asyncio
+    import httpx
+    from agent.scheduler import running_jobs
+
+    agent = make_agent()
+    started, stopped = asyncio.Event(), asyncio.Event()
+
+    async def run_job(job):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            stopped.set()
+
+    monkeypatch.setattr(agent, "run_job", run_job)
+    job_id = agent.memory.add_job("Long job", "* * * * *", "work", 0 if scheduled else 10**12)
+    app = create_app(agent, run_scheduler=scheduled)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                    base_url="http://testserver") as c:
+            assert (await c.post("/login", data={"password": PW}, headers=ORIGIN)).status_code == 303
+            status = (await c.get("/api/status")).json()
+            headers = {**ORIGIN, "X-CSRF-Token": status["csrf"]}
+            if not scheduled:
+                assert (await c.post(f"/api/jobs/{job_id}/run", headers=headers)).status_code == 200
+            await asyncio.wait_for(started.wait(), 2)
+    assert stopped.is_set()
+    assert job_id not in running_jobs
+    assert agent.memory.runs()[0]["finished"] is not None

@@ -5,6 +5,13 @@ const $ = (id) => document.getElementById(id);
 let currentChat = null;
 let sending = false;
 let csrf = "";
+let chatLoad = 0;
+
+function setSending(value) {
+  sending = value;
+  $("send").disabled = value;
+  $("new-chat").disabled = value;
+}
 
 async function api(path, options = {}) {
   const headers = { "X-CSRF-Token": csrf };
@@ -58,6 +65,7 @@ async function loadChats() {
     const del = el("button", "chat-del", "×");
     del.setAttribute("aria-label", "Delete chat");
     del.onclick = async () => {
+      if (sending) return;
       if (!confirm(`Delete "${c.title}"?`)) return;
       try { await api(`/api/chats/${c.id}`, { method: "DELETE" }); } catch (e) { alert(e.message); return; }
       if (c.id === currentChat) { currentChat = null; $("messages").replaceChildren(); $("title").textContent = "Chat"; }
@@ -84,39 +92,63 @@ function scrollDown() {
 }
 
 async function openChat(id) {
+  if (sending) return;
+  const load = ++chatLoad;
   currentChat = id;
   showView("chat");
+  // Do not leave the previous conversation visible while this history loads.
+  $("messages").replaceChildren();
+  $("title").textContent = "Chat";
   const data = await (await api(`/api/chats/${id}/messages`)).json();
+  if (load !== chatLoad || sending) return;
   const box = $("messages");
   box.replaceChildren();
   for (const m of data.messages) addMessage(m.role, m.content);
   if (data.busy) addMessage("note", "The agent is still answering here… reopen the chat in a moment.");
   const chats = await loadChats();
+  if (load !== chatLoad || sending) return;
   const c = chats.find((x) => x.id === id);
   $("title").textContent = c ? c.title : "Chat";
   $("input").focus();
 }
 
 async function newChat() {
-  const { id } = await (await api("/api/chats", { method: "POST" })).json();
-  await openChat(id);
-  openSidebar(false);
+  if (sending) return;
+  setSending(true);
+  ++chatLoad;
+  let id;
+  try {
+    ({ id } = await (await api("/api/chats", { method: "POST" })).json());
+  } catch (e) {
+    addMessage("error", e.message);
+    return;
+  } finally {
+    setSending(false);
+  }
+  try {
+    await openChat(id);
+    openSidebar(false);
+  } catch (e) {
+    addMessage("error", e.message);
+  }
 }
 $("new-chat").onclick = newChat;
 
 async function send(text) {
   if (sending) return;
-  if (currentChat === null) {
-    const { id } = await (await api("/api/chats", { method: "POST" })).json();
-    currentChat = id;
-  }
-  sending = true;
-  $("send").disabled = true;
-  addMessage("user", text);
-  const reply = addMessage("assistant", "");
-  const bubble = reply.querySelector(".bubble");
-  reply.classList.add("typing");
+  // Reserve the composer before the first await, including creation of a new chat.
+  setSending(true);
+  ++chatLoad; // An older history request must not replace this live conversation.
+  let reply = null;
   try {
+    if (currentChat === null) {
+      const { id } = await (await api("/api/chats", { method: "POST" })).json();
+      currentChat = id;
+    }
+    addMessage("user", text);
+    reply = addMessage("assistant", "");
+    const bubble = reply.querySelector(".bubble");
+    reply.classList.add("typing");
     const res = await api(`/api/chats/${currentChat}/send`, { method: "POST", body: JSON.stringify({ text }) });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -138,16 +170,22 @@ async function send(text) {
       }
     }
   } catch (e) {
-    reply.after(el("div", "msg error", e.message));
+    if (reply) reply.after(el("div", "msg error", e.message));
+    else {
+      addMessage("error", e.message);
+      // Creation failed before a message was sent. Preserve the draft for retry.
+      if (!input.value) { input.value = text; autosize(); }
+    }
   } finally {
-    reply.classList.remove("typing");
-    if (!bubble.textContent) reply.remove();
-    sending = false;
-    $("send").disabled = false;
+    if (reply) {
+      reply.classList.remove("typing");
+      if (!reply.querySelector(".bubble").textContent) reply.remove();
+    }
+    setSending(false);
     loadChats().then((chats) => {
       const c = chats.find((x) => x.id === currentChat);
       if (c) $("title").textContent = c.title;
-    });
+    }).catch((e) => addMessage("error", e.message));
     loadStatus();
   }
 }
@@ -156,8 +194,10 @@ const input = $("input");
 function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 200) + "px"; }
 input.addEventListener("input", autosize);
 input.addEventListener("keydown", (e) => {
-  // Enter sends on a computer; on a phone the keyboard's Enter makes a new line.
-  if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer: coarse)").matches) {
+  // Enter sends on a computer; Ctrl/Cmd+Enter also sends with a phone/tablet keyboard.
+  // Never submit the Enter used to confirm an IME composition.
+  if (e.key === "Enter" && !e.isComposing && !e.shiftKey &&
+      (e.ctrlKey || e.metaKey || !matchMedia("(pointer: coarse)").matches)) {
     e.preventDefault();
     $("composer").requestSubmit();
   }
