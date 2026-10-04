@@ -229,3 +229,26 @@ test('old-origin jobs say the origin is unknown', async () => {
   await f.run('loadJobs()');
   assert.match(f.get('job-list').children[0].children[2].textContent, /^The agent made this job\. /);
 });
+
+test('deleting the open chat suppresses its pending load error', async () => {
+  const f = fixture(), history = deferred();
+  // Restore the shipped list loader that the fixture normally replaces with a stub.
+  const source = fs.readFileSync(path.join(__dirname, '../../agent/web/static/app.js'), 'utf8');
+  const loader = source.slice(source.indexOf('async function loadChats()'),
+                              source.indexOf('// ---------- chat ----------'));
+  vm.runInContext(loader, f.context);
+  let chats = [{ id: 3, title: 'Pending' }];
+  f.context.api = async (url, options = {}) => {
+    if (url.endsWith('/messages')) return history.promise;
+    if (options.method === 'DELETE') { chats = []; return {}; }
+    return { json: async () => chats };
+  };
+  const opening = f.run('openChat(3)');
+  await f.run('loadChats()');
+  await f.get('chat-list').children[0].children[1].onclick();
+  history.reject(new Error('no such chat'));
+  await opening;
+  assert.equal(f.run('currentChat'), null);
+  assert.equal(f.get('messages').children.length, 0);
+  assert.equal(f.get('title').textContent, 'Chat');
+});
