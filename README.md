@@ -117,3 +117,20 @@ Then set these in `.env`:
   and waits for a busy lock instead of failing. Job runs cut off by a restart are marked failed.
 - **Known limit:** with the shell on, a command runs as the agent's user and can reach its
   database. Use an API key with a spending limit. v2 moves commands into a separate sandbox.
+
+## v2 M0 fixes
+
+The `v2` branch starts with fixes to the v1 agent; the later v2 services are not installed yet.
+
+- `FORWARDED_ALLOW_IPS=*` is rejected. List the IP or CIDR of your actual reverse proxy.
+  The right-most untrusted forwarded hop identifies the visitor. If all hops are trusted,
+  the direct peer is kept and a warning is logged once.
+- A migrated job's origin is described as unknown; it still needs approval before running.
+- `MAX_TOOL_STEPS` limits tool rounds. The last model call can provide a final answer but
+  cannot execute another tool round.
+- A job that overruns its cron interval waits for a future scheduled time after it finishes.
+- Deleting the open chat suppresses errors from its pending history request.
+
+M0 preserves the existing model setup and security controls. Its tests use a fake model and
+make no hosted-model or LLM API calls. See [RUNBOOK](docs/RUNBOOK.md) and
+[SECURITY](docs/SECURITY.md) for M0 validation and the regex audit.
