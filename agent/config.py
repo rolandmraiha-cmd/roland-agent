@@ -45,6 +45,8 @@ class Config:
 
     def check(self) -> None:
         """Refuses to run with settings that would leave the page open."""
+        if "*" in self.trusted_proxies:
+            raise SystemExit("FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP")
         if not self.password_hash.startswith("$argon2"):
             raise SystemExit(
                 "AGENT_PASSWORD_HASH is missing. Run `python -m agent hash-password` "

@@ -293,7 +293,9 @@ def test_forwarded_for_details():
 
     import asyncio
     # A visitor typing a fake left-hand entry doesn't change who they are.
-    assert asyncio.run(run(("*",), "172.17.0.1", "1.1.1.1, 6.6.6.6:4000")) == "6.6.6.6"
+    with pytest.raises(ValueError):
+        ProxyHeaders(app, ("*",))
+    assert asyncio.run(run(("172.17.0.1",), "172.17.0.1", "1.1.1.1, 6.6.6.6:4000")) == "6.6.6.6"
     assert asyncio.run(run(("172.17.0.0/16",), "172.17.0.1", "1.1.1.1", "6.6.6.6")) == "6.6.6.6"
     assert asyncio.run(run(("172.17.0.0/16",), "172.17.0.1", "6.6.6.6, 172.17.0.9")) == "6.6.6.6"
     assert asyncio.run(run(("172.17.0.1",), "8.8.8.8", "1.1.1.1")) == "8.8.8.8"  # untrusted peer
@@ -370,3 +372,45 @@ async def test_shutdown_cancels_and_awaits_job(make_agent, monkeypatch, schedule
     assert stopped.is_set()
     assert job_id not in running_jobs
     assert agent.memory.runs()[0]["finished"] is not None
+
+
+@pytest.mark.asyncio
+async def test_forwarded_for_never_uses_leftmost_when_all_trusted(caplog):
+    from agent.web.app import ProxyHeaders
+
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(scope["client"][0])
+
+    middleware = ProxyHeaders(app, ("10.77.1.0/24",))
+    scope = {"type": "http", "client": ("10.77.1.2", 1),
+             "headers": [(b"x-forwarded-for", b"10.77.1.5, 10.77.1.6")]}
+    with caplog.at_level("WARNING", logger="agent.web"):
+        await middleware(scope, None, None)
+        await middleware(scope, None, None)
+    assert seen == ["10.77.1.2", "10.77.1.2"]
+    assert caplog.text.count("keeping direct peer") == 1
+
+
+def test_star_rejected_in_config_check(make_agent):
+    agent = make_agent(trusted_proxies=("*",))
+    with pytest.raises(SystemExit) as error:
+        agent.config.check()
+    assert str(error.value) == "FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP"
+
+
+@pytest.mark.asyncio
+async def test_invalid_forwarded_hop_is_used_only_when_rightmost():
+    from agent.web.app import ProxyHeaders
+
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(scope["client"][0])
+
+    middleware = ProxyHeaders(app, ("10.77.1.2",))
+    for hops in (b"invalid, 1.2.3.4", b"1.2.3.4, invalid"):
+        await middleware({"type": "http", "client": ("10.77.1.2", 1),
+                          "headers": [(b"x-forwarded-for", hops)]}, None, None)
+    assert seen == ["1.2.3.4", "invalid"]
