@@ -27,8 +27,8 @@ async def run_due_jobs(agent: Agent, now: float | None = None) -> int:
         # The list was read before earlier jobs ran, so Roland may have paused, deleted or
         # edited this one since. Read it again right before running.
         job = agent.memory.job(job.id)
-        if job is None or not (job.enabled and job.approved):
-            continue
+        if job is None or not (job.enabled and job.approved) or job.next_run > now:
+            continue  # resuming a job moves next_run forward, so a pause+resume also skips
         # Move the next run forward first, so a crash or long job never runs twice in a row.
         agent.memory.set_next_run(job.id, next_run_after(job.cron, agent.config.timezone, now))
         running_jobs.add(job.id)

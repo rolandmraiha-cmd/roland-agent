@@ -259,21 +259,38 @@ def _short(text: str, limit: int) -> str:
 
 
 async def list_jobs(ctx: ToolContext, args: dict) -> str:
-    jobs = ctx.memory.jobs()
+    # Jobs waiting for approval first, then newest first, so the ones the model just made
+    # are always on the first page.
+    jobs = sorted(ctx.memory.jobs(), key=lambda j: (j.approved, -j.id))
     if not jobs:
         return "No jobs."
+    try:
+        offset = max(0, int(args.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+    total = len(jobs)
+    jobs = jobs[offset:]
+    if not jobs:
+        return f"{total} job(s), none from offset {offset}."
     # Every field is put on one line (so a newline in a name can't fake an entry) and shortened
     # so the whole list fits under MAX_OUTPUT. A line is at most 160 characters plus the prompt.
     shown = jobs[:MAX_LISTED_JOBS]
+    start = offset + 1
     room = max(40, min(LIST_PROMPT_CHARS, (MAX_OUTPUT - 200) // len(shown) - 160))
     lines = [
         f"{j.id}: {_short(j.name, 60)} [{_short(j.cron, 40)}] "
         f"{'waiting for approval' if not j.approved else 'on' if j.enabled else 'paused'}"
         f" - {_short(j.prompt, room)}" for j in shown
     ]
-    if len(jobs) > len(shown):
-        lines.append(f"... and {len(jobs) - len(shown)} more jobs not shown.")
-    return f"{len(jobs)} job(s):\n" + "\n".join(lines)
+    rest = len(jobs) - len(shown)
+    if rest:
+        lines.append(f"... and {rest} more jobs not shown. Call list_jobs with offset "
+                     f"{offset + len(shown)} to see them, or Roland can see all of them on the "
+                     "Jobs tab.")
+    head = f"{total} job(s), waiting for approval first, then newest first"
+    if offset or rest:
+        head += f" (showing {start}-{offset + len(shown)})"
+    return head + ":\n" + "\n".join(lines)
 
 
 async def cancel_job(ctx: ToolContext, args: dict) -> str:
@@ -310,7 +327,9 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
                          "5-field cron schedule in Roland's time zone, e.g. '0 7 * * *' for every "
                          "day at 07:00.", {"name": S, "cron": S, "prompt": S},
                          ["name", "cron", "prompt"]), schedule_job),
-    "list_jobs": (_fn("list_jobs", "List scheduled background jobs.", {}, []), list_jobs),
+    "list_jobs": (_fn("list_jobs", "List scheduled background jobs, waiting for approval first, "
+                      "then newest first, 30 at a time. Use offset to see more.",
+                      {"offset": I}, []), list_jobs),
     "cancel_job": (_fn("cancel_job", "Delete a scheduled job by its id.",
                        {"job_id": I}, ["job_id"]), cancel_job),
 }

@@ -76,3 +76,24 @@ async def test_job_paused_or_deleted_during_earlier_job_does_not_run(make_agent,
     monkeypatch.setattr(agent, "run_job", run_job)
     assert await run_due_jobs(agent, now=100) == 1
     assert ran == [first]
+
+
+@pytest.mark.asyncio
+async def test_job_paused_and_resumed_during_earlier_job_waits_for_next_time(make_agent, monkeypatch):
+    from agent.schedule import next_run_after
+    agent = make_agent()
+    first = agent.memory.add_job("First", "* * * * *", "one", 0)
+    second = agent.memory.add_job("Second", "* * * * *", "two", 0)
+    ran = []
+
+    async def run_job(job):
+        ran.append(job.id)
+        if job.id == first:  # pause and resume like the Jobs tab does
+            agent.memory.set_job_enabled(second, False)
+            agent.memory.set_next_run(second, next_run_after("* * * * *", agent.config.timezone))
+            agent.memory.set_job_enabled(second, True)
+        return True, "ok"
+
+    monkeypatch.setattr(agent, "run_job", run_job)
+    assert await run_due_jobs(agent, now=100) == 1
+    assert ran == [first]

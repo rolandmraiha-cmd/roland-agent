@@ -124,5 +124,29 @@ async def test_list_jobs_names_stay_on_one_line_and_many_jobs_fit(tmp_path):
     out = await call_tool(ToolContext(mem, tmp_path, "Europe/Helsinki", allow_shell=False),
                           "list_jobs", {})
     assert len(out) <= MAX_OUTPUT and "[cut" not in out
-    assert "\n99: fake" not in out and "1: real 99: fake" in out
-    assert out.startswith("71 job(s):") and "41 more jobs not shown" in out
+    assert out.startswith("71 job(s)") and "41 more jobs not shown" in out
+    assert "offset 30" in out and "Jobs tab" in out
+    last = await call_tool(ToolContext(mem, tmp_path, "Europe/Helsinki", allow_shell=False),
+                           "list_jobs", {"offset": 60})
+    assert "\n99: fake" not in last and "1: real 99: fake" in last  # oldest is on the last page
+    assert "(showing 61-71)" in last and "not shown" not in last
+
+
+async def test_list_jobs_puts_waiting_and_newest_first(tmp_path):
+    from agent.memory import Memory
+    from agent.tools import ToolContext, call_tool
+    mem = Memory(tmp_path / "m.db")
+    for i in range(40):
+        mem.add_job(f"old{i}", "0 7 * * *", "p", 0)
+    waiting = mem.add_job("agent idea", "0 7 * * *", "p", 0, approved=False, origin="agent")
+    for i in range(40):
+        mem.add_job(f"new{i}", "0 7 * * *", "p", 0)
+    out = await call_tool(ToolContext(mem, tmp_path, "Europe/Helsinki", allow_shell=False),
+                          "list_jobs", {})
+    lines = out.splitlines()
+    assert lines[1].startswith(f"{waiting}: agent idea") and "waiting for approval" in lines[1]
+    assert lines[2].startswith("81: new39")
+    assert "old" not in out  # the 40 oldest are on later pages
+    bad = await call_tool(ToolContext(mem, tmp_path, "Europe/Helsinki", allow_shell=False),
+                          "list_jobs", {"offset": "lots"})
+    assert bad.splitlines()[1] == lines[1]
