@@ -210,3 +210,22 @@ test('failed history load shows an error instead of an empty chat', async () => 
   assert.equal(f.run('currentChat'), 3);
   assert.match(f.get('messages').children[0].children[0].textContent, /Couldn't load this chat: Server error/);
 });
+
+test('old-origin jobs say the origin is unknown', async () => {
+  const f = fixture();
+  f.context.api = async () => ({ json: async () => ({
+    timezone: 'Europe/Helsinki', facts: [], runs: [],
+    jobs: [{ id: 1, name: 'Legacy', cron: '* * * * *', prompt: 'Check',
+             origin: 'old', approved: false }],
+  }) });
+  await f.run('loadJobs()');
+  const status = f.get('job-list').children[0].children[2].textContent;
+  assert.equal(status, "Where this job came from wasn't recorded (it was made before v1 tracked that), so the agent may have made it. Waiting for your OK: read what it does, then approve or delete it.");
+  f.context.api = async () => ({ json: async () => ({
+    timezone: 'Europe/Helsinki', facts: [], runs: [],
+    jobs: [{ id: 2, name: 'Agent', cron: '* * * * *', prompt: 'Check',
+             origin: 'agent', approved: false }],
+  }) });
+  await f.run('loadJobs()');
+  assert.match(f.get('job-list').children[0].children[2].textContent, /^The agent made this job\. /);
+});

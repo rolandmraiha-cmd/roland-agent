@@ -243,7 +243,7 @@ async function loadJobs() {
     head.append(el("strong", "", j.name), el("code", "", j.cron));
     card.append(head, el("p", "job-prompt", j.prompt));
     const status = waiting
-      ? (j.origin === "agent" ? "The agent made this job. " : "This job is from before approvals existed. ")
+      ? (j.origin === "agent" ? "The agent made this job. " : "Where this job came from wasn't recorded (it was made before v1 tracked that), so the agent may have made it. ")
         + "Waiting for your OK: read what it does, then approve or delete it."
       : j.running ? "Running now…"
       : j.enabled ? `Next run: ${fmtTime(j.next_run)}` : "Paused";
