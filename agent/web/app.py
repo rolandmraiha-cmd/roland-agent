@@ -13,16 +13,31 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from ..config import trusted_proxy_networks
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
-
-from .auth import (COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, client_key, csrf_token,
-                   password_ok)
+from .auth import (
+    COOKIE,
+    MAX_WAITING,
+    LoginGate,
+    LoginLimiter,
+    Sessions,
+    client_key,
+    csrf_token,
+    password_ok,
+)
 
 STATIC = Path(__file__).parent / "static"
 
@@ -83,9 +98,7 @@ class ProxyHeaders:
 
     def __init__(self, app, trusted: tuple[str, ...]):
         self.app = app
-        if "*" in trusted:
-            raise ValueError("FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP")
-        self.nets = [ipaddress.ip_network(t, strict=False) for t in trusted]
+        self.nets = trusted_proxy_networks(trusted)
         self.warned = False
         self.warned_all_trusted = False
 
@@ -109,7 +122,7 @@ class ProxyHeaders:
                 visitor = next((h for h in reversed(hops) if not self.trusted(h)), None)
                 if visitor is not None:
                     host = visitor
-                elif not self.warned_all_trusted:
+                elif hops and not self.warned_all_trusted:
                     self.warned_all_trusted = True
                     log.warning("Every X-Forwarded-For hop is trusted; keeping direct peer %s.", host)
                 proto = next((v.decode("latin-1") for k, v in scope["headers"]

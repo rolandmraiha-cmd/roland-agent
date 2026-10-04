@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,29 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 MIN_PASSWORD_LENGTH = 16
+
+
+def trusted_proxy_networks(
+    entries: tuple[str, ...],
+) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    """Validate proxy addresses without allowing trust of every address."""
+    if "*" in entries:
+        raise ValueError("FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP")
+    networks = []
+    for entry in entries:
+        try:
+            network = ipaddress.ip_network(entry, strict=False)
+        except ValueError as error:
+            raise ValueError(
+                f"Invalid FORWARDED_ALLOW_IPS entry {entry!r}; use an IP address or CIDR",
+            ) from error
+        if network.prefixlen == 0:
+            raise ValueError(
+                f"FORWARDED_ALLOW_IPS entry {entry!r} has prefix length 0; "
+                "list explicit proxy IPs or narrower CIDRs",
+            )
+        networks.append(network)
+    return networks
 
 
 def _bool(value: str | None, default: bool) -> bool:
@@ -45,8 +69,10 @@ class Config:
 
     def check(self) -> None:
         """Refuses to run with settings that would leave the page open."""
-        if "*" in self.trusted_proxies:
-            raise SystemExit("FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP")
+        try:
+            trusted_proxy_networks(self.trusted_proxies)
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         if not self.password_hash.startswith("$argon2"):
             raise SystemExit(
                 "AGENT_PASSWORD_HASH is missing. Run `python -m agent hash-password` "
