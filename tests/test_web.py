@@ -193,6 +193,88 @@ def test_origin_scheme_checked_when_secure(make_agent):
         assert r.status_code == 403
 
 
+def test_ipv6_counted_per_64():
+    assert auth.client_key("2001:db8:1:2:aaaa::1") == auth.client_key("2001:db8:1:2:bbbb::9")
+    assert auth.client_key("2001:db8:1:2::1") != auth.client_key("2001:db8:1:3::1")
+    assert auth.client_key("::ffff:1.2.3.4") == "1.2.3.4"
+    assert auth.client_key("1.2.3.4") == "1.2.3.4"
+
+
+def test_wrong_guesses_dont_hold_up_roland(make_agent, monkeypatch):
+    """The slowdown sleep happens outside the login lock: while attackers' wrong guesses sleep,
+    Roland's login still goes straight through."""
+    import asyncio
+    import httpx
+    real_sleep = asyncio.sleep
+
+    async def slow_sleep(seconds):
+        await real_sleep(1.5)  # every wrong guess "sleeps" 1.5 s
+
+    monkeypatch.setattr("agent.web.app.asyncio.sleep", slow_sleep)
+    app = create_app(make_agent(), run_scheduler=False)
+
+    async def attempt(ip, pw):
+        transport = httpx.ASGITransport(app=app, client=(ip, 1))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            r = await c.post("/login", data={"password": pw}, headers=ORIGIN)
+            return r.status_code
+
+    async def scenario():
+        bad = [asyncio.create_task(attempt(f"10.0.0.{i}", "wrong")) for i in range(6)]
+        await real_sleep(0.5)  # all 6 wrong guesses checked and now sleeping
+        t = time.perf_counter()
+        good = await attempt("1.2.3.4", PW)
+        took = time.perf_counter() - t
+        return good, took, await asyncio.gather(*bad)
+
+    good, took, bad = asyncio.run(scenario())
+    assert good == 303 and took < 1.0, took
+    assert bad == [401] * 6
+
+
+def test_one_attempt_per_address_at_a_time(make_agent, monkeypatch):
+    import asyncio
+    import httpx
+    real_sleep = asyncio.sleep
+
+    async def slow_sleep(seconds):
+        await real_sleep(1)
+
+    monkeypatch.setattr("agent.web.app.asyncio.sleep", slow_sleep)
+    app = create_app(make_agent(), run_scheduler=False)
+
+    async def attempt(ip):
+        transport = httpx.ASGITransport(app=app, client=(ip, 1))
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as c:
+            return (await c.post("/login", data={"password": "x"}, headers=ORIGIN)).status_code
+
+    async def scenario():
+        first = asyncio.create_task(attempt("2001:db8::1"))
+        await real_sleep(0.3)
+        second = await attempt("2001:db8::2")  # same /64, while the first is still sleeping
+        return await first, second
+
+    assert asyncio.run(scenario()) == (401, 429)
+
+
+def test_forwarded_for_only_from_trusted_proxy(make_agent, monkeypatch, caplog):
+    monkeypatch.setattr("agent.web.app.asyncio.sleep", _no_sleep)
+    agent = make_agent(trusted_proxies=("172.17.0.1",))
+    app = create_app(agent, run_scheduler=False)
+    with TestClient(app, client=("172.17.0.1", 1)) as proxy:
+        for i in range(auth.PER_IP_FAILS):  # 5 wrong from one visitor behind the proxy
+            proxy.post("/login", data={"password": "x"},
+                       headers={**ORIGIN, "X-Forwarded-For": "6.6.6.6"})
+        r = proxy.post("/login", data={"password": PW},
+                       headers={**ORIGIN, "X-Forwarded-For": "1.2.3.4"}, follow_redirects=False)
+        assert r.status_code == 303  # a different visitor is not locked out
+    with TestClient(app, client=("8.8.8.8", 1)) as direct:
+        with caplog.at_level("WARNING", logger="agent.web"):
+            direct.post("/login", data={"password": "x"},
+                        headers={**ORIGIN, "X-Forwarded-For": "9.9.9.9"})
+        assert "FORWARDED_ALLOW_IPS" in caplog.text
+
+
 async def _no_sleep(_):
     return None
 

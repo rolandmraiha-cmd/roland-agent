@@ -65,7 +65,8 @@ Then set these in `.env`:
 - `FORWARDED_ALLOW_IPS` to the proxy's IP as the agent sees it (for Caddy on the same machine
   talking to the container, usually the Docker gateway, like `172.17.0.1`). Only that address
   may say who the real visitor is, so the per-address lockout counts real visitors and a stranger
-  can't pretend to be someone else.
+  can't pretend to be someone else. If a request carries `X-Forwarded-For` from an address that
+  isn't listed, the agent ignores the header and logs a warning once.
 
 ## Security notes
 
@@ -77,10 +78,13 @@ Then set these in `.env`:
   - Changing the password hash in `.env` and restarting logs out every device.
 - **Wrong passwords:**
   - 5 wrong passwords from one address within 15 minutes lock that address for 15 minutes.
-    Other addresses, like yours, can still log in.
+    Other addresses, like yours, can still log in. IPv6 is counted per /64 network, since one
+    user usually holds a whole /64.
   - After 20 wrong passwords from everywhere together, each further wrong guess is slowed down,
     but nobody is locked out.
   - Password checks run one at a time, and at most 8 can wait; more get "busy, try again".
+    Each address can have only one attempt in progress, and the delay after a wrong guess
+    happens outside the queue, so wrong guesses don't hold up your login.
   - Restarting the agent clears all of this.
 - **Cross-site requests:** every request that changes something must come from the page's own
   origin and carry the session's CSRF token in an `X-CSRF-Token` header. Strict security headers
@@ -106,6 +110,8 @@ Then set these in `.env`:
   after 45 seconds.
 - **Supply chain:** Docker installs dependencies from `requirements.lock` with checked hashes, and
   the base image is pinned to an exact digest.
+- **Upgrades:** an older `agent.db` is updated on start. Jobs from before approvals need your
+  OK once, and everyone logs in again.
 - **Limits:** at most 3 model calls run at once (others wait), and the daily cap is counted in
   one database step, so parallel chats and jobs can't slip past it. The database uses WAL mode
   and waits for a busy lock instead of failing. Job runs cut off by a restart are marked failed.

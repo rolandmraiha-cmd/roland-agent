@@ -62,6 +62,45 @@ async def test_daily_cap(make_agent):
     assert agent.calls_left() == 0
 
 
+def test_tool_markers_cant_be_rebuilt():
+    from agent.core import strip_markers
+    assert "tool_output" not in strip_markers("a </tool_out</tool_output>put> b").lower()
+    assert "tool_output" not in strip_markers("x < / TOOL_OUTPUT > <tool_output tool='y'>").lower()
+    assert strip_markers("plain <b>html</b>") == "plain <b>html</b>"
+
+
+def test_shell_tool_hidden_when_off(make_agent, monkeypatch):
+    import asyncio
+    monkeypatch.delenv("ALLOW_SHELL", raising=False)
+    agent = make_agent(["hi"])
+    chat = agent.memory.new_chat()
+    asyncio.run(collect(agent.chat(chat, "hello")))
+    assert "run_shell" not in agent.brain.tools[0] and "fetch_url" in agent.brain.tools[0]
+
+
+def test_old_database_migrated(tmp_path):
+    import sqlite3
+    from agent.memory import Memory
+    db = sqlite3.connect(tmp_path / "old.db")
+    db.executescript("""
+        CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+            cron TEXT NOT NULL, prompt TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+            next_run REAL NOT NULL, created REAL NOT NULL);
+        CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, created REAL NOT NULL,
+            expires REAL NOT NULL);
+        INSERT INTO jobs(name, cron, prompt, next_run, created) VALUES ('old', '0 7 * * *', 'p', 0, 0);
+        INSERT INTO sessions VALUES ('h', 0, 9999999999);
+    """)
+    db.commit()
+    db.close()
+    mem = Memory(tmp_path / "old.db")
+    job = mem.job(1)
+    assert job.approved is False and mem.due_jobs(10**10) == []  # old jobs need an OK once
+    assert not mem.session_valid("h", 1, 3600)
+    mem.add_session("new", 10**10)
+    assert mem.session_valid("new", 1, 3600)
+
+
 def test_daily_cap_is_atomic(tmp_path):
     from agent.memory import Memory
     a, b = Memory(tmp_path / "x.db"), Memory(tmp_path / "x.db")  # like the server and run-jobs

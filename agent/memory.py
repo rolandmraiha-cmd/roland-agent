@@ -95,7 +95,22 @@ class Memory:
             if str(path) != ":memory:":
                 self._db.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer
             self._db.executescript(SCHEMA)
+            self._migrate()
             self._db.commit()
+
+    def _migrate(self) -> None:
+        """Brings a database from an older version up to date (called under the lock)."""
+        def columns(table: str) -> set[str]:
+            return {r["name"] for r in self._db.execute(f"PRAGMA table_info({table})")}
+        if "approved" not in columns("jobs"):
+            # Jobs from before approvals existed need Roland's OK once, since some may have been
+            # created by the agent itself.
+            self._db.execute("ALTER TABLE jobs ADD COLUMN approved INTEGER NOT NULL DEFAULT 0")
+        if "last_seen" not in columns("sessions"):
+            # Old sessions can't be checked for idle time, so everyone logs in again.
+            self._db.execute("DROP TABLE sessions")
+            self._db.execute("CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, created REAL "
+                             "NOT NULL, expires REAL NOT NULL, last_seen REAL NOT NULL)")
 
     def _exec(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:

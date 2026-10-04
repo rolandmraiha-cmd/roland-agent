@@ -10,12 +10,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 # Dependencies come from requirements.lock with checked hashes, so a tampered package fails
 # the build. Remake the lock with:
-#   uv pip compile pyproject.toml --generate-hashes --python-version 3.12 --python-platform linux -o requirements.lock
+#   uv pip compile pyproject.toml requirements-build.in --generate-hashes --python-version 3.12 --python-platform linux -o requirements.lock
+# The lock includes setuptools (the build tool), so building the app below downloads nothing.
 COPY requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY pyproject.toml README.md ./
 COPY agent ./agent
-RUN pip install --no-cache-dir --no-deps .
+RUN pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
 
 # Runs as a normal user, never root. Its data lives in the /data volume. HOME points at the
 # throwaway /tmp, and Python ignores per-user packages, so the shell can't plant code there

@@ -97,17 +97,18 @@ def main() -> None:
             log.warning("ALLOWED_HOSTS is empty, so the page answers to any hostname. "
                         "Set it before putting the agent online.")
         if agent.allow_shell:
-            log.warning("ALLOW_SHELL=true: the agent can run shell commands as its own user. "
-                        "A prompt-injected web page could use that against the agent itself.")
+            log.warning("ALLOW_SHELL=true: shell commands run as the agent's own user and can "
+                        "write its database. A web page that tricks the model into one command "
+                        "could create a login for an attacker or approve its own jobs. Only turn "
+                        "this on if you accept that risk.")
         import uvicorn
 
         from .web.app import create_app
 
         uvicorn.run(create_app(agent), host=os.getenv("HOST", "0.0.0.0"),
-                    port=int(os.getenv("PORT", "8080")), proxy_headers=True,
-                    # Only these proxy IPs may report the real visitor IP (X-Forwarded-For).
-                    forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS") or "127.0.0.1",
-                    server_header=False)
+                    port=int(os.getenv("PORT", "8080")),
+                    # The app reads X-Forwarded-For itself, only from FORWARDED_ALLOW_IPS.
+                    proxy_headers=False, server_header=False)
 
 
 if __name__ == "__main__":

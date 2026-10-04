@@ -32,6 +32,8 @@ class Config:
     data_dir: Path
     allowed_hosts: tuple[str, ...] = ()
     idle_hours: float = 72
+    # Reverse proxies allowed to report the real visitor IP in X-Forwarded-For (IPs or CIDRs).
+    trusted_proxies: tuple[str, ...] = ("127.0.0.1", "::1")
 
     @property
     def db_path(self) -> Path:
@@ -68,4 +70,7 @@ class Config:
             allowed_hosts=tuple(h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",")
                                 if h.strip()),
             idle_hours=float(os.getenv("SESSION_IDLE_HOURS", "72")),
+            trusted_proxies=tuple(h.strip() for h in
+                                  (os.getenv("FORWARDED_ALLOW_IPS") or "127.0.0.1,::1").split(",")
+                                  if h.strip()),
         )

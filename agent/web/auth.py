@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import secrets
 import time
 from collections import defaultdict, deque
@@ -38,6 +39,20 @@ def password_ok(given: str, stored_hash: str) -> bool:
         return _hasher.verify(stored_hash, given)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         return False
+
+
+def client_key(ip: str) -> str:
+    """The address the login limits count. One IPv6 user usually gets a whole /64 (2^64
+    addresses), so IPv6 is counted per /64, not per address."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if isinstance(addr, ipaddress.IPv6Address):
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False))
+    return str(addr)
 
 
 def token_hash(token: str) -> str:
@@ -115,8 +130,11 @@ class Sessions:
 
 class LoginGate:
     """Runs one password check at a time, so lockout counts can't be raced and parallel argon2
-    checks (64 MiB each) can't exhaust memory. Only MAX_WAITING attempts may queue."""
+    checks (64 MiB each) can't exhaust memory. Only MAX_WAITING attempts may queue, and each
+    address (IPv6 /64) may have only one attempt in the queue at a time. Nothing waits or sleeps
+    while holding the lock, so a queue of wrong guesses only delays Roland by the checks."""
 
     def __init__(self) -> None:
         self.lock = asyncio.Lock()
         self.waiting = 0
+        self.inflight: set[str] = set()

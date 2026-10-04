@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import html
+import ipaddress
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,7 +21,8 @@ from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
 
-from .auth import COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, csrf_token, password_ok
+from .auth import (COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, client_key, csrf_token,
+                   password_ok)
 
 STATIC = Path(__file__).parent / "static"
 
@@ -47,6 +49,54 @@ class JobBody(BaseModel):
 
 
 log = logging.getLogger("agent.web")
+
+
+class ProxyHeaders:
+    """Takes the visitor's IP from X-Forwarded-For, but only when the request comes straight
+    from a trusted reverse proxy (FORWARDED_ALLOW_IPS). Anyone else's header is ignored, and a
+    warning is logged once, since a forgotten setting makes every visitor look like the proxy and
+    share one login lockout."""
+
+    def __init__(self, app, trusted: tuple[str, ...]):
+        self.app = app
+        self.any = "*" in trusted
+        self.nets = [ipaddress.ip_network(t, strict=False) for t in trusted if t != "*"]
+        self.warned = False
+
+    def trusted(self, host: str) -> bool:
+        if self.any:
+            return True
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        return any(ip in n for n in self.nets)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket") and scope.get("client"):
+            host, port = scope["client"]
+            fwd = next((v.decode("latin-1") for k, v in scope["headers"]
+                        if k == b"x-forwarded-for"), None)
+            if fwd and self.trusted(host):
+                # The rightmost address not added by a trusted proxy is the real visitor.
+                hops = [h.strip() for h in fwd.split(",") if h.strip()]
+                for hop in reversed(hops):
+                    if not self.trusted(hop):
+                        host = hop
+                        break
+                else:
+                    host = hops[0] if hops else host
+                proto = next((v.decode("latin-1") for k, v in scope["headers"]
+                              if k == b"x-forwarded-proto"), None)
+                scope = dict(scope, client=(host, port))
+                if proto in ("http", "https") and scope["type"] == "http":
+                    scope["scheme"] = proto
+            elif fwd and not self.warned:
+                self.warned = True
+                log.warning("Got X-Forwarded-For from %s, which isn't in FORWARDED_ALLOW_IPS, so "
+                            "it was ignored. If that's your reverse proxy, add its IP there; "
+                            "otherwise every visitor shares one login lockout.", host)
+        await self.app(scope, receive, send)
 
 
 def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
@@ -102,6 +152,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     if config.allowed_hosts:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=config.allowed_hosts)
+    app.add_middleware(ProxyHeaders, trusted=config.trusted_proxies)  # outermost: runs first
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -122,26 +173,45 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     async def login(request: Request):
         # Behind a reverse proxy this is the real visitor's address only when the proxy's IP is
         # in FORWARDED_ALLOW_IPS (see .env.example).
-        ip = request.client.host if request.client else "?"
+        ip = client_key(request.client.host if request.client else "?")
         form = await request.form()
         given = str(form.get("password", ""))[:1024]
+
+        def locked_page(wait: float) -> HTMLResponse:
+            return login_page(
+                f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
+
+        # A locked address is turned away before it can take a place in the queue.
+        if wait := limiter.locked(ip):
+            return locked_page(wait)
+        if ip in gate.inflight:
+            return login_page("A login from your address is already being checked.", 429)
         if gate.waiting >= MAX_WAITING:
             return login_page("The login is busy. Try again in a moment.", 429)
-        gate.waiting += 1
+        gate.inflight.add(ip)
         try:
-            # Check the lockout, verify and record the result as one step, one login at a time.
-            async with gate.lock:
-                wait = limiter.locked(ip)
-                if wait:
-                    return login_page(
-                        f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
-                if not await asyncio.to_thread(password_ok, given, config.password_hash):
-                    limiter.failed(ip)
-                    await asyncio.sleep(1 + limiter.slowdown())  # slows down guessing
-                    return login_page("Wrong password.", 401)
-                limiter.succeeded(ip)
+            gate.waiting += 1
+            try:
+                # Check the lockout, verify and record the result as one step, one login at a
+                # time. Only that happens under the lock; the slowdown runs after releasing it.
+                async with gate.lock:
+                    if wait := limiter.locked(ip):
+                        return locked_page(wait)
+                    ok = await asyncio.to_thread(password_ok, given, config.password_hash)
+                    if ok:
+                        limiter.succeeded(ip)
+                    else:
+                        limiter.failed(ip)
+                        delay = 1 + limiter.slowdown()
+            finally:
+                gate.waiting -= 1
+            if not ok:
+                # Slows this address's guessing without holding up anyone else. Its place in
+                # `inflight` is kept meanwhile, so it can't send the next guess in parallel.
+                await asyncio.sleep(delay)
+                return login_page("Wrong password.", 401)
         finally:
-            gate.waiting -= 1
+            gate.inflight.discard(ip)
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(COOKIE, sessions.create(), max_age=config.session_days * 86400,
                             httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
