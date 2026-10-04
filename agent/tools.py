@@ -22,6 +22,7 @@ MAX_OUTPUT = 8000          # characters of tool output the model sees
 MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
 SHELL_TIMEOUT = 60         # seconds
 LIST_PROMPT_CHARS = 300    # how much of each prompt list_jobs shows
+MAX_LISTED_JOBS = 30       # list_jobs shows at most this many
 MAX_JOB_PROMPT = 5000      # characters, same as the Jobs tab form
 FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
@@ -261,13 +262,18 @@ async def list_jobs(ctx: ToolContext, args: dict) -> str:
     jobs = ctx.memory.jobs()
     if not jobs:
         return "No jobs."
-    # Each prompt is shortened so every job and its id still fits under MAX_OUTPUT.
-    room = max(40, min(LIST_PROMPT_CHARS, MAX_OUTPUT // len(jobs) - 140))
-    return f"{len(jobs)} job(s):\n" + "\n".join(
-        f"{j.id}: {j.name} [{j.cron}] "
+    # Every field is put on one line (so a newline in a name can't fake an entry) and shortened
+    # so the whole list fits under MAX_OUTPUT. A line is at most 160 characters plus the prompt.
+    shown = jobs[:MAX_LISTED_JOBS]
+    room = max(40, min(LIST_PROMPT_CHARS, (MAX_OUTPUT - 200) // len(shown) - 160))
+    lines = [
+        f"{j.id}: {_short(j.name, 60)} [{_short(j.cron, 40)}] "
         f"{'waiting for approval' if not j.approved else 'on' if j.enabled else 'paused'}"
-        f" - {_short(j.prompt, room)}" for j in jobs
-    )
+        f" - {_short(j.prompt, room)}" for j in shown
+    ]
+    if len(jobs) > len(shown):
+        lines.append(f"... and {len(jobs) - len(shown)} more jobs not shown.")
+    return f"{len(jobs)} job(s):\n" + "\n".join(lines)
 
 
 async def cancel_job(ctx: ToolContext, args: dict) -> str:

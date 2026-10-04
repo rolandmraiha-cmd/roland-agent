@@ -99,7 +99,14 @@ async function openChat(id) {
   // Do not leave the previous conversation visible while this history loads.
   $("messages").replaceChildren();
   $("title").textContent = "Chat";
-  const data = await (await api(`/api/chats/${id}/messages`)).json();
+  let data;
+  try {
+    data = await (await api(`/api/chats/${id}/messages`)).json();
+  } catch (e) {
+    // Don't show an empty chat as if it had no messages.
+    if (load === chatLoad && !sending) addMessage("error", `Couldn't load this chat: ${e.message}`);
+    return;
+  }
   if (load !== chatLoad || sending) return;
   const box = $("messages");
   box.replaceChildren();
@@ -196,7 +203,8 @@ input.addEventListener("input", autosize);
 input.addEventListener("keydown", (e) => {
   // Enter sends on a computer; Ctrl/Cmd+Enter also sends with a phone/tablet keyboard.
   // Never submit the Enter used to confirm an IME composition.
-  if (e.key === "Enter" && !e.isComposing && !e.shiftKey &&
+  // Safari can report that Enter as a normal one, but with keyCode 229.
+  if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229 && !e.shiftKey &&
       (e.ctrlKey || e.metaKey || !matchMedia("(pointer: coarse)").matches)) {
     e.preventDefault();
     $("composer").requestSubmit();
