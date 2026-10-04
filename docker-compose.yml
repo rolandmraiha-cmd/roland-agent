@@ -1,0 +1,43 @@
+services:
+  agent:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    ports:
+      # Only reachable from this machine. Put a reverse proxy with HTTPS in front to go online.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - agent-data:/data
+    # No Docker socket and no host folders. If you turn on ALLOW_SHELL, its commands stay inside
+    # this container, but they still run as the agent's user (a separate sandbox comes in v2).
+    # The container's own files are read-only; only /data (and a small /tmp) can be written.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 1.5
+    depends_on:
+      - ollama
+
+  # Local model (free). Remove this service if you use Grok or another paid API instead.
+  ollama:
+    image: ollama/ollama:0.35.1   # pinned; update on purpose
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    pids_limit: 512
+    # A 7b model needs about 6 GB. Raise these for bigger models.
+    mem_limit: 8g
+    cpus: 4
+    # No ports published: only the agent can reach it, on the internal compose network.
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  agent-data:
+  ollama-models:
