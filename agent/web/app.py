@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
@@ -41,11 +41,25 @@ SECURITY_HEADERS = {
 class SendBody(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
 
+    @field_validator("text")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("message must not be blank")
+        return value
+
 
 class JobBody(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     cron: str = Field(min_length=9, max_length=100)
     prompt: str = Field(min_length=1, max_length=5000)
+
+    @field_validator("name", "prompt")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("name and prompt must not be blank")
+        return value
 
 
 log = logging.getLogger("agent.web")
@@ -123,9 +137,16 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         if run_scheduler and (n := agent.memory.fail_unfinished_runs()):
             log.info("marked %s unfinished job run(s) as failed", n)
         loop_task = asyncio.create_task(scheduler_loop(agent)) if run_scheduler else None
-        yield
-        if loop_task:
-            loop_task.cancel()
+        try:
+            yield
+        finally:
+            # Await cancellation so jobs can finish their failure records and release slots.
+            pending = list(tasks)
+            if loop_task:
+                pending.append(loop_task)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 

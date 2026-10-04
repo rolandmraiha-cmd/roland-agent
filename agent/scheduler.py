@@ -22,6 +22,8 @@ async def run_due_jobs(agent: Agent, now: float | None = None) -> int:
     for job in agent.memory.due_jobs(now):
         if job.id in running_jobs:
             continue
+        if len(running_jobs) >= MAX_PARALLEL_JOBS:
+            break  # Leave due times unchanged so these jobs can run on the next poll.
         # Move the next run forward first, so a crash or long job never runs twice in a row.
         agent.memory.set_next_run(job.id, next_run_after(job.cron, agent.config.timezone, now))
         running_jobs.add(job.id)
@@ -38,6 +40,9 @@ async def execute(agent: Agent, job: Job) -> None:
         log.info("running job %s %s", job.id, job.name)
         try:
             ok, output = await agent.run_job(job)
+        except asyncio.CancelledError:
+            agent.memory.finish_run(run_id, False, "Stopped: the job was cancelled.")
+            raise
         except Exception as e:
             ok, output = False, f"{type(e).__name__}: {e}"
         agent.memory.finish_run(run_id, ok, output)

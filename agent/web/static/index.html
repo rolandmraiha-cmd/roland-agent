@@ -32,7 +32,9 @@
     <section id="chat-view" class="view">
       <div id="messages" class="messages" aria-live="polite"></div>
       <form id="composer" class="composer">
-        <textarea id="input" rows="1" placeholder="Message your agent…" maxlength="20000"></textarea>
+        <textarea id="input" rows="1" placeholder="Message your agent…" maxlength="20000"
+                  aria-label="Message your agent"
+                  title="Enter sends on desktop. Shift+Enter adds a line. Ctrl/Cmd+Enter sends on any device."></textarea>
         <button id="send" class="primary" type="submit">Send</button>
       </form>
     </section>
