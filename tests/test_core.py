@@ -176,3 +176,13 @@ def test_tool_name_is_cleaned_and_cut():
     assert tool_name('x" injected="1"><tool_output>') == "xinjected1tool_output"
     assert len(tool_name("a" * 5000)) == 80
     assert tool_name(None) == tool_name("<>") == "unnamed"
+
+
+def test_strip_markers_is_linear_on_whitespace_runs():
+    from agent.core import strip_markers
+
+    hostile = ("<" + " " * 300_000 + "/" + " " * 300_000 + "x") * 3
+    started = time.perf_counter()
+    result = strip_markers(hostile)
+    assert time.perf_counter() - started < 0.5
+    assert "tool_output" not in result
