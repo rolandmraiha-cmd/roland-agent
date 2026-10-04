@@ -53,6 +53,12 @@ async def execute(agent: Agent, job: Job) -> None:
         agent.memory.finish_run(run_id, ok, output)
     finally:
         running_jobs.discard(job.id)
+        finish_time = time.time()
+        current = agent.memory.job(job.id)
+        if current is not None and current.next_run <= finish_time:
+            agent.memory.set_next_run(
+                job.id, next_run_after(current.cron, agent.config.timezone, finish_time),
+            )
 
 
 async def scheduler_loop(agent: Agent, every: float = 20.0) -> None:
