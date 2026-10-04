@@ -21,6 +21,7 @@ from .schedule import next_run_after, valid_cron
 MAX_OUTPUT = 8000          # characters of tool output the model sees
 MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
 SHELL_TIMEOUT = 60         # seconds
+MAX_JOB_PROMPT = 5000      # characters, same as the Jobs tab form
 FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
@@ -237,12 +238,14 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
     cron = str(args.get("cron", "")).strip()
     if not valid_cron(cron):
         return "Error: that is not a valid 5-field cron schedule, e.g. '0 7 * * *'."
-    name = str(args.get("name", "Job")).strip() or "Job"
+    name = str(args.get("name", "Job")).strip()[:80] or "Job"
     prompt = str(args.get("prompt", "")).strip()
     if not prompt:
         return "Error: the job needs a prompt."
+    if len(prompt) > MAX_JOB_PROMPT:
+        return f"Error: a job prompt can be at most {MAX_JOB_PROMPT} characters."
     nxt = next_run_after(cron, ctx.timezone)
-    job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False)
+    job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False, origin="agent")
     return (f"Created job {job_id} '{name}' ({cron}, {ctx.timezone}). It is waiting for Roland's "
             "approval: tell him to press Approve on the Jobs tab. It won't run until then.")
 

@@ -51,6 +51,16 @@ class JobBody(BaseModel):
 log = logging.getLogger("agent.web")
 
 
+def _strip_port(hop: str) -> str:
+    """'1.2.3.4:5678' becomes '1.2.3.4' and '[2001:db8::1]:443' becomes '2001:db8::1'."""
+    hop = hop.strip()
+    if hop.startswith("["):
+        return hop[1:hop.find("]")] if "]" in hop else hop
+    if hop.count(":") == 1:
+        return hop.split(":")[0]
+    return hop
+
+
 class ProxyHeaders:
     """Takes the visitor's IP from X-Forwarded-For, but only when the request comes straight
     from a trusted reverse proxy (FORWARDED_ALLOW_IPS). Anyone else's header is ignored, and a
@@ -75,17 +85,18 @@ class ProxyHeaders:
     async def __call__(self, scope, receive, send):
         if scope["type"] in ("http", "websocket") and scope.get("client"):
             host, port = scope["client"]
-            fwd = next((v.decode("latin-1") for k, v in scope["headers"]
-                        if k == b"x-forwarded-for"), None)
+            # Several X-Forwarded-For lines count as one list, in order.
+            fwd = ",".join(v.decode("latin-1") for k, v in scope["headers"]
+                           if k == b"x-forwarded-for")
             if fwd and self.trusted(host):
-                # The rightmost address not added by a trusted proxy is the real visitor.
-                hops = [h.strip() for h in fwd.split(",") if h.strip()]
-                for hop in reversed(hops):
-                    if not self.trusted(hop):
-                        host = hop
-                        break
+                # The rightmost address not added by a trusted proxy is the real visitor;
+                # anything further left could have been typed by the visitor.
+                hops = [_strip_port(h) for h in fwd.split(",") if h.strip()]
+                if self.any:
+                    host = hops[-1] if hops else host  # '*' trusts only the direct peer
                 else:
-                    host = hops[0] if hops else host
+                    host = next((h for h in reversed(hops) if not self.trusted(h)),
+                                hops[0] if hops else host)
                 proto = next((v.decode("latin-1") for k, v in scope["headers"]
                               if k == b"x-forwarded-proto"), None)
                 scope = dict(scope, client=(host, port))
@@ -298,7 +309,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     async def jobs():
         return {
             "jobs": [{"id": j.id, "name": j.name, "cron": j.cron, "prompt": j.prompt,
-                      "enabled": j.enabled, "approved": j.approved, "next_run": j.next_run,
+                      "enabled": j.enabled, "approved": j.approved, "origin": j.origin,
+                      "next_run": j.next_run,
                       "running": j.id in running_jobs} for j in agent.memory.jobs()],
             "facts": [{"id": i, "text": t} for i, t in agent.memory.facts()],
             "runs": agent.memory.runs(30),

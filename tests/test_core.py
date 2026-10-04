@@ -63,10 +63,16 @@ async def test_daily_cap(make_agent):
 
 
 def test_tool_markers_cant_be_rebuilt():
+    import time as _t
     from agent.core import strip_markers
+    from agent.tools import MAX_OUTPUT
     assert "tool_output" not in strip_markers("a </tool_out</tool_output>put> b").lower()
     assert "tool_output" not in strip_markers("x < / TOOL_OUTPUT > <tool_output tool='y'>").lower()
+    assert "tool_output" not in strip_markers("tool_tool_outputoutput tool_Tool_OUTPUToutput").lower()
     assert strip_markers("plain <b>html</b>") == "plain <b>html</b>"
+    t = _t.perf_counter()
+    out = strip_markers("<" * 5_000_000 + "/ " * 1_000_000)  # huge hostile input
+    assert _t.perf_counter() - t < 1 and len(out) < MAX_OUTPUT + 100
 
 
 def test_shell_tool_hidden_when_off(make_agent, monkeypatch):
@@ -96,6 +102,8 @@ def test_old_database_migrated(tmp_path):
     mem = Memory(tmp_path / "old.db")
     job = mem.job(1)
     assert job.approved is False and mem.due_jobs(10**10) == []  # old jobs need an OK once
+    assert job.origin == "old"
+    assert mem.job(mem.add_job("new", "0 7 * * *", "p", 0)).origin == "panel"
     assert not mem.session_valid("h", 1, 3600)
     mem.add_session("new", 10**10)
     assert mem.session_valid("new", 1, 3600)

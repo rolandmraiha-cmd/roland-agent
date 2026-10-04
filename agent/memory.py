@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     prompt TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     approved INTEGER NOT NULL DEFAULT 1,
+    origin TEXT NOT NULL DEFAULT 'panel',
     next_run REAL NOT NULL,
     created REAL NOT NULL
 );
@@ -76,6 +77,7 @@ class Job:
     enabled: bool
     next_run: float
     approved: bool = True
+    origin: str = "panel"  # 'panel' (Roland), 'agent' (schedule_job) or 'old' (before v1 merge)
 
 
 class Memory:
@@ -106,6 +108,10 @@ class Memory:
             # Jobs from before approvals existed need Roland's OK once, since some may have been
             # created by the agent itself.
             self._db.execute("ALTER TABLE jobs ADD COLUMN approved INTEGER NOT NULL DEFAULT 0")
+        if "origin" not in columns("jobs"):
+            # Who made each job: 'panel' (Roland, Jobs tab), 'agent' (schedule_job) or 'old'
+            # (from before this was recorded).
+            self._db.execute("ALTER TABLE jobs ADD COLUMN origin TEXT NOT NULL DEFAULT 'old'")
         if "last_seen" not in columns("sessions"):
             # Old sessions can't be checked for idle time, so everyone logs in again.
             self._db.execute("DROP TABLE sessions")
@@ -181,19 +187,19 @@ class Memory:
 
     # --- jobs ---
     def add_job(self, name: str, cron: str, prompt: str, next_run: float,
-                approved: bool = True) -> int:
+                approved: bool = True, origin: str = "panel") -> int:
         """Jobs the agent creates itself start unapproved (and off) until Roland approves them."""
         cur = self._exec(
-            "INSERT INTO jobs(name, cron, prompt, enabled, approved, next_run, created) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (name[:80], cron, prompt, int(approved), int(approved), next_run, time.time()),
+            "INSERT INTO jobs(name, cron, prompt, enabled, approved, origin, next_run, created) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (name[:80], cron, prompt, int(approved), int(approved), origin, next_run, time.time()),
         )
         return int(cur.lastrowid)
 
     def jobs(self) -> list[Job]:
         return [
             Job(r["id"], r["name"], r["cron"], r["prompt"], bool(r["enabled"]), r["next_run"],
-                bool(r["approved"]))
+                bool(r["approved"]), r["origin"])
             for r in self._all("SELECT * FROM jobs ORDER BY id")
         ]
 

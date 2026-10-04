@@ -96,5 +96,8 @@ async def test_jobs_tools(ctx):
     job = ctx.memory.job(1)
     assert job.approved is False and job.enabled is False
     assert "waiting for approval" in await call_tool(ctx, "list_jobs", {})
+    assert ctx.memory.job(1).origin == "agent"
+    out = await call_tool(ctx, "schedule_job", {"name": "Big", "cron": "0 7 * * *", "prompt": "x" * 5001})
+    assert "at most 5000" in out and ctx.memory.job(2) is None
     assert "deleted" in await call_tool(ctx, "cancel_job", {"job_id": 1})
     assert "no tool" in await call_tool(ctx, "nope", {})
