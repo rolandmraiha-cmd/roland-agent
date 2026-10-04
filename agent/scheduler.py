@@ -40,25 +40,37 @@ async def run_due_jobs(agent: Agent, now: float | None = None) -> int:
 async def execute(agent: Agent, job: Job) -> None:
     """Runs one job now and saves its result for the jobs panel."""
     running_jobs.add(job.id)
+    failed = False
     try:
         run_id = agent.memory.start_run(job)
         log.info("running job %s %s", job.id, job.name)
         try:
             ok, output = await agent.run_job(job)
         except asyncio.CancelledError:
-            agent.memory.finish_run(run_id, False, "Stopped: the job was cancelled.")
+            try:
+                agent.memory.finish_run(run_id, False, "Stopped: the job was cancelled.")
+            except Exception:
+                log.exception("failed to record cancellation for job %s", job.id)
             raise
         except Exception as e:
             ok, output = False, f"{type(e).__name__}: {e}"
         agent.memory.finish_run(run_id, ok, output)
+    except BaseException:
+        failed = True
+        raise
     finally:
         running_jobs.discard(job.id)
-        finish_time = time.time()
-        current = agent.memory.job(job.id)
-        if current is not None and current.next_run <= finish_time:
-            agent.memory.set_next_run(
-                job.id, next_run_after(current.cron, agent.config.timezone, finish_time),
-            )
+        try:
+            finish_time = time.time()
+            current = agent.memory.job(job.id)
+            if current is not None and current.next_run <= finish_time:
+                agent.memory.set_next_run(
+                    job.id, next_run_after(current.cron, agent.config.timezone, finish_time),
+                )
+        except Exception:
+            if not failed:
+                raise
+            log.exception("failed to reschedule job %s during cleanup", job.id)
 
 
 async def scheduler_loop(agent: Agent, every: float = 20.0) -> None:
