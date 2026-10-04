@@ -10,15 +10,29 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ctypes
 import getpass
 import logging
 import os
+import sys
 
 from .brain import OpenAICompatibleBrain
 from .config import Config
 from .core import Agent
 from .memory import Memory
 from .scheduler import run_due_jobs
+
+
+def harden_process() -> None:
+    """Stops other processes running as the same user from reading this process's memory or
+    environment (like /proc/<pid>/environ, which holds the API key)."""
+    if sys.platform.startswith("linux"):
+        try:
+            libc = ctypes.CDLL(None, use_errno=True)
+            if libc.prctl(4, 0, 0, 0, 0) != 0:  # 4 = PR_SET_DUMPABLE
+                logging.warning("prctl(PR_SET_DUMPABLE) failed")
+        except (OSError, AttributeError):
+            logging.warning("could not call prctl")
 
 
 def build() -> Agent:
@@ -70,6 +84,7 @@ def main() -> None:
         make_hash()
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    harden_process()
     agent = build()
     if args.command == "chat":
         asyncio.run(terminal_chat(agent))
@@ -77,12 +92,22 @@ def main() -> None:
         print(f"ran {asyncio.run(run_due_jobs(agent))} job(s)")
     else:
         agent.config.check()
+        log = logging.getLogger("agent")
+        if not agent.config.allowed_hosts:
+            log.warning("ALLOWED_HOSTS is empty, so the page answers to any hostname. "
+                        "Set it before putting the agent online.")
+        if agent.allow_shell:
+            log.warning("ALLOW_SHELL=true: the agent can run shell commands as its own user. "
+                        "A prompt-injected web page could use that against the agent itself.")
         import uvicorn
 
         from .web.app import create_app
 
         uvicorn.run(create_app(agent), host=os.getenv("HOST", "0.0.0.0"),
-                    port=int(os.getenv("PORT", "8080")), proxy_headers=True)
+                    port=int(os.getenv("PORT", "8080")), proxy_headers=True,
+                    # Only these proxy IPs may report the real visitor IP (X-Forwarded-For).
+                    forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS") or "127.0.0.1",
+                    server_header=False)
 
 
 if __name__ == "__main__":

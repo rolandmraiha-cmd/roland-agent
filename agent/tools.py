@@ -21,6 +21,9 @@ from .schedule import next_run_after, valid_cron
 MAX_OUTPUT = 8000          # characters of tool output the model sees
 MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
 SHELL_TIMEOUT = 60         # seconds
+FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
+# IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
+BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
 # Environment variables the shell never gets, so commands can't print the agent's secrets.
 SECRET_ENV = {"AGENT_PASSWORD_HASH", "MODEL_API_KEY"}
 
@@ -29,10 +32,6 @@ def clip(text: str, limit: int = MAX_OUTPUT) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + f"\n... [cut, {len(text) - limit} more characters]"
-
-
-def in_container() -> bool:
-    return Path("/.dockerenv").exists() or os.getenv("AGENT_IN_CONTAINER") == "1"
 
 
 @dataclass
@@ -56,25 +55,50 @@ def _workspace_path(ctx: ToolContext, path: str) -> Path:
 
 
 # --- web ---
-def _is_public_host(host: str) -> bool:
+def _public_ip(host: str) -> str | None:
+    """Looks the host up once and returns an address to connect to, or None if any of its
+    addresses is local or private."""
     try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return False
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError):
+        return None
+    if not infos:
+        return None
     for info in infos:
         ip = ipaddress.ip_address(info[4][0].split("%")[0])
         if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
             ip = ip.ipv4_mapped  # e.g. ::ffff:127.0.0.1
         # is_global is False for loopback, private, link-local (169.254.x, fe80::), unique-local
         # (fc00::/7), shared, reserved and other non-public ranges.
-        if not ip.is_global or ip.is_multicast:
-            return False
-    return True
+        if not ip.is_global or ip.is_multicast or any(ip in net for net in BLOCKED_NETS):
+            return None
+    return infos[0][4][0].split("%")[0]
+
+
+def _pinned(parsed, ip: str) -> tuple[str, dict, dict]:
+    """Rewrites the URL to connect to the address we just checked, so a second DNS lookup can't
+    swap in a private one (DNS rebinding). The real hostname still goes in the Host header and,
+    for https, in the TLS name the certificate is checked against."""
+    netloc_ip = f"[{ip}]" if ":" in ip else ip
+    if parsed.port:
+        netloc_ip += f":{parsed.port}"
+    url = parsed._replace(netloc=netloc_ip).geturl()
+    host_header = parsed.hostname + (f":{parsed.port}" if parsed.port else "")
+    ext = {"sni_hostname": parsed.hostname} if parsed.scheme == "https" else {}
+    return url, {"Host": host_header}, ext
 
 
 async def fetch_url(ctx: ToolContext, args: dict) -> str:
-    url = str(args.get("url", "")).strip()
-    async with httpx.AsyncClient(timeout=20, follow_redirects=False,
+    try:
+        return await asyncio.wait_for(_fetch(str(args.get("url", "")).strip()), FETCH_DEADLINE)
+    except asyncio.TimeoutError:
+        return f"Error: the page took longer than {FETCH_DEADLINE} seconds."
+
+
+async def _fetch(url: str) -> str:
+    # trust_env=False: never send fetches through a proxy from the environment, which would
+    # make the address check meaningless.
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False, trust_env=False,
                                  headers={"User-Agent": "roland-agent/0.1"}) as client:
         for _ in range(6):
             parsed = urlparse(url)
@@ -82,9 +106,11 @@ async def fetch_url(ctx: ToolContext, args: dict) -> str:
                 return "Error: only http and https URLs are allowed."
             # Blocks local and private addresses (the agent's own machine, home network,
             # cloud metadata), checked again on every redirect.
-            if not await asyncio.to_thread(_is_public_host, parsed.hostname):
+            ip = await asyncio.to_thread(_public_ip, parsed.hostname)
+            if not ip:
                 return "Error: that address is private or can't be resolved."
-            async with client.stream("GET", url) as resp:
+            target, headers, ext = _pinned(parsed, ip)
+            async with client.stream("GET", target, headers=headers, extensions=ext) as resp:
                 if resp.is_redirect and "location" in resp.headers:
                     url = urljoin(url, resp.headers["location"])
                     continue
@@ -109,8 +135,8 @@ async def fetch_url(ctx: ToolContext, args: dict) -> str:
 # --- shell ---
 async def run_shell(ctx: ToolContext, args: dict) -> str:
     if not ctx.allow_shell:
-        return ("Error: shell commands are turned off. They only run inside the agent's Docker "
-                "container (or with ALLOW_SHELL=true).")
+        return ("Error: shell commands are turned off. Roland can turn them on with "
+                "ALLOW_SHELL=true.")
     command = str(args.get("command", ""))
     ctx.workspace.mkdir(parents=True, exist_ok=True)
     env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
@@ -119,15 +145,42 @@ async def run_shell(ctx: ToolContext, args: dict) -> str:
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         start_new_session=True,
     )
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=SHELL_TIMEOUT)
-    except asyncio.TimeoutError:
+
+    def kill() -> None:
         try:
             os.killpg(proc.pid, 9)
         except ProcessLookupError:
             pass
+
+    async def read_capped() -> tuple[bytes, bool]:
+        # Reads at most MAX_OUTPUT bytes; a command that prints more is stopped right there.
+        out = b""
+        while len(out) <= MAX_OUTPUT:
+            part = await proc.stdout.read(4096)
+            if not part:
+                return out, False
+            out += part
+        kill()
+        return out, True
+
+    async def finish() -> None:
+        # Drains what's left (the process is dead or done) so its pipes close cleanly.
+        try:
+            await asyncio.wait_for(proc.communicate(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+
+    try:
+        out, cut = await asyncio.wait_for(read_capped(), timeout=SHELL_TIMEOUT)
+    except asyncio.TimeoutError:
+        kill()
+        await finish()
         return f"Error: the command took longer than {SHELL_TIMEOUT} seconds and was stopped."
-    return clip(f"exit code {proc.returncode}\n{out.decode(errors='replace')}")
+    await finish()
+    text = clip(out.decode(errors="replace"))
+    if cut:
+        return f"{text}\n[stopped: the command printed more than {MAX_OUTPUT} characters]"
+    return f"exit code {proc.returncode}\n{text}"
 
 
 # --- files ---
@@ -189,8 +242,9 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
     if not prompt:
         return "Error: the job needs a prompt."
     nxt = next_run_after(cron, ctx.timezone)
-    job_id = ctx.memory.add_job(name, cron, prompt, nxt)
-    return f"Scheduled job {job_id} '{name}' ({cron}, {ctx.timezone})."
+    job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False)
+    return (f"Created job {job_id} '{name}' ({cron}, {ctx.timezone}). It is waiting for Roland's "
+            "approval: tell him to press Approve on the Jobs tab. It won't run until then.")
 
 
 async def list_jobs(ctx: ToolContext, args: dict) -> str:
@@ -198,7 +252,9 @@ async def list_jobs(ctx: ToolContext, args: dict) -> str:
     if not jobs:
         return "No jobs."
     return "\n".join(
-        f"{j.id}: {j.name} [{j.cron}] {'on' if j.enabled else 'paused'} - {j.prompt}" for j in jobs
+        f"{j.id}: {j.name} [{j.cron}] "
+        f"{'waiting for approval' if not j.approved else 'on' if j.enabled else 'paused'}"
+        f" - {j.prompt}" for j in jobs
     )
 
 

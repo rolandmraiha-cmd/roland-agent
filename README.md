@@ -14,13 +14,15 @@ model through [Ollama](https://ollama.com) or vLLM, or a paid one like Grok.
   jobs, job results and usage.
 - **Tools:**
   - read public web pages
-  - run shell commands (inside its own container only)
+  - run shell commands (off unless you set `ALLOW_SHELL=true`; see the security notes)
   - read, write and list files in its workspace (`/data/workspace`)
   - save and forget facts
-  - schedule, list and cancel jobs
+  - schedule, list and cancel jobs (jobs the agent makes wait for your OK)
 - **Background jobs:** cron schedules in your time zone, e.g. `0 7 * * *` for every day at 07:00.
-  Ask in chat ("every morning at 7, check X") or add one on the **Jobs** tab. The Jobs tab also
-  shows what each run did.
+  Ask in chat ("every morning at 7, check X") or add one on the **Jobs** tab. A job the agent
+  creates from chat stays off until you press **Approve** on the Jobs tab, so a web page can't
+  trick it into setting up its own repeating task. The Jobs tab also shows what each run did,
+  and lists the facts the agent has saved so you can delete them.
 - **Safety:** a daily cap on model calls (`DAILY_CALL_LIMIT`) and a cap on tool steps per message
   (`MAX_TOOL_STEPS`).
 
@@ -49,8 +51,7 @@ python -m agent chat              # or chat in the terminal
 pytest                            # tests (no model needed)
 ```
 
-Shell commands are turned off outside Docker, so the agent can't touch your own computer. Set
-`ALLOW_SHELL=true` only on a throwaway machine.
+Shell commands are off by default everywhere. Never set `ALLOW_SHELL=true` on your own computer.
 
 ## Putting it online
 
@@ -58,26 +59,55 @@ The container only listens on `127.0.0.1:8080`. To reach it from your phone anyw
 reverse proxy with HTTPS in front of it, such as [Caddy](https://caddyserver.com) or Nginx with
 Let's Encrypt, and keep `COOKIE_SECURE=true`. Never expose port 8080 directly.
 
+Then set these in `.env`:
+
+- `ALLOWED_HOSTS` to your hostname, like `agent.example.com`.
+- `FORWARDED_ALLOW_IPS` to the proxy's IP as the agent sees it (for Caddy on the same machine
+  talking to the container, usually the Docker gateway, like `172.17.0.1`). Only that address
+  may say who the real visitor is, so the per-address lockout counts real visitors and a stranger
+  can't pretend to be someone else.
+
 ## Security notes
 
 - **Login:**
   - Only an argon2 hash of the password is stored.
   - Sessions are random tokens, and only their hash is kept in the database.
   - The cookie is `HttpOnly`, `SameSite=Strict` and `Secure`.
-- **Lockout:** 5 wrong passwords from one address, or 20 from all addresses together, within
-  15 minutes lock logins for 15 minutes.
+  - A login ends after `SESSION_DAYS`, or after `SESSION_IDLE_HOURS` (default 72) unused.
+  - Changing the password hash in `.env` and restarting logs out every device.
+- **Wrong passwords:**
+  - 5 wrong passwords from one address within 15 minutes lock that address for 15 minutes.
+    Other addresses, like yours, can still log in.
+  - After 20 wrong passwords from everywhere together, each further wrong guess is slowed down,
+    but nobody is locked out.
+  - Password checks run one at a time, and at most 8 can wait; more get "busy, try again".
+  - Restarting the agent clears all of this.
 - **Cross-site requests:** every request that changes something must come from the page's own
   origin and carry the session's CSRF token in an `X-CSRF-Token` header. Strict security headers
   (CSP, no framing) are set, and `ALLOWED_HOSTS` limits which hostnames the page answers to.
-- **Shell:**
-  - It runs as a non-root user in the agent's container, which has no Docker socket, no host
-    folders, no Linux capabilities and a read-only filesystem apart from `/data` and `/tmp`.
-  - It's a normal shell, not a list of allowed commands, because a fixed list would block most
-    real tasks. The container itself is the boundary.
-  - It has CPU, memory and process limits, and each command is stopped after 60 seconds.
-  - Commands don't get the API key or password hash in their environment.
-- **Web fetch:** local and private addresses (localhost, 10.x, 192.168.x, 169.254.x and so on)
-  are refused, and checked again on every redirect.
-- **Known limit:** the agent's shell runs as the same user as the agent itself, so a determined
-  command could still read the agent's own settings, such as through `/proc`. Use an API key with
-  a spending limit. A later version can move tools into a separate sandbox container.
+- **Shell (off by default):**
+  - It's off unless you set `ALLOW_SHELL=true`, and the agent logs a warning at startup when on.
+  - When on, commands run as the agent's own user. A web page that tricks the model could then
+    try to use a command against the agent itself, such as changing its database. Only turn it
+    on if you accept that; v2 will move commands into a separate sandbox container.
+  - In Docker it runs as a non-root user with no Docker socket, no host folders, no Linux
+    capabilities and a read-only filesystem apart from `/data` and `/tmp`, with CPU, memory and
+    process limits.
+  - Each command stops after 60 seconds or 8000 characters of output.
+  - Commands don't get the API key or password hash in their environment, and the agent
+    process blocks other processes from reading its memory (`/proc/<pid>/environ`).
+- **Untrusted tool output:** web pages, files and command output reach the model marked as
+  untrusted data, and it's told never to follow instructions inside them. That lowers the risk
+  but can't remove it, which is why agent-made jobs need your OK.
+- **Web fetch:** local and private addresses (localhost, 10.x, 192.168.x, 169.254.x, IPv6 forms
+  that wrap them, and so on) are refused and checked again on every redirect. The request then
+  connects to the exact address that passed the check, so a DNS trick can't swap in a private one
+  afterwards. Fetches never go through a proxy from the environment, and a whole fetch stops
+  after 45 seconds.
+- **Supply chain:** Docker installs dependencies from `requirements.lock` with checked hashes, and
+  the base image is pinned to an exact digest.
+- **Limits:** at most 3 model calls run at once (others wait), and the daily cap is counted in
+  one database step, so parallel chats and jobs can't slip past it. The database uses WAL mode
+  and waits for a busy lock instead of failing. Job runs cut off by a restart are marked failed.
+- **Known limit:** with the shell on, a command runs as the agent's user and can reach its
+  database. Use an API key with a spending limit. v2 moves commands into a separate sandbox.

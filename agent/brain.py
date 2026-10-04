@@ -40,7 +40,8 @@ class Brain(Protocol):
 class OpenAICompatibleBrain:
     def __init__(self, base_url: str, model: str, api_key: str):
         self.model = model
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key or "none", timeout=300)
+        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key or "none", timeout=300,
+                                  max_retries=0)  # one counted call is one paid call
 
     async def stream(self, messages: list[dict], tools: list[dict]) -> AsyncIterator[str | Step]:
         kwargs: dict = {"model": self.model, "messages": messages, "stream": True}

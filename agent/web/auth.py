@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import secrets
 import time
@@ -16,10 +17,13 @@ _hasher = PasswordHasher()  # argon2id with the library's recommended settings
 
 COOKIE = "agent_session"
 
-PER_IP_FAILS = 5          # wrong passwords from one address ...
-GLOBAL_FAILS = 20         # ... or from everyone together ...
-WINDOW = 15 * 60          # ... within 15 minutes ...
-LOCKOUT = 15 * 60         # ... lock logins for 15 minutes.
+PER_IP_FAILS = 5          # 5 wrong passwords from one address within WINDOW lock that address
+WINDOW = 15 * 60          # for LOCKOUT. Other addresses (Roland) are not affected.
+LOCKOUT = 15 * 60
+GLOBAL_FAILS = 20         # After 20 wrong passwords from everyone together within WINDOW, every
+GLOBAL_SLOWDOWN = 3.0     # further wrong guess is slowed down; nobody is locked out.
+MAX_WAITING = 8           # Login attempts allowed to queue at once; more get "busy, try again".
+# All of this is kept in memory, so restarting the agent clears it.
 
 
 def hash_password(password: str) -> str:
@@ -51,7 +55,6 @@ class LoginLimiter:
         self.fails: dict[str, deque[float]] = defaultdict(deque)
         self.all_fails: deque[float] = deque()
         self.locked_until: dict[str, float] = {}
-        self.global_locked_until = 0.0
 
     @staticmethod
     def _trim(q: deque[float], now: float) -> None:
@@ -61,8 +64,13 @@ class LoginLimiter:
     def locked(self, ip: str, now: float | None = None) -> float:
         """Seconds until this address may try again (0 if it may try now)."""
         now = time.time() if now is None else now
-        until = max(self.locked_until.get(ip, 0.0), self.global_locked_until)
-        return max(0.0, until - now)
+        return max(0.0, self.locked_until.get(ip, 0.0) - now)
+
+    def slowdown(self, now: float | None = None) -> float:
+        """Extra seconds to hold each wrong guess while many are coming in from everywhere."""
+        now = time.time() if now is None else now
+        self._trim(self.all_fails, now)
+        return GLOBAL_SLOWDOWN if len(self.all_fails) >= GLOBAL_FAILS else 0.0
 
     def failed(self, ip: str, now: float | None = None) -> None:
         now = time.time() if now is None else now
@@ -74,18 +82,21 @@ class LoginLimiter:
         if len(q) >= PER_IP_FAILS:
             self.locked_until[ip] = now + LOCKOUT
             q.clear()
-        if len(self.all_fails) >= GLOBAL_FAILS:
-            self.global_locked_until = now + LOCKOUT
-            self.all_fails.clear()
 
     def succeeded(self, ip: str) -> None:
         self.fails.pop(ip, None)
 
 
 class Sessions:
-    def __init__(self, memory: Memory, days: int):
+    def __init__(self, memory: Memory, days: int, idle_hours: float, password_hash: str):
         self.memory = memory
         self.days = days
+        self.idle = idle_hours * 3600
+        # A new password ends every existing login.
+        fingerprint = hashlib.sha256(password_hash.encode()).hexdigest()
+        if memory.get_meta("password_fingerprint") != fingerprint:
+            memory.delete_all_sessions()
+            memory.set_meta("password_fingerprint", fingerprint)
 
     def create(self) -> str:
         token = secrets.token_urlsafe(32)
@@ -95,8 +106,17 @@ class Sessions:
         return token
 
     def valid(self, token: str | None) -> bool:
-        return bool(token) and self.memory.session_valid(token_hash(token), time.time())
+        return bool(token) and self.memory.session_valid(token_hash(token), time.time(), self.idle)
 
     def end(self, token: str | None) -> None:
         if token:
             self.memory.delete_session(token_hash(token))
+
+
+class LoginGate:
+    """Runs one password check at a time, so lockout counts can't be raced and parallel argon2
+    checks (64 MiB each) can't exhaust memory. Only MAX_WAITING attempts may queue."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.waiting = 0

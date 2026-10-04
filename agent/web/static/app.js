@@ -189,21 +189,52 @@ async function loadJobs() {
   list.replaceChildren();
   if (!data.jobs.length) list.append(el("p", "hint", "No jobs yet."));
   for (const j of data.jobs) {
-    const card = el("div", "card job" + (j.enabled ? "" : " paused"));
+    const waiting = !j.approved;
+    const card = el("div", "card job" + (waiting ? " waiting" : j.enabled ? "" : " paused"));
     const head = el("div", "job-head");
     head.append(el("strong", "", j.name), el("code", "", j.cron));
     card.append(head, el("p", "job-prompt", j.prompt));
-    card.append(el("p", "hint", j.enabled ? `Next run: ${fmtTime(j.next_run)}` : "Paused"));
+    const status = waiting
+      ? "The agent made this job. Waiting for your OK: read what it does, then approve or delete it."
+      : j.running ? "Running now…"
+      : j.enabled ? `Next run: ${fmtTime(j.next_run)}` : "Paused";
+    card.append(el("p", waiting ? "hint warn" : "hint", status));
     const actions = el("div", "job-actions");
-    const runBtn = el("button", "ghost", "Run now");
-    runBtn.onclick = async () => { await api(`/api/jobs/${j.id}/run`, { method: "POST" }); runBtn.textContent = "Running…"; setTimeout(loadJobs, 3000); };
-    const toggle = el("button", "ghost", j.enabled ? "Pause" : "Resume");
-    toggle.onclick = async () => { await api(`/api/jobs/${j.id}/toggle`, { method: "POST" }); loadJobs(); };
+    const msg = el("span", "error");
+    const act = (fn) => async () => { msg.textContent = ""; try { await fn(); } catch (e) { msg.textContent = e.message; } };
+    if (waiting) {
+      const ok = el("button", "primary", "Approve");
+      ok.onclick = act(async () => { await api(`/api/jobs/${j.id}/approve`, { method: "POST" }); loadJobs(); });
+      actions.append(ok);
+    } else {
+      const runBtn = el("button", "ghost", j.running ? "Running…" : "Run now");
+      runBtn.disabled = j.running;
+      runBtn.onclick = act(async () => {
+        await api(`/api/jobs/${j.id}/run`, { method: "POST" });
+        runBtn.textContent = "Running…"; runBtn.disabled = true; setTimeout(loadJobs, 3000);
+      });
+      const toggle = el("button", "ghost", j.enabled ? "Pause" : "Resume");
+      toggle.onclick = act(async () => { await api(`/api/jobs/${j.id}/toggle`, { method: "POST" }); loadJobs(); });
+      actions.append(runBtn, toggle);
+    }
     const del = el("button", "ghost danger", "Delete");
-    del.onclick = async () => { if (confirm(`Delete job "${j.name}"?`)) { await api(`/api/jobs/${j.id}`, { method: "DELETE" }); loadJobs(); } };
-    actions.append(runBtn, toggle, del);
+    del.onclick = act(async () => { if (confirm(`Delete job "${j.name}"?`)) { await api(`/api/jobs/${j.id}`, { method: "DELETE" }); loadJobs(); } });
+    actions.append(del, msg);
     card.append(actions);
     list.append(card);
+  }
+  const facts = $("fact-list");
+  facts.replaceChildren();
+  if (!data.facts.length) facts.append(el("p", "hint", "Nothing saved yet."));
+  for (const f of data.facts) {
+    const row = el("div", "card fact");
+    const del = el("button", "ghost danger", "Delete");
+    del.onclick = async () => {
+      if (!confirm("Delete this saved fact?")) return;
+      try { await api(`/api/facts/${f.id}`, { method: "DELETE" }); loadJobs(); } catch (e) { alert(e.message); }
+    };
+    row.append(el("span", "", f.text), del);
+    facts.append(row);
   }
   const runs = $("run-list");
   runs.replaceChildren();

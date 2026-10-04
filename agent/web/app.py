@@ -3,24 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import html
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
-from ..scheduler import execute, scheduler_loop
-import hmac
+from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
 
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-
-from .auth import COOKIE, LoginLimiter, Sessions, csrf_token, password_ok
+from .auth import COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, csrf_token, password_ok
 
 STATIC = Path(__file__).parent / "static"
 
@@ -46,15 +46,21 @@ class JobBody(BaseModel):
     prompt: str = Field(min_length=1, max_length=5000)
 
 
+log = logging.getLogger("agent.web")
+
+
 def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     config = agent.config
-    sessions = Sessions(agent.memory, config.session_days)
+    sessions = Sessions(agent.memory, config.session_days, config.idle_hours, config.password_hash)
     limiter = LoginLimiter()
+    gate = LoginGate()
     busy: set[int] = set()
     tasks: set[asyncio.Task] = set()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if run_scheduler and (n := agent.memory.fail_unfinished_runs()):
+            log.info("marked %s unfinished job run(s) as failed", n)
         loop_task = asyncio.create_task(scheduler_loop(agent)) if run_scheduler else None
         yield
         if loop_task:
@@ -71,9 +77,11 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         # CSRF, two layers: every state-changing request must come from this site's own page
         # (Origin check), and once logged in it must also carry the session's CSRF token.
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin") or request.headers.get("referer")
+            origin = urlparse(request.headers.get("origin") or request.headers.get("referer") or "")
             host = request.headers.get("host", "")
-            if not origin or urlparse(origin).netloc != host:
+            # With secure cookies (online, behind HTTPS) only an https:// origin is accepted.
+            schemes = {"https"} if config.cookie_secure else {"http", "https"}
+            if origin.scheme not in schemes or origin.netloc != host:
                 return JSONResponse({"error": "bad origin"}, status_code=403)
             token = request.cookies.get(COOKIE)
             if path != "/login" and token:
@@ -112,17 +120,28 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     @app.post("/login")
     async def login(request: Request):
+        # Behind a reverse proxy this is the real visitor's address only when the proxy's IP is
+        # in FORWARDED_ALLOW_IPS (see .env.example).
         ip = request.client.host if request.client else "?"
-        wait = limiter.locked(ip)
-        if wait:
-            return login_page(f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
         form = await request.form()
         given = str(form.get("password", ""))[:1024]
-        if not await asyncio.to_thread(password_ok, given, config.password_hash):
-            limiter.failed(ip)
-            await asyncio.sleep(1)  # slows down guessing
-            return login_page("Wrong password.", 401)
-        limiter.succeeded(ip)
+        if gate.waiting >= MAX_WAITING:
+            return login_page("The login is busy. Try again in a moment.", 429)
+        gate.waiting += 1
+        try:
+            # Check the lockout, verify and record the result as one step, one login at a time.
+            async with gate.lock:
+                wait = limiter.locked(ip)
+                if wait:
+                    return login_page(
+                        f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
+                if not await asyncio.to_thread(password_ok, given, config.password_hash):
+                    limiter.failed(ip)
+                    await asyncio.sleep(1 + limiter.slowdown())  # slows down guessing
+                    return login_page("Wrong password.", 401)
+                limiter.succeeded(ip)
+        finally:
+            gate.waiting -= 1
         response = RedirectResponse("/", status_code=303)
         response.set_cookie(COOKIE, sessions.create(), max_age=config.session_days * 86400,
                             httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
@@ -209,7 +228,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     async def jobs():
         return {
             "jobs": [{"id": j.id, "name": j.name, "cron": j.cron, "prompt": j.prompt,
-                      "enabled": j.enabled, "next_run": j.next_run} for j in agent.memory.jobs()],
+                      "enabled": j.enabled, "approved": j.approved, "next_run": j.next_run,
+                      "running": j.id in running_jobs} for j in agent.memory.jobs()],
+            "facts": [{"id": i, "text": t} for i, t in agent.memory.facts()],
             "runs": agent.memory.runs(30),
             "timezone": config.timezone,
         }
@@ -228,6 +249,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         job = agent.memory.job(job_id)
         if not job:
             raise HTTPException(404, "no such job")
+        if not job.approved:
+            raise HTTPException(400, "approve the job first")
         if not job.enabled:  # skip runs missed while paused
             agent.memory.set_next_run(job_id, next_run_after(job.cron, config.timezone))
         agent.memory.set_job_enabled(job_id, not job.enabled)
@@ -238,9 +261,31 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         job = agent.memory.job(job_id)
         if not job:
             raise HTTPException(404, "no such job")
+        if not job.approved:
+            raise HTTPException(400, "approve the job first")
+        if job_id in running_jobs:
+            raise HTTPException(409, "this job is already running")
+        if len(running_jobs) >= MAX_PARALLEL_JOBS:
+            raise HTTPException(429, "too many jobs are running; try again shortly")
+        running_jobs.add(job_id)  # reserved now, so quick double clicks can't start it twice
         task = asyncio.create_task(execute(agent, job))
         tasks.add(task)
         task.add_done_callback(tasks.discard)
+        return {"ok": True}
+
+    @app.post("/api/jobs/{job_id}/approve")
+    async def approve_job(job_id: int):
+        job = agent.memory.job(job_id)
+        if not job:
+            raise HTTPException(404, "no such job")
+        agent.memory.set_next_run(job_id, next_run_after(job.cron, config.timezone))
+        agent.memory.approve_job(job_id)
+        return {"ok": True}
+
+    @app.delete("/api/facts/{fact_id}")
+    async def delete_fact(fact_id: int):
+        if not agent.memory.forget(fact_id):
+            raise HTTPException(404, "no such fact")
         return {"ok": True}
 
     @app.delete("/api/jobs/{job_id}")

@@ -65,6 +65,10 @@ code { font-size: .85em; color: var(--muted); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: .8rem 1rem; margin-bottom: .6rem; }
 .card summary { cursor: pointer; }
 .job.paused { opacity: .6; }
+.job.waiting { border-color: var(--bad); }
+.hint.warn { color: var(--bad); }
+.fact { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
+.fact span { white-space: pre-wrap; overflow-wrap: anywhere; }
 .job-head { display: flex; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
 .job-prompt { white-space: pre-wrap; margin: .4rem 0; }
 .job-actions { display: flex; gap: .4rem; flex-wrap: wrap; }

@@ -8,7 +8,8 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - agent-data:/data
-    # No Docker socket and no host folders: the agent's shell can only touch its own container.
+    # No Docker socket and no host folders. If you turn on ALLOW_SHELL, its commands stay inside
+    # this container, but they still run as the agent's user (a separate sandbox comes in v2).
     # The container's own files are read-only; only /data (and a small /tmp) can be written.
     read_only: true
     tmpfs:
@@ -24,8 +25,11 @@ services:
 
   # Local model (free). Remove this service if you use Grok or another paid API instead.
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.35.1   # pinned; update on purpose
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # No ports published: only the agent can reach it, on the internal compose network.
     volumes:
       - ollama-models:/root/.ollama
 

@@ -31,6 +31,7 @@ class Config:
     timezone: str
     data_dir: Path
     allowed_hosts: tuple[str, ...] = ()
+    idle_hours: float = 72
 
     @property
     def db_path(self) -> Path:
@@ -66,4 +67,5 @@ class Config:
             data_dir=Path(os.getenv("DATA_DIR", "./data")).resolve(),
             allowed_hosts=tuple(h.strip() for h in os.getenv("ALLOWED_HOSTS", "").split(",")
                                 if h.strip()),
+            idle_hours=float(os.getenv("SESSION_IDLE_HOURS", "72")),
         )
