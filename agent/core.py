@@ -19,6 +19,15 @@ HISTORY = 30  # earlier messages from the same chat sent to the model
 _MARKER = re.compile(r"tool_output", re.IGNORECASE)
 
 
+_NOT_NAME = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def tool_name(raw: str) -> str:
+    """The model picks the tool name, so keep it to plain name characters and 80 long before
+    it goes anywhere (the <tool_output> header, error messages, the chat page)."""
+    return _NOT_NAME.sub("", str(raw or ""))[:80] or "unnamed"
+
+
 def strip_markers(text: str) -> str:
     """Breaks anything that could be read as our <tool_output> markers by renaming the word to
     tool-output, in one linear pass. Nothing is removed, so pieces can't join up into a new
@@ -115,12 +124,13 @@ class Agent:
             })
             for call in step.tool_calls:
                 args = call.args()
-                if call.name in tool_exclude:
-                    result = f"Error: {call.name} isn't available here."
+                name = tool_name(call.name)
+                if name in tool_exclude:
+                    result = f"Error: {name} isn't available here."
                 else:
-                    yield {"type": "tool", "text": describe(call.name, args)}
-                    result = await call_tool(self.ctx, call.name, args)
-                    result = (f'<tool_output tool="{call.name}">\n'
+                    yield {"type": "tool", "text": describe(name, args)}
+                    result = await call_tool(self.ctx, name, args)
+                    result = (f'<tool_output tool="{name}">\n'
                               f'{strip_markers(result)}\n</tool_output>')
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
             if reply and not reply.endswith("\n"):

@@ -101,3 +101,14 @@ async def test_jobs_tools(ctx):
     assert "at most 5000" in out and ctx.memory.job(2) is None
     assert "deleted" in await call_tool(ctx, "cancel_job", {"job_id": 1})
     assert "no tool" in await call_tool(ctx, "nope", {})
+
+
+async def test_list_jobs_shows_every_job_with_long_prompts(tmp_path):
+    from agent.memory import Memory
+    from agent.tools import MAX_OUTPUT, ToolContext, call_tool
+    mem = Memory(tmp_path / "m.db")
+    ids = [mem.add_job(f"job{i}", "0 7 * * *", f"start{i} " + "x" * 4990, 0) for i in range(12)]
+    out = await call_tool(ToolContext(mem, tmp_path, "Europe/Helsinki", allow_shell=False), "list_jobs", {})
+    assert len(out) <= MAX_OUTPUT and "[cut" not in out
+    for i, job_id in enumerate(ids):
+        assert f"{job_id}: job{i} " in out and f"start{i}" in out

@@ -21,6 +21,7 @@ from .schedule import next_run_after, valid_cron
 MAX_OUTPUT = 8000          # characters of tool output the model sees
 MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
 SHELL_TIMEOUT = 60         # seconds
+LIST_PROMPT_CHARS = 300    # how much of each prompt list_jobs shows
 MAX_JOB_PROMPT = 5000      # characters, same as the Jobs tab form
 FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
@@ -250,14 +251,22 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
             "approval: tell him to press Approve on the Jobs tab. It won't run until then.")
 
 
+def _short(text: str, limit: int) -> str:
+    """One line, at most `limit` characters, with … when something was left out."""
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[:limit - 1] + "…"
+
+
 async def list_jobs(ctx: ToolContext, args: dict) -> str:
     jobs = ctx.memory.jobs()
     if not jobs:
         return "No jobs."
-    return "\n".join(
+    # Each prompt is shortened so every job and its id still fits under MAX_OUTPUT.
+    room = max(40, min(LIST_PROMPT_CHARS, MAX_OUTPUT // len(jobs) - 140))
+    return f"{len(jobs)} job(s):\n" + "\n".join(
         f"{j.id}: {j.name} [{j.cron}] "
         f"{'waiting for approval' if not j.approved else 'on' if j.enabled else 'paused'}"
-        f" - {j.prompt}" for j in jobs
+        f" - {_short(j.prompt, room)}" for j in jobs
     )
 
 
