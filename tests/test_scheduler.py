@@ -56,3 +56,23 @@ async def test_job_exception_records_failure_and_releases_slot(make_agent, monke
     run = agent.memory.runs()[0]
     assert run["ok"] == 0 and "model unavailable" in run["output"]
     assert job_id not in running_jobs
+
+
+@pytest.mark.asyncio
+async def test_job_paused_or_deleted_during_earlier_job_does_not_run(make_agent, monkeypatch):
+    agent = make_agent()
+    first = agent.memory.add_job("First", "* * * * *", "one", 0)
+    paused = agent.memory.add_job("Paused", "* * * * *", "two", 0)
+    deleted = agent.memory.add_job("Deleted", "* * * * *", "three", 0)
+    ran = []
+
+    async def run_job(job):
+        ran.append(job.id)
+        if job.id == first:  # Roland changes the others while the first one runs
+            agent.memory.set_job_enabled(paused, False)
+            agent.memory.delete_job(deleted)
+        return True, "ok"
+
+    monkeypatch.setattr(agent, "run_job", run_job)
+    assert await run_due_jobs(agent, now=100) == 1
+    assert ran == [first]

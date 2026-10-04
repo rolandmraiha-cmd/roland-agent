@@ -24,6 +24,11 @@ async def run_due_jobs(agent: Agent, now: float | None = None) -> int:
             continue
         if len(running_jobs) >= MAX_PARALLEL_JOBS:
             break  # Leave due times unchanged so these jobs can run on the next poll.
+        # The list was read before earlier jobs ran, so Roland may have paused, deleted or
+        # edited this one since. Read it again right before running.
+        job = agent.memory.job(job.id)
+        if job is None or not (job.enabled and job.approved):
+            continue
         # Move the next run forward first, so a crash or long job never runs twice in a row.
         agent.memory.set_next_run(job.id, next_run_after(job.cron, agent.config.timezone, now))
         running_jobs.add(job.id)

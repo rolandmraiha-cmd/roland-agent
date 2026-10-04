@@ -194,3 +194,19 @@ test('opening another chat immediately clears the previous conversation', async 
   await opening;
   assert.equal(f.get('messages').children[0].children[0].textContent, 'selected conversation');
 });
+
+test('Safari IME Enter (keyCode 229) does not submit', () => {
+  const f = fixture();
+  let submissions = 0;
+  f.get('composer').requestSubmit = () => submissions++;
+  f.get('input').listeners.keydown({ key: 'Enter', isComposing: false, keyCode: 229, preventDefault() {} });
+  assert.equal(submissions, 0);
+});
+
+test('failed history load shows an error instead of an empty chat', async () => {
+  const f = fixture();
+  f.context.api = async () => { throw new Error('Server error'); };
+  await f.run('openChat(3)');
+  assert.equal(f.run('currentChat'), 3);
+  assert.match(f.get('messages').children[0].children[0].textContent, /Couldn't load this chat: Server error/);
+});

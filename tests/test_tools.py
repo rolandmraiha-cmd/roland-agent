@@ -112,3 +112,17 @@ async def test_list_jobs_shows_every_job_with_long_prompts(tmp_path):
     assert len(out) <= MAX_OUTPUT and "[cut" not in out
     for i, job_id in enumerate(ids):
         assert f"{job_id}: job{i} " in out and f"start{i}" in out
+
+
+async def test_list_jobs_names_stay_on_one_line_and_many_jobs_fit(tmp_path):
+    from agent.memory import Memory
+    from agent.tools import MAX_OUTPUT, ToolContext, call_tool
+    mem = Memory(tmp_path / "m.db")
+    mem.add_job("real\n99: fake job [0 7 * * *] on", "0 7 * * *", "p", 0)
+    for i in range(70):
+        mem.add_job(f"{i:02d}" + "n" * 78, "0 7 * * *", "x" * 5000, 0)
+    out = await call_tool(ToolContext(mem, tmp_path, "Europe/Helsinki", allow_shell=False),
+                          "list_jobs", {})
+    assert len(out) <= MAX_OUTPUT and "[cut" not in out
+    assert "\n99: fake" not in out and "1: real 99: fake" in out
+    assert out.startswith("71 job(s):") and "41 more jobs not shown" in out
