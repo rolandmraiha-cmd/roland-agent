@@ -275,6 +275,30 @@ def test_forwarded_for_only_from_trusted_proxy(make_agent, monkeypatch, caplog):
         assert "FORWARDED_ALLOW_IPS" in caplog.text
 
 
+def test_forwarded_for_details():
+    from agent.web.app import ProxyHeaders, _strip_port
+    assert _strip_port("1.2.3.4:5678") == "1.2.3.4"
+    assert _strip_port("[2001:db8::1]:443") == "2001:db8::1"
+    assert _strip_port(" 2001:db8::1 ") == "2001:db8::1"
+    seen = {}
+
+    async def app(scope, receive, send):
+        seen["client"] = scope["client"][0]
+
+    async def run(trusted, peer, *lines):
+        mw = ProxyHeaders(app, trusted)
+        headers = [(b"x-forwarded-for", line.encode()) for line in lines]
+        await mw({"type": "http", "client": (peer, 1), "headers": headers}, None, None)
+        return seen["client"]
+
+    import asyncio
+    # A visitor typing a fake left-hand entry doesn't change who they are.
+    assert asyncio.run(run(("*",), "172.17.0.1", "1.1.1.1, 6.6.6.6:4000")) == "6.6.6.6"
+    assert asyncio.run(run(("172.17.0.0/16",), "172.17.0.1", "1.1.1.1", "6.6.6.6")) == "6.6.6.6"
+    assert asyncio.run(run(("172.17.0.0/16",), "172.17.0.1", "6.6.6.6, 172.17.0.9")) == "6.6.6.6"
+    assert asyncio.run(run(("172.17.0.1",), "8.8.8.8", "1.1.1.1")) == "8.8.8.8"  # untrusted peer
+
+
 async def _no_sleep(_):
     return None
 

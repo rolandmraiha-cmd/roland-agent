@@ -12,21 +12,18 @@ from .brain import Brain, Step
 from .config import Config
 from .memory import Job, Memory
 from .schedule import now_text, today
-from .tools import ToolContext, call_tool, describe, schemas
+from .tools import ToolContext, call_tool, clip, describe, schemas
 
 HISTORY = 30  # earlier messages from the same chat sent to the model
 
-_MARKER = re.compile(r"<\s*/?\s*tool_output", re.IGNORECASE)
+_MARKER = re.compile(r"tool_output", re.IGNORECASE)
 
 
 def strip_markers(text: str) -> str:
-    """Removes anything that looks like our <tool_output> markers, repeating until none is left,
-    so a page can't rebuild one from pieces (like '</tool_out</tool_output>put>')."""
-    while True:
-        cleaned = _MARKER.sub("", text)
-        if cleaned == text:
-            return text
-        text = cleaned
+    """Breaks anything that could be read as our <tool_output> markers by renaming the word to
+    tool-output, in one linear pass. Nothing is removed, so pieces can't join up into a new
+    marker (like '</tool_out</tool_output>put>'). The text is cut to MAX_OUTPUT first."""
+    return _MARKER.sub("tool-output", clip(text))
 
 
 MAX_STREAMS = 3  # model calls running at the same time; more wait their turn
