@@ -174,10 +174,18 @@ class Memory:
         return [dict(r) for r in reversed(rows)]
 
     # --- facts ---
-    def remember(self, text: str) -> int:
+    def remember(self, text: str, limit: int | None = None) -> int | None:
+        """Saves a fact and returns its id (the old id if it's saved already). With a limit, a new
+        fact is only added while fewer than `limit` are saved, checked in the same statement so
+        two processes can't both add the last one. Returns None when it didn't fit."""
         text = text.strip()
-        self._exec("INSERT OR IGNORE INTO facts(text, created) VALUES (?, ?)", (text, time.time()))
-        return int(self._all("SELECT id FROM facts WHERE text = ?", (text,))[0]["id"])
+        self._exec(
+            "INSERT OR IGNORE INTO facts(text, created) SELECT ?, ? "
+            "WHERE (SELECT COUNT(*) FROM facts) < ?",
+            (text, time.time(), limit if limit is not None else 2**62),
+        )
+        rows = self._all("SELECT id FROM facts WHERE text = ?", (text,))
+        return int(rows[0]["id"]) if rows else None
 
     def forget(self, fact_id: int) -> bool:
         return self._exec("DELETE FROM facts WHERE id = ?", (fact_id,)).rowcount > 0

@@ -238,11 +238,22 @@ async def remember(ctx: ToolContext, args: dict) -> str:
         return "Error: the fact is empty."
     if len(fact) > MAX_FACT_CHARS:
         return f"Error: a fact can be at most {MAX_FACT_CHARS} characters. Save a shorter one."
-    if len(ctx.memory.facts()) >= MAX_FACTS:
+    fact_id = ctx.memory.remember(fact, limit=MAX_FACTS)
+    if fact_id is None:
         return (f"Error: {MAX_FACTS} facts are saved already. Forget one first, or ask Roland "
                 "to delete some on the Jobs tab.")
-    fact_id = ctx.memory.remember(fact)
     return f"Remembered as fact {fact_id}."
+
+
+def prompt_facts(memory: Memory) -> str:
+    """Saved facts as prompt lines: one line each, shortened, at most MAX_FACTS of them. Older
+    versions saved facts without these limits, so they're applied here as well."""
+    facts = memory.facts()
+    lines = [f"{i}: {_short(t, MAX_FACT_CHARS)}" for i, t in facts[:MAX_FACTS]]
+    if len(facts) > MAX_FACTS:
+        lines.append(f"({len(facts) - MAX_FACTS} more saved facts not shown here; Roland can see "
+                     "them on the Jobs tab.)")
+    return "\n".join(lines)
 
 
 async def forget(ctx: ToolContext, args: dict) -> str:
@@ -269,7 +280,7 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
 
 def _short(text: str, limit: int) -> str:
     """One line, at most `limit` characters, with … when something was left out."""
-    text = " ".join(text.split())
+    text = one_line(text)
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 

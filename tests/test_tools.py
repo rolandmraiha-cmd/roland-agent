@@ -169,3 +169,16 @@ async def test_fact_count_is_capped(ctx):
     assert "Remembered" in await call_tool(ctx, "remember", {"fact": "the last one"})
     assert "Error" in await call_tool(ctx, "remember", {"fact": "one more"})
     assert len(ctx.memory.facts()) == MAX_FACTS
+    # Saving a fact that's already there still works when full, and adds nothing.
+    assert "Remembered" in await call_tool(ctx, "remember", {"fact": "fact 3"})
+    assert len(ctx.memory.facts()) == MAX_FACTS
+
+
+def test_fact_cap_holds_across_connections(tmp_path):
+    # Like the server and `run-jobs`: two connections to one database, each checking the cap.
+    a, b = Memory(tmp_path / "m.db"), Memory(tmp_path / "m.db")
+    for i in range(MAX_FACTS - 1):
+        a.remember(f"fact {i}")
+    assert a.remember("from a", limit=MAX_FACTS) is not None
+    assert b.remember("from b", limit=MAX_FACTS) is None
+    assert len(b.facts()) == MAX_FACTS

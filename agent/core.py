@@ -12,7 +12,7 @@ from .brain import Brain, Step
 from .config import Config
 from .memory import Job, Memory
 from .schedule import now_text, today
-from .tools import ToolContext, call_tool, clip, describe, one_line, schemas
+from .tools import ToolContext, call_tool, clip, describe, prompt_facts, schemas
 
 HISTORY = 30  # earlier messages from the same chat sent to the model
 
@@ -70,8 +70,7 @@ class Agent:
         config.workspace.mkdir(parents=True, exist_ok=True)
 
     def system_prompt(self, extra: str = "") -> str:
-        # One line each, also for facts saved before remember() flattened them.
-        facts = "\n".join(f"{i}: {one_line(t)}" for i, t in self.memory.facts()) or "(nothing yet)"
+        facts = prompt_facts(self.memory) or "(nothing yet)"
         shell_note = "" if self.allow_shell else "Shell commands are turned off right now.\n"
         return SYSTEM.format(
             name=self.config.agent_name, now=now_text(self.config.timezone),
