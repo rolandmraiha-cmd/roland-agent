@@ -25,6 +25,8 @@ LIST_PROMPT_CHARS = 300    # how much of each prompt list_jobs shows
 MAX_LISTED_JOBS = 30       # list_jobs shows at most this many
 MAX_JOB_PROMPT = 5000      # characters, same as the Jobs tab form
 FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
+MAX_FACT_CHARS = 300       # one saved fact; every fact goes into every prompt
+MAX_FACTS = 100            # saved facts in total
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
 # Environment variables the shell never gets, so commands can't print the agent's secrets.
@@ -225,8 +227,21 @@ async def list_files(ctx: ToolContext, args: dict) -> str:
 
 
 # --- memory ---
+def one_line(text: str) -> str:
+    """Joins all lines into one, so a fact can't start what looks like a new prompt line."""
+    return " ".join(text.split())
+
+
 async def remember(ctx: ToolContext, args: dict) -> str:
-    fact_id = ctx.memory.remember(str(args.get("fact", "")))
+    fact = one_line(str(args.get("fact", "")))
+    if not fact:
+        return "Error: the fact is empty."
+    if len(fact) > MAX_FACT_CHARS:
+        return f"Error: a fact can be at most {MAX_FACT_CHARS} characters. Save a shorter one."
+    if len(ctx.memory.facts()) >= MAX_FACTS:
+        return (f"Error: {MAX_FACTS} facts are saved already. Forget one first, or ask Roland "
+                "to delete some on the Jobs tab.")
+    fact_id = ctx.memory.remember(fact)
     return f"Remembered as fact {fact_id}."
 
 
@@ -320,7 +335,8 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
                        ["path", "content"]), write_file),
     "list_files": (_fn("list_files", "List files in a workspace folder (relative path, default the workspace itself).",
                        {"path": S}, []), list_files),
-    "remember": (_fn("remember", "Save a lasting fact about Roland or your work.",
+    "remember": (_fn("remember", "Save a lasting fact about Roland or your work: one short line, "
+                     f"at most {MAX_FACT_CHARS} characters.",
                      {"fact": S}, ["fact"]), remember),
     "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": I}, ["fact_id"]), forget),
     "schedule_job": (_fn("schedule_job", "Schedule a background job: a prompt you will run on a "
