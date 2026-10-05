@@ -35,8 +35,10 @@ def harden_process() -> None:
             logging.warning("could not call prctl")
 
 
-def build() -> Agent:
+def build(*, validate: bool = False) -> Agent:
     config = Config.from_env()
+    if validate:
+        config.check()  # Refuse unsafe settings before opening the DB or model client.
     memory = Memory(config.db_path)
     brain = OpenAICompatibleBrain(config.model_base_url, config.model_name, config.model_api_key)
     return Agent(config, memory, brain)
@@ -85,13 +87,12 @@ def main() -> None:
         return
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     harden_process()
-    agent = build()
+    agent = build(validate=args.command == "serve")
     if args.command == "chat":
         asyncio.run(terminal_chat(agent))
     elif args.command == "run-jobs":
         print(f"ran {asyncio.run(run_due_jobs(agent))} job(s)")
     else:
-        agent.config.check()
         log = logging.getLogger("agent")
         if not agent.config.allowed_hosts:
             log.warning("ALLOWED_HOSTS is empty, so the page answers to any hostname. "

@@ -19,9 +19,11 @@ class ToolCall:
     def args(self) -> dict:
         try:
             value = json.loads(self.arguments or "{}")
-            return value if isinstance(value, dict) else {}
-        except json.JSONDecodeError:
-            return {}
+            if not isinstance(value, dict):
+                raise ValueError("Tool arguments must be a JSON object.")
+            return value
+        except json.JSONDecodeError as e:
+            raise ValueError("Tool arguments must be valid JSON.") from e
 
 
 @dataclass
@@ -51,21 +53,24 @@ class OpenAICompatibleBrain:
         response = await self.client.chat.completions.create(**kwargs)
         step = Step()
         calls: dict[int, ToolCall] = {}
-        async for chunk in response:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                step.text += delta.content
-                yield delta.content
-            for tc in delta.tool_calls or []:
-                call = calls.setdefault(tc.index, ToolCall(id="", name="", arguments=""))
-                if tc.id:
-                    call.id = tc.id
-                if tc.function and tc.function.name:
-                    call.name += tc.function.name
-                if tc.function and tc.function.arguments:
-                    call.arguments += tc.function.arguments
+        try:
+            async for chunk in response:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    step.text += delta.content
+                    yield delta.content
+                for tc in delta.tool_calls or []:
+                    call = calls.setdefault(tc.index, ToolCall(id="", name="", arguments=""))
+                    if tc.id:
+                        call.id = tc.id
+                    if tc.function and tc.function.name:
+                        call.name += tc.function.name
+                    if tc.function and tc.function.arguments:
+                        call.arguments += tc.function.arguments
+        finally:
+            await response.close()
         step.tool_calls = [c for _, c in sorted(calls.items()) if c.name]
         for i, call in enumerate(step.tool_calls):
             call.id = call.id or f"call_{i}"
