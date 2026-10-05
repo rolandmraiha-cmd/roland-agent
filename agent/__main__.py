@@ -105,7 +105,7 @@ def main() -> None:
 
         from .web.app import create_app
 
-        uvicorn.run(create_app(agent), host=os.getenv("HOST", "0.0.0.0"),
+        uvicorn.run(create_app(agent), host=os.getenv("HOST", "0.0.0.0"),  # noqa: S104 -- serving externally is intentional
                     port=int(os.getenv("PORT", "8080")),
                     # The app reads X-Forwarded-For itself, only from FORWARDED_ALLOW_IPS.
                     proxy_headers=False, server_header=False)

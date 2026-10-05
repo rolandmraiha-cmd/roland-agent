@@ -74,6 +74,7 @@ def test_fetch_connects_to_checked_address(monkeypatch):
     """DNS rebinding: the request goes to the IP that passed the check, with the real hostname
     kept for the Host header and the TLS certificate check."""
     from urllib.parse import urlparse
+
     from agent import tools
     monkeypatch.setattr(tools.socket, "getaddrinfo",
                         lambda *a, **k: [(2, 1, 6, "", ("93.184.215.14", 0))])

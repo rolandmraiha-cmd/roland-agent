@@ -13,16 +13,21 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
-
-from .auth import (COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, client_key, csrf_token,
-                   password_ok)
+from .auth import COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, client_key, csrf_token, password_ok
 
 STATIC = Path(__file__).parent / "static"
 

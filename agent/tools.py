@@ -7,9 +7,9 @@ import ipaddress
 import json
 import os
 import socket
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Awaitable, Callable
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -94,7 +94,7 @@ def _pinned(parsed, ip: str) -> tuple[str, dict, dict]:
 async def fetch_url(ctx: ToolContext, args: dict) -> str:
     try:
         return await asyncio.wait_for(_fetch(str(args.get("url", "")).strip()), FETCH_DEADLINE)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return f"Error: the page took longer than {FETCH_DEADLINE} seconds."
 
 
@@ -129,7 +129,7 @@ async def _fetch(url: str) -> str:
                     for tag in soup(["script", "style", "noscript", "svg"]):
                         tag.decompose()
                     title = soup.title.get_text(strip=True) if soup.title else ""
-                    lines = [l.strip() for l in soup.get_text("\n").splitlines() if l.strip()]
+                    lines = [line.strip() for line in soup.get_text("\n").splitlines() if line.strip()]
                     text = (f"Title: {title}\n\n" if title else "") + "\n".join(lines)
                 return clip(f"HTTP {resp.status_code} {url}\n\n{text}")
     return "Error: too many redirects."
@@ -170,12 +170,12 @@ async def run_shell(ctx: ToolContext, args: dict) -> str:
         # Drains what's left (the process is dead or done) so its pipes close cleanly.
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     try:
         out, cut = await asyncio.wait_for(read_capped(), timeout=SHELL_TIMEOUT)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         kill()
         await finish()
         return f"Error: the command took longer than {SHELL_TIMEOUT} seconds and was stopped."
@@ -306,7 +306,7 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 
 
 S = {"type": "string"}
-I = {"type": "integer"}
+INTEGER = {"type": "integer"}
 
 TOOLS: dict[str, tuple[dict, Handler]] = {
     "fetch_url": (_fn("fetch_url", "Download a public web page and return its text.",
@@ -322,16 +322,16 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
                        {"path": S}, []), list_files),
     "remember": (_fn("remember", "Save a lasting fact about Roland or your work.",
                      {"fact": S}, ["fact"]), remember),
-    "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": I}, ["fact_id"]), forget),
+    "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": INTEGER}, ["fact_id"]), forget),
     "schedule_job": (_fn("schedule_job", "Schedule a background job: a prompt you will run on a "
                          "5-field cron schedule in Roland's time zone, e.g. '0 7 * * *' for every "
                          "day at 07:00.", {"name": S, "cron": S, "prompt": S},
                          ["name", "cron", "prompt"]), schedule_job),
     "list_jobs": (_fn("list_jobs", "List scheduled background jobs, waiting for approval first, "
                       "then newest first, 30 at a time. Use offset to see more.",
-                      {"offset": I}, []), list_jobs),
+                      {"offset": INTEGER}, []), list_jobs),
     "cancel_job": (_fn("cancel_job", "Delete a scheduled job by its id.",
-                       {"job_id": I}, ["job_id"]), cancel_job),
+                       {"job_id": INTEGER}, ["job_id"]), cancel_job),
 }
 
 

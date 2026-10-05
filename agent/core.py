@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 import re
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 from .brain import Brain, Step
 from .config import Config
