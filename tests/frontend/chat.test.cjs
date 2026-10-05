@@ -210,3 +210,45 @@ test('failed history load shows an error instead of an empty chat', async () => 
   assert.equal(f.run('currentChat'), 3);
   assert.match(f.get('messages').children[0].children[0].textContent, /Couldn't load this chat: Server error/);
 });
+
+test('old-origin jobs say the origin is unknown', async () => {
+  const f = fixture();
+  f.context.api = async () => ({ json: async () => ({
+    timezone: 'Europe/Helsinki', facts: [], runs: [],
+    jobs: [{ id: 1, name: 'Legacy', cron: '* * * * *', prompt: 'Check',
+             origin: 'old', approved: false }],
+  }) });
+  await f.run('loadJobs()');
+  const status = f.get('job-list').children[0].children[2].textContent;
+  assert.equal(status, "Where this job came from wasn't recorded (it was made before v1 tracked that), so the agent may have made it. Waiting for your OK: read what it does, then approve or delete it.");
+  f.context.api = async () => ({ json: async () => ({
+    timezone: 'Europe/Helsinki', facts: [], runs: [],
+    jobs: [{ id: 2, name: 'Agent', cron: '* * * * *', prompt: 'Check',
+             origin: 'agent', approved: false }],
+  }) });
+  await f.run('loadJobs()');
+  assert.match(f.get('job-list').children[0].children[2].textContent, /^The agent made this job\. /);
+});
+
+test('deleting the open chat suppresses its pending load error', async () => {
+  const f = fixture(), history = deferred();
+  // Restore the shipped list loader that the fixture normally replaces with a stub.
+  const source = fs.readFileSync(path.join(__dirname, '../../agent/web/static/app.js'), 'utf8');
+  const loader = source.slice(source.indexOf('async function loadChats()'),
+                              source.indexOf('// ---------- chat ----------'));
+  vm.runInContext(loader, f.context);
+  let chats = [{ id: 3, title: 'Pending' }];
+  f.context.api = async (url, options = {}) => {
+    if (url.endsWith('/messages')) return history.promise;
+    if (options.method === 'DELETE') { chats = []; return {}; }
+    return { json: async () => chats };
+  };
+  const opening = f.run('openChat(3)');
+  await f.run('loadChats()');
+  await f.get('chat-list').children[0].children[1].onclick();
+  history.reject(new Error('no such chat'));
+  await opening;
+  assert.equal(f.run('currentChat'), null);
+  assert.equal(f.get('messages').children.length, 0);
+  assert.equal(f.get('title').textContent, 'Chat');
+});

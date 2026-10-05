@@ -13,16 +13,31 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from ..config import trusted_proxy_networks
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
-
-from .auth import (COOKIE, MAX_WAITING, LoginGate, LoginLimiter, Sessions, client_key, csrf_token,
-                   password_ok)
+from .auth import (
+    COOKIE,
+    MAX_WAITING,
+    LoginGate,
+    LoginLimiter,
+    Sessions,
+    client_key,
+    csrf_token,
+    password_ok,
+)
 
 STATIC = Path(__file__).parent / "static"
 
@@ -83,13 +98,11 @@ class ProxyHeaders:
 
     def __init__(self, app, trusted: tuple[str, ...]):
         self.app = app
-        self.any = "*" in trusted
-        self.nets = [ipaddress.ip_network(t, strict=False) for t in trusted if t != "*"]
+        self.nets = trusted_proxy_networks(trusted)
         self.warned = False
+        self.warned_all_trusted = False
 
     def trusted(self, host: str) -> bool:
-        if self.any:
-            return True
         try:
             ip = ipaddress.ip_address(host)
         except ValueError:
@@ -106,11 +119,12 @@ class ProxyHeaders:
                 # The rightmost address not added by a trusted proxy is the real visitor;
                 # anything further left could have been typed by the visitor.
                 hops = [_strip_port(h) for h in fwd.split(",") if h.strip()]
-                if self.any:
-                    host = hops[-1] if hops else host  # '*' trusts only the direct peer
-                else:
-                    host = next((h for h in reversed(hops) if not self.trusted(h)),
-                                hops[0] if hops else host)
+                visitor = next((h for h in reversed(hops) if not self.trusted(h)), None)
+                if visitor is not None:
+                    host = visitor
+                elif hops and not self.warned_all_trusted:
+                    self.warned_all_trusted = True
+                    log.warning("Every X-Forwarded-For hop is trusted; keeping direct peer %s.", host)
                 proto = next((v.decode("latin-1") for k, v in scope["headers"]
                               if k == b"x-forwarded-proto"), None)
                 scope = dict(scope, client=(host, port))

@@ -68,7 +68,7 @@ async function loadChats() {
       if (sending) return;
       if (!confirm(`Delete "${c.title}"?`)) return;
       try { await api(`/api/chats/${c.id}`, { method: "DELETE" }); } catch (e) { alert(e.message); return; }
-      if (c.id === currentChat) { currentChat = null; $("messages").replaceChildren(); $("title").textContent = "Chat"; }
+      if (c.id === currentChat) { ++chatLoad; currentChat = null; $("messages").replaceChildren(); $("title").textContent = "Chat"; }
       loadChats();
     };
     row.append(open, del);
@@ -104,7 +104,7 @@ async function openChat(id) {
     data = await (await api(`/api/chats/${id}/messages`)).json();
   } catch (e) {
     // Don't show an empty chat as if it had no messages.
-    if (load === chatLoad && !sending) addMessage("error", `Couldn't load this chat: ${e.message}`);
+    if (load === chatLoad && currentChat === id && !sending) addMessage("error", `Couldn't load this chat: ${e.message}`);
     return;
   }
   if (load !== chatLoad || sending) return;
@@ -243,7 +243,7 @@ async function loadJobs() {
     head.append(el("strong", "", j.name), el("code", "", j.cron));
     card.append(head, el("p", "job-prompt", j.prompt));
     const status = waiting
-      ? (j.origin === "agent" ? "The agent made this job. " : "This job is from before approvals existed. ")
+      ? (j.origin === "agent" ? "The agent made this job. " : "Where this job came from wasn't recorded (it was made before v1 tracked that), so the agent may have made it. ")
         + "Waiting for your OK: read what it does, then approve or delete it."
       : j.running ? "Running now…"
       : j.enabled ? `Next run: ${fmtTime(j.next_run)}` : "Paused";

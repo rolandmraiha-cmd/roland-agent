@@ -97,3 +97,43 @@ async def test_job_paused_and_resumed_during_earlier_job_waits_for_next_time(mak
     monkeypatch.setattr(agent, "run_job", run_job)
     assert await run_due_jobs(agent, now=100) == 1
     assert ran == [first]
+
+
+@pytest.mark.asyncio
+async def test_overrunning_job_is_not_rerun_immediately(make_agent, monkeypatch):
+    from agent import scheduler
+
+    clock = [100.0]
+    monkeypatch.setattr(scheduler.time, "time", lambda: clock[0])
+    agent = make_agent()
+    job_id = agent.memory.add_job("Long", "* * * * *", "work", 0)
+
+    async def run_job(job):
+        clock[0] += 150
+        return True, "done"
+
+    monkeypatch.setattr(agent, "run_job", run_job)
+    assert await run_due_jobs(agent) == 1
+    assert clock[0] == 250
+    assert agent.memory.job(job_id).next_run > clock[0]
+    assert await run_due_jobs(agent) == 0
+    assert len(agent.memory.runs()) == 1
+
+
+@pytest.mark.asyncio
+async def test_overrun_preserves_a_later_resumed_schedule(make_agent, monkeypatch):
+    from agent import scheduler
+
+    clock = [100.0]
+    monkeypatch.setattr(scheduler.time, "time", lambda: clock[0])
+    agent = make_agent()
+    job_id = agent.memory.add_job("Long", "* * * * *", "work", 0)
+
+    async def run_job(job):
+        agent.memory.set_next_run(job.id, 1000)
+        clock[0] += 150
+        return True, "done"
+
+    monkeypatch.setattr(agent, "run_job", run_job)
+    assert await run_due_jobs(agent) == 1
+    assert agent.memory.job(job_id).next_run == 1000
