@@ -95,7 +95,7 @@ class Agent:
             tool_exclude = set(tool_exclude) | {"run_shell"}
         tools = schemas(tool_exclude)
         reply = ""
-        for _ in range(self.config.max_tool_steps + 1):
+        for tool_step in range(self.config.max_tool_steps + 1):
             try:
                 self._count_call()
             except LimitReached as e:
@@ -116,6 +116,8 @@ class Agent:
             if not step.tool_calls:
                 yield {"type": "done", "reply": reply}
                 return
+            if tool_step >= self.config.max_tool_steps:
+                break  # The final model call may answer, but must not run more tools.
             messages.append({
                 "role": "assistant", "content": step.text or None,
                 "tool_calls": [{"id": c.id, "type": "function",
@@ -123,9 +125,14 @@ class Agent:
                                for c in step.tool_calls],
             })
             for call in step.tool_calls:
-                args = call.args()
                 name = tool_name(call.name)
-                if name in tool_exclude:
+                try:
+                    args = call.args()
+                except ValueError as e:
+                    messages.append({"role": "tool", "tool_call_id": call.id,
+                                     "content": f"Error: {e}"})
+                    continue
+                if call.name != name or name in tool_exclude:
                     result = f"Error: {name} isn't available here."
                 else:
                     yield {"type": "tool", "text": describe(name, args)}
