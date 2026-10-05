@@ -9,7 +9,7 @@
 | Implementer | Codex (via AI Relay) |
 | Reviewer | Code Shipper (reviews every PR before merge) |
 | Target host | Contabo VPS, Ubuntu 24.04, 4 vCPU (CPU only, no GPU), 7.8 GB RAM + 2 GB swap, 96 GB disk, public IPv4 `37.60.226.214`, SSH user `deploy` (passwordless sudo), app dir `/opt/roland-agent`, Docker 29 + Compose plugin, ufw allowing only 22, 80, 443/tcp and 443/udp. The server is fresh: no v1 data and no Ollama volume |
-| Model | **Self-hosted open-weight model only.** No hosted or third-party model API in any code path (§6.9). Default: Qwen2.5-3B-Instruct, GGUF Q4_K_M, served by llama.cpp in its own internal container |
+| Model | **Self-hosted open-weight model only.** No hosted or third-party model API in any code path (§6.9). Default: Qwen3-4B-Instruct-2507 (Apache-2.0), GGUF Q4_K_M, served by llama.cpp in its own internal container |
 
 The words MUST, MUST NOT, SHOULD and MAY mean what RFC 2119 says. Anything marked **(normative)** is a requirement. Anything marked **(reference)** is a worked example: an implementation that behaves the same way is fine. If this spec contradicts itself, stop and ask in the PR. Do not guess.
 
@@ -50,7 +50,7 @@ v2 turns it into an always-on assistant that can do what a capable desktop AI as
 - **G7 Security baseline.** Secrets come only from env or Docker secrets. Every route is authenticated, including websockets. Also required: CSRF protection, rate-limited login, secure cookies, CSP, prompt-injection defence and Docker log limits.
 - **G8 One-command deploy.** `docker-compose.yml`, `.env.example`, a Makefile and deploy scripts, plus a step-by-step runbook for the Contabo host. HTTPS works before a domain exists, through `37-60-226-214.sslip.io`.
 - **G9 Tests and CI.** Unit tests, plus integration tests that never touch real external sites, plus GitHub Actions running tests and lint. All existing v1 tests keep passing, apart from one explicitly authorised change (§4.4).
-- **G10 Own model, own server.** The agent's brain is a self-hosted open-weight model that Roland holds a copy of. It is served by llama.cpp (default) or Ollama in a `model` container on an internal network with no egress and no published ports. No prompt, chat, file or screenshot ever goes to a third-party model API. A swappable model-provider interface, grammar-constrained JSON tool calls with robust parsing and retries, and a context budget make tool calling work on a ~3B CPU model (§6.9).
+- **G10 Own model, own server.** The agent's brain is a self-hosted open-weight model that Roland holds a copy of. It is served by llama.cpp (default) or Ollama in a `model` container on an internal network with no egress and no published ports. No prompt, chat, file or screenshot ever goes to a third-party model API. A swappable model-provider interface, grammar-constrained JSON tool calls with robust parsing and retries, and a context budget make tool calling work on a ~4B CPU model (§6.9).
 - **G11 Training pipeline.** Opt-in, scrubbed, exportable training data from Roland's own chats and approvals. LoRA/QLoRA fine-tuning scripts that run on a rented GPU (never on the VPS). Merge, GGUF conversion and quantisation. An evaluation gate that must pass before a model version is promoted. Versioning with rollback, and a model card. Persona and system-prompt editing in the UI (§6.10–§6.11, M8). This is continued training of an owned open-weight base model. **Training from scratch is out of scope.**
 
 Success means all milestone acceptance criteria (§12) pass on CI and on the Contabo host, and Code Shipper approves every PR.
@@ -186,7 +186,7 @@ flowchart LR
       BR[browser<br/>browserd 10.77.4.40:7100<br/>Playwright + Chromium on Xvfb :99<br/>x11vnc 10.77.5.40:5900]
     end
     subgraph net_model["model 10.77.6.0/24 (internal, no egress)"]
-      LLM[model<br/>llama.cpp server 10.77.6.60:8080<br/>Qwen2.5-3B-Instruct Q4_K_M GGUF<br/>CPU only, 3 GB cap]
+      LLM[model<br/>llama.cpp server 10.77.6.60:8080<br/>Qwen3-4B-Instruct-2507 Q4_K_M GGUF<br/>CPU only, 3.5 GB cap]
     end
     subgraph net_tctl["trainer_ctl 10.77.7.0/24 (internal; profile training, off by default)"]
       TR[trainer<br/>trainerd 10.77.7.70:7200<br/>SSH/rsync launcher, import, promote/rollback]
@@ -276,7 +276,7 @@ Rules:
 | workspace | **bind**: `${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}` (a 10 GB ext4 loop filesystem, `nodev,nosuid`) | core `/workspace` (rw), sandbox `/workspace` (rw), browser `/files` = `${WORKSPACE_HOST_DIR}/browser` (rw) | | The filesystem size is the hard quota. It holds a `.trash/` subfolder |
 | `browser-profile` | named | browser | `/profile` | Chromium user data dir (cookies and logins). **Never mounted anywhere else** |
 | `caddy-data`, `caddy-config` | named | caddy | `/data`, `/config` | Certificates (persisted, to avoid ACME rate limits) |
-| `models` | named | model `/models` (**ro**), core `/models` (**ro**, reads `registry.json`, manifests, model cards and eval reports only), trainer `/models` (**rw**) | `/models` | Model versions (GGUF, manifest, model card, eval report, licence), `registry.json`, and the `current` symlink (§6.11.6). Written only by trainerd or the one-off `make model-*` containers (§14.7a). About 2 GB per 3B version; keep ≤ 3 versions plus base |
+| `models` | named | model `/models` (**ro**), core `/models` (**ro**, reads `registry.json`, manifests, model cards and eval reports only), trainer `/models` (**rw**) | `/models` | Model versions (GGUF, manifest, model card, eval report, licence), `registry.json`, and the `current` symlink (§6.11.6). Written only by trainerd or the one-off `make model-*` containers (§14.7a). About 2.5 GB per 4B version; keep ≤ 3 versions plus base |
 | `training-data` | named | core `/training-data` (rw), trainer `/training-data` (ro) | | Exported, scrubbed datasets (§6.11.3), mode 0600. Pruned to the last 5 datasets |
 | `training-runs` | named | trainer `/training-runs` (rw), core `/training-runs` (ro) | | Run logs (scrubbed), imported `candidate.tar` staging, eval reports. Pruned after 30 days |
 
@@ -288,30 +288,43 @@ Every service sets `memswap_limit` equal to `mem_limit`, so containers never swa
 
 | Service | mem_limit (MiB) | cpus | pids_limit | other |
 |---|---|---|---|---|
-| model (llama.cpp, 3B Q4_K_M) | 3072 | 3.00 | 128 | `--threads 3`, `--ctx-size 8192`, `--parallel 1`; `oom_score_adj: 300` |
-| browser | 1536 (includes shm) | 2.00 | 512 | `shm_size: 384m`, tmpfs `/tmp` 256m, `BROWSER_MAX_TABS=3`, `oom_score_adj: 500` |
+| model (llama.cpp, 4B Q4_K_M) | 3840 | 3.00 | 128 | `--threads 3`, `--ctx-size 6144`, f16 KV cache, flash attention off, `--ubatch-size 256`, weights loaded without mmap, `--parallel 1`; `oom_score_adj: 300` |
+| browser | 1280 (includes shm) | 2.00 | 512 | `shm_size: 320m`, tmpfs `/tmp` 256m, `BROWSER_MAX_TABS=2`, `oom_score_adj: 500` |
 | sandbox | 1024 | 1.50 | 256 | tmpfs `/tmp` 384m, `oom_score_adj: 800`, nofile 1024 |
 | core | 640 | 1.00 | 256 | tmpfs `/tmp` 96m |
 | caddy | 96 | 0.50 | 64 | |
 | novnc | 64 | 0.25 | 32 | |
-| **Total (default)** | **6432 MiB ≈ 6.28 GiB** | | | Leaves ≈ 1,555 MiB for the kernel, dockerd, containerd, sshd and page cache |
+| **Total (default)** | **6944 MiB ≈ 6.78 GiB** | | | Leaves ≈ 1,043 MiB for the kernel, dockerd, containerd, sshd and page cache |
 
-How the numbers add up: 3072 + 1536 + 1024 + 640 + 96 + 64 = 6432 MiB, and 7,987 − 6,432 = 1,555 MiB of headroom. With the optional `trainer` (profile `training`: 128 MiB, 0.5 cpus, pids 64) the total is 6560 MiB, leaving ≈ 1,427 MiB. Fine-tuning itself never runs here (§6.11).
+How the numbers add up: 3840 + 1280 + 1024 + 640 + 96 + 64 = 6944 MiB, and 7,987 − 6,944 = 1,043 MiB of headroom. With the optional `trainer` (profile `training`: 128 MiB, 0.5 cpus, pids 64) the total is 7072 MiB, leaving ≈ 915 MiB. That is about 500 MiB less headroom than the earlier 3B default had, and the browser gives up 256 MiB and one tab so the 4B model fits. If M2 or M6 shows the headroom is too tight, lower `MODEL_CTX` (below) before touching anything else. Fine-tuning itself never runs here (§6.11).
 
-Model memory estimate (Qwen2.5-3B-Instruct Q4_K_M):
+Model memory (Qwen3-4B-Instruct-2507 Q4_K_M; architecture from its `config.json`: 36 layers, 8 KV heads, head size 128). **Measured** with llama.cpp commit `0c1e570` built for AVX2, on a 4-vCPU cloud VM (not the Contabo host), 3 threads; buffer sizes from llama.cpp's own log:
 
 | Part | Size |
 |---|---|
-| Weights | 2,104,932,768 B ≈ 2,007 MiB (mmapped; page-cache pages are charged to the container's cgroup) |
-| KV cache at 8,192 tokens, f16 | 36 layers × 2 (K+V) × 2 KV heads × 128 dims × 2 B = 36,864 B/token → 288 MiB |
-| Compute buffers (batch 512) and runtime | ≈ 300–400 MiB |
-| **Total** | **≈ 2.6–2.7 GiB, under the 3 GiB cap** |
+| Weights, read into memory (`--load-mode none`) | 692.6 MiB as stored + 1,683.3 MiB repacked by llama.cpp's AVX2 kernels = 2,376 MiB |
+| KV cache at 6,144 tokens, f16 | 36 layers × 2 (K+V) × 8 KV heads × 128 dims × 2 B = 147,456 B/token → 864 MiB |
+| Compute buffer (batch 512, micro-batch 256, no flash attention) | 216 MiB |
+| Runtime overhead | ≈ 45 MiB |
+| **Total** | **≈ 3,500 MiB (3.42 GiB) allocated, under the 3,840 MiB limit** |
 
-`--ctx-size` MUST NOT be raised above 8192 on this host without re-measuring. M2 acceptance records the real `docker stats` peak.
+Why these settings (each one measured; peak = allocated buffers, not just the pages a short test touches):
+
+| Setting | Allocated | Prompt speed at 0 / 4,096 tokens of context | Generation at 4,096 | Verdict |
+|---|---|---|---|---|
+| mmap (llama.cpp default) + repack | ≈ 4,780 MiB resident | 18.9 / – tokens/s | – | **No.** The mapped file *and* the repacked copy both stay resident |
+| `q8_0` KV + flash attention, 8,192 | ≈ 3,120 MiB | 18.9 / **3.6** | 2.4 | **No.** Fits, but deep-context prompts are 3.5× slower on CPU |
+| f16 KV + flash attention, 8,192 | ≈ 3,660 MiB | 21.6 / 12.5 | **1.9** | **No.** Flash attention halves generation at depth on CPU |
+| f16 KV, no flash attention, 8,192 | ≈ 3,850 MiB (micro-batch 256) | 19.7 / 12.1 | 3.6 | Too big for this host with the other services |
+| **f16 KV, no flash attention, 6,144, micro-batch 256** | **≈ 3,500 MiB** | **19.8 / ~12** | **~3.6** | **Chosen** |
+
+Repacking stays on (it's what makes prompts ~11% faster than `--no-repack`); loading without mmap is what stops the double count. Older llama.cpp builds spell `--load-mode none` as `--no-mmap`.
+
+`--ctx-size` MUST NOT be raised above 6144 on this host, and flash attention and a quantised KV cache MUST NOT be turned on here, without re-measuring speed and memory. M2 acceptance records the real `docker stats` peak (A2.8). If the peak is above 3,600 MiB, set `MODEL_CTX=5120` (KV 720 MiB) rather than raising `MODEL_MEM_LIMIT`.
 
 Rules:
 - CPU limits are caps, not reservations. The model gets 3 of the 4 vCPUs while it generates, and the rest share. Builds (`docker compose build`) temporarily need about 1–1.5 GB. `make deploy` builds before restarting services, and the runbook warns not to build the browser image while a long model task is running.
-- `compose` reads the model limit from `MODEL_MEM_LIMIT` (default `3g`) and `MODEL_CPUS` (default `3.0`), so the 7B option (§6.9.6) is a config change on a bigger server.
+- `compose` reads the model limit from `MODEL_MEM_LIMIT` (default `3840m`) and `MODEL_CPUS` (default `3.0`), so the 7B option (§6.9.6) is a config change on a bigger server.
 - The v1 `ollama` service (8g) is removed.
 
 ### 5.6 Ports summary
@@ -664,7 +677,7 @@ Agent tools can read `.trash` but can't write to it.
 - `playwright.chromium.launch_persistent_context(user_data_dir="/profile", headless=False, viewport=…, locale="en-GB", timezone_id="Europe/Helsinki", accept_downloads=True, downloads_path="/files/downloads", chromium_sandbox=BROWSER_CHROMIUM_SANDBOX, args=[...])`.
 - Args: `--disable-background-networking`, `--disable-component-update`, `--disable-sync`, `--disable-domain-reliability`, `--disable-breakpad`, `--no-first-run`, `--no-default-browser-check`, `--password-store=basic`, `--disable-features=AutofillServerCommunication,OptimizationHints,MediaRouter`.
 - `BROWSER_CHROMIUM_SANDBOX` defaults to `false`. Chromium's own sandbox needs user namespaces, which Docker's default seccomp and Ubuntu 24.04's AppArmor userns restriction usually block. The hardened container is then the security boundary (Q4). M6 includes a task to try `true` with Playwright's published seccomp profile (`docker/browser/seccomp-chromium.json`, pinned copy) and report the result.
-- At most `BROWSER_MAX_TABS` (3 by default on this server) pages. Opening another one returns an error telling the agent to close a tab.
+- At most `BROWSER_MAX_TABS` (2 by default on this server) pages. Opening another one returns an error telling the agent to close a tab.
 - **Dialogs** (`alert`, `confirm`, `prompt`, `beforeunload`) are auto-dismissed and recorded in the next action's result. The agent can never accept a dialog.
 - **Navigation guard.** `context.route("**/*")` aborts navigations to schemes other than http/https/about/blob/data(images). It aborts private destinations (literal private IPs, `localhost`, `*.internal`) unless the host is in `BROWSER_ALLOW_PRIVATE_HOSTS` (tests only). The firewall (§5.3) is the authoritative layer.
 - **POST-navigation guard.** While the agent runs an action classified SAFE (`mode="safe"`), a request with `resource_type == "document"` and a method other than GET or HEAD is aborted, and the action returns `blocked_submission: {method, url}`. The core turns that into "This action tried to submit a form; ask for approval" and the agent may retry as a gated action. For `mode="approved"` actions the guard is off for that action only, until the network has been idle for 2 s or 10 s have passed.
@@ -805,26 +818,26 @@ Vanilla JS only. All dynamic text goes in with `textContent` (never `innerHTML`)
 - **Image:** `ghcr.io/ggml-org/llama.cpp:server-b<build>@sha256:<pin>` (CPU). The build number is pinned and recorded in `docker/model/VERSION`. The same llama.cpp commit is used by the training pipeline's GGUF conversion and quantisation (§6.11.4), so the formats always match.
 - **Entrypoint:** `docker/model/run.sh` (bash, mounted read-only), a small supervisor:
   - It resolves `/models/current/model.gguf` and checks it against `/models/current/model.sha256`. On a mismatch it refuses to start and logs why.
-  - It starts `llama-server --model … --host 10.77.6.60 --port 8080 --api-key-file /run/secrets/model_server_token --ctx-size ${MODEL_CTX:-8192} --parallel 1 --threads ${MODEL_THREADS:-3} --threads-batch ${MODEL_THREADS:-3} --batch-size 512 --jinja --no-webui --cache-reuse 256`. No `--mlock`, no `--host 0.0.0.0`, no `--metrics`, no `--slots` endpoint, no `--props` writes. Check each flag against the pinned build's `--help`. If a flag differs, use the equivalent and note it in the PR.
+  - It starts `llama-server --model … --host 10.77.6.60 --port 8080 --api-key-file /run/secrets/model_server_token --ctx-size ${MODEL_CTX:-6144} --parallel 1 --threads ${MODEL_THREADS:-3} --threads-batch ${MODEL_THREADS:-3} --batch-size 512 --ubatch-size 256 --flash-attn off --load-mode none --jinja --no-webui --cache-reuse 256`. No `--mlock`, no `--host 0.0.0.0`, no `--metrics`, no `--slots` endpoint, no `--props` writes. Check each flag against the pinned build's `--help`. If a flag differs, use the equivalent and note it in the PR.
   - Every 15 s it checks whether the `current` symlink target changed (promotion or rollback). If so, it sends SIGTERM to llama-server, waits for exit (≤ 30 s, then SIGKILL) and restarts it on the new target. No Docker socket is needed for model swaps.
-- **Compose:** `user: "1000:1000"`, `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges`, `models:/models:ro`, tmpfs `/tmp:size=64m`, `secrets: [model_server_token]`, network `model` (10.77.6.60) only, `mem_limit: ${MODEL_MEM_LIMIT:-3g}`, `memswap_limit` the same, `cpus: ${MODEL_CPUS:-3.0}`, `pids_limit: 128`, `oom_score_adj: 300`, `stop_grace_period: 30s`, and `healthcheck: curl -fsS http://10.77.6.60:8080/health` (the image ships `curl`; if it doesn't, use bash `/dev/tcp` plus an HTTP GET in `run.sh healthcheck`), with `start_period: 120s` (loading 2 GB from disk).
+- **Compose:** `user: "1000:1000"`, `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges`, `models:/models:ro`, tmpfs `/tmp:size=64m`, `secrets: [model_server_token]`, network `model` (10.77.6.60) only, `mem_limit: ${MODEL_MEM_LIMIT:-3840m}`, `memswap_limit` the same, `cpus: ${MODEL_CPUS:-3.0}`, `pids_limit: 128`, `oom_score_adj: 300`, `stop_grace_period: 30s`, and `healthcheck: curl -fsS http://10.77.6.60:8080/health` (the image ships `curl`; if it doesn't, use bash `/dev/tcp` plus an HTTP GET in `run.sh healthcheck`), with `start_period: 120s` (loading 2.4 GB from disk).
 - **Ollama alternative:** `docker-compose.ollama.yml` replaces the service with `ollama/ollama:<pin>@sha256:<pin>`, `OLLAMA_HOST=10.77.6.60:11434`, `OLLAMA_MODELS=/models/ollama` (that subtree is read-write), `OLLAMA_NOPRUNE=1` and the same limits and network. The GGUF is imported with a Modelfile (`FROM /models/current/model.gguf`). Ollama has no API-key option, so the internal network and the core peer rules are the protection there. Documented, not default.
 
 #### 6.9.5 Expected speed on this server (be honest in README and UI)
 
-Contabo vCPUs are shared, with no GPU. Measured numbers go into `docs/MODEL.md` in M2 (`make model-bench`). The planning estimates for Qwen2.5-3B-Instruct Q4_K_M with 3 threads are:
+Contabo vCPUs are shared, with no GPU. Measured numbers go into `docs/MODEL.md` in M2 (`make model-bench`). The numbers below were **measured** for Qwen3-4B-Instruct-2507 Q4_K_M with the §5.5 settings and 3 threads, but on a 4-vCPU cloud VM rather than the Contabo host, so M2 replaces them. Speed falls as the context fills:
 
 | What | Estimate |
 |---|---|
-| Prompt processing | ~20–60 tokens/s |
-| Generation | ~5–10 tokens/s |
-| First reply in a new chat (cold prompt cache, ~1,500-token system prompt + tools) | ~30–90 s |
-| Follow-up reply with no tools (warm cache) | ~5–25 s |
-| Each tool step (another model call plus the tool output to read) | +10–40 s |
-| A 5-step browsing task | ~2–6 minutes |
+| Prompt processing | ~20 tokens/s with an empty context, ~12 tokens/s at 4,096 tokens |
+| Generation | ~5–6 tokens/s with an empty context, ~3.5 tokens/s at 4,096 tokens |
+| First reply in a new chat (cold prompt cache, ~1,500-token system prompt + tools) | ~80–120 s |
+| Follow-up reply with no tools (warm cache) | ~10–40 s |
+| Each tool step (another model call plus the tool output to read) | +40–120 s |
+| A 5-step browsing task | ~5–12 minutes |
 | Concurrency | One model call at a time. A second chat or a job waits its turn |
 
-Quality: a 3B model makes more planning and tool-choice mistakes than large hosted models. Expect simple, well-scoped tasks to work and long multi-step tasks to need guidance. The gate keeps mistakes from becoming harmful actions. The README says this plainly. The UI shows a "thinking… (local model, this can take a minute)" indicator with elapsed seconds.
+Quality: a 4B model makes more planning and tool-choice mistakes than large hosted models. Expect simple, well-scoped tasks to work and long multi-step tasks to need guidance. The gate keeps mistakes from becoming harmful actions. The README says this plainly. The UI shows a "thinking… (local model, this can take a minute)" indicator with elapsed seconds.
 
 Mitigations that MUST be implemented:
 - compact tool descriptions and the 1,500-token system prompt budget;
@@ -838,11 +851,13 @@ Mitigations that MUST be implemented:
 
 | | Default (this server) | Option (bigger server) |
 |---|---|---|
-| Model | **Qwen2.5-3B-Instruct**, GGUF `qwen2.5-3b-instruct-q4_k_m.gguf` from `Qwen/Qwen2.5-3B-Instruct-GGUF`, revision `7dabda4d13d513e3e842b20f0d435c732f172cbe`, 2,104,932,768 bytes, SHA-256 `626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d` | **Qwen2.5-7B-Instruct**, GGUF Q4_K_M from `Qwen/Qwen2.5-7B-Instruct-GGUF`, revision `bb5d59e06d9551d752d08b292a50eb208b07ab1f` (two split files; merge with `llama-gguf-split --merge`, record the SHA-256 of the merged file), ≈ 4.7 GB |
-| Licence | **Qwen RESEARCH LICENSE AGREEMENT** (*not* Apache-2.0: "non-commercial", meaning research or evaluation purposes; it requires a NOTICE file when redistributing). Roland must confirm his personal use fits (Q17). Apache-2.0 or MIT alternatives that fit the same budget are listed in Q17 | **Apache-2.0** |
-| Memory | ≈ 2.7 GiB → `MODEL_MEM_LIMIT=3g` | ≈ 4.7 GB weights + 448 MiB KV at 8k (28 layers × 2 × 4 KV heads × 128 × 2 B = 57,344 B/token) + buffers ≈ 5.6 GiB → `MODEL_MEM_LIMIT=6g` |
+| Model | **Qwen3-4B-Instruct-2507** (Qwen's non-thinking instruct release of July 2025), GGUF `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` from `unsloth/Qwen3-4B-Instruct-2507-GGUF`, revision `a06e946bb6b655725eafa393f4a9745d460374c9`, 2,497,281,120 bytes, SHA-256 `3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597`. Qwen publishes no GGUF of this release; this is Unsloth's conversion of the official weights `Qwen/Qwen3-4B-Instruct-2507` (revision `cdbee75f17c01a7cc42f958dc650907174af0554`). A GGUF is data loaded by the pinned llama.cpp in a container with no egress (T27). Roland can avoid trusting the conversion by building the GGUF himself from the official weights with the pinned llama.cpp (`convert_hf_to_gguf.py` then `llama-quantize Q4_K_M`, as in §6.11.4; needs ≥ 16 GB RAM, so not on the VPS) and installing it with `make model-install … ALLOW_UNLISTED=1` | **Qwen2.5-7B-Instruct**, GGUF Q4_K_M from `Qwen/Qwen2.5-7B-Instruct-GGUF`, revision `bb5d59e06d9551d752d08b292a50eb208b07ab1f` (two split files; merge with `llama-gguf-split --merge`, record the SHA-256 of the merged file), ≈ 4.7 GB |
+| Licence | **Apache-2.0** (decided in Q17). Roland may use, change, sell and share fine-tuned versions. When sharing one, include the licence text and state that it was changed | **Apache-2.0** |
+| Memory | ≈ 3,500 MiB measured at 6,144 tokens of context (§5.5) → `MODEL_MEM_LIMIT=3840m` | ≈ 4.7 GB weights + 448 MiB KV at 8k (28 layers × 2 × 4 KV heads × 128 × 2 B = 57,344 B/token) + buffers ≈ 5.6 GiB → `MODEL_MEM_LIMIT=6g` |
 | Server | This VPS (4 vCPU, 7.8 GB) | ≥ 16 GB RAM and ≥ 6 vCPU, e.g. the next Contabo tier. With 6g for the model, the other services keep their §5.5 limits. Expect ~3–6 tokens/s generation on 6 vCPU |
 | Switch | – | `make model-fetch MODEL=qwen2.5-7b-q4km`, set `MODEL_MEM_LIMIT=6g` and `MODEL_CPUS=5.0`, then `make deploy` and `make model-promote ID=…`. `test_compose_policy` allows a higher model limit only when `MODEL_MEM_LIMIT` is set explicitly |
+
+Not chosen: the official `Qwen/Qwen3-4B-GGUF` (`Qwen3-4B-Q4_K_M.gguf`, revision `bc640142c66e1fdd12af0bd68f40445458f3869b`, SHA-256 `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5`, Apache-2.0) is the earlier hybrid model, whose thinking mode writes long reasoning before each answer. At 4–8 tokens/s that adds minutes per reply, and it would have to be switched off in every request. The 2507 instruct release has no thinking mode. Both are listed in `models.lock`, so the eval suite (§6.11.5) can compare them.
 
 `deploy/models.lock` (committed) lists every fetchable model: id, repo, revision, file(s), size, SHA-256, licence id, licence URL, capabilities (`text`; `vision` only for multimodal models). `make model-fetch` refuses anything not in that file.
 
@@ -921,7 +936,7 @@ Scrubbing runs **at export time** and again **at capture time**, on every string
                {"role":"tool","content":"<tool_output tool=\"browser_open\">…</tool_output>"},
                {"role":"assistant","content":"{\"action\":\"reply\",\"text\":\"…\"}"}],
    "tools":[{"name":"browser_open","parameters":{…}}],
-   "meta":{"model_version":"qwen2.5-3b-base","prompt_version":7,"created":"2026-10-05T10:12:00+03:00","tainted":false}}
+   "meta":{"model_version":"qwen3-4b-base","prompt_version":7,"created":"2026-10-05T10:12:00+03:00","tainted":false}}
   ```
   Only the **last** assistant message is the training target. Earlier ones are context. Assistant targets are always action JSON in exactly the §6.9.3 format, so fine-tuning reinforces the protocol.
 - **`dpo.jsonl`:** `{"id","schema":1,"source":"correction|gate_reject_with_alternative","prompt":[messages up to the decision point],"chosen":"<action JSON>","rejected":"<action JSON>","tools":[…],"meta":{…}}`.
@@ -944,7 +959,7 @@ training/
   run_all.sh                prepare → sft → (dpo) → merge → convert → eval (§6.11.5) → package candidate.tar
   check_gpu.py              refuses to run without a CUDA GPU with ≥ 16 GB memory (exit code 3)
 ```
-- **Base weights.** The safetensors of the owned base (`Qwen/Qwen2.5-3B-Instruct` at revision `aa8e72537993ba99e69dfaafa59ed015b17504d1`, or whatever is in `config/default.yaml`) are downloaded *on the GPU machine* from the pinned revision, with SHA-256 checks against `training/base_models.lock`. Roland may instead copy them there from his own copy.
+- **Base weights.** The safetensors of the owned base (`Qwen/Qwen3-4B-Instruct-2507` at revision `cdbee75f17c01a7cc42f958dc650907174af0554`, or whatever is in `config/default.yaml`) are downloaded *on the GPU machine* from the pinned revision, with SHA-256 checks against `training/base_models.lock`. Roland may instead copy them there from his own copy.
 - **Library choice.** HF PEFT + TRL is the default because it pins cleanly. An Unsloth variant (`train_sft_unsloth.py`) MAY be added later, with its own lock and a stated reason. It is not required.
 - **Default hyperparameters** (`config/default.yaml`):
 
@@ -957,7 +972,7 @@ training/
   | Other | max_seq_len 4096, effective batch 16 (gradient accumulation), seed 42 | beta 0.1 |
 
   Training stops early if validation loss rises for 2 evaluations.
-- **Hardware.** A 3B QLoRA run fits one 16–24 GB GPU (for example an L4, A10 or RTX 4090). It takes about 30–90 minutes for a few thousand examples. 7B needs ≥ 24 GB.
+- **Hardware.** A 4B QLoRA run fits one 16–24 GB GPU (for example an L4, A10 or RTX 4090). It takes about 40–120 minutes for a few thousand examples. 7B needs ≥ 24 GB.
 - **Output.** `candidate.tar` contains `model.gguf` (Q4_K_M), `model.sha256`, `adapter/` (LoRA weights, for audit), `manifest.json` (§6.11.6), `MODEL_CARD.md`, `eval-report.json`, `train-metrics.json`, `requirements-train.lock` (copy) and the base model's `LICENSE`/`NOTICE`.
 - **Data hygiene on the GPU machine.** `run_all.sh` deletes the dataset, the merged fp16 weights and caches when it finishes (`trap`). The README tells Roland to destroy the instance after copying `candidate.tar` back. EU-region providers are recommended.
 
@@ -999,7 +1014,7 @@ training/
     versions/<id>/
       model.gguf  model.sha256  manifest.json  MODEL_CARD.md  eval-report.json  LICENSE  NOTICE  adapter/ (fine-tunes only)
   ```
-- **Version id:** `<base-short>-<quant>-<YYYYMMDD>-<hash8>`, e.g. `qwen2.5-3b-q4km-20261012-a1b2c3d4`. The downloaded base is `qwen2.5-3b-q4km-base`.
+- **Version id:** `<base-short>-<quant>-<YYYYMMDD>-<hash8>`, e.g. `qwen3-4b-q4km-20261012-a1b2c3d4`. The downloaded base is `qwen3-4b-q4km-base`.
 - **`manifest.json`:** `id`, `base_model` (repo, revision, licence id and URL), `parent_version`, `quant`, `sha256`, `size`, `ctx`, `capabilities`, `dataset_id` and its manifest SHA-256, `prompt_version_ids`, `train_config` SHA-256, `llama_cpp_build`, `requirements_train_lock` SHA-256, `eval_summary`, `created`.
 - **`MODEL_CARD.md`** (template `training/MODEL_CARD.template.md`), filled in automatically, with:
   - name and version; base model and its licence (including the Qwen NOTICE text where required); intended use (Roland's personal agent, single user) and out-of-scope uses;
@@ -1067,7 +1082,7 @@ training/
     | GET | `/v1/registry` | |
 
     Promote and rollback are accepted **only** with a one-time `request_token` that the core mints when Roland clicks (HMAC with `trainer_api_token` over version id + timestamp, valid 2 minutes), so a core bug in a scheduled path can't promote.
-  - **Memory with the trainer on:** 6432 + 128 = 6560 MiB, leaving ≈ 1,427 MiB of headroom.
+  - **Memory with the trainer on:** 6944 + 128 = 7072 MiB, leaving ≈ 915 MiB of headroom.
 - **Without the trainer profile,** capture, review, export, manual training and `make model-import`/`model-promote`/`model-rollback` on the host still work. The host commands use a one-off container with `models` rw, which needs `deploy` (passwordless sudo is available).
 
 ---
@@ -1715,7 +1730,7 @@ No component makes update checks, analytics or telemetry calls.
 | `MODEL_SERVER_TOKEN` / `_FILE` | – | compose: `_FILE=/run/secrets/model_server_token` | Shared by core and llama.cpp `--api-key-file`. Required in production for `llamacpp` |
 | `MODEL_API_KEY` | – | – | **Removed.** Logged as ignored if set |
 | `MODEL_TOOL_MODE` | `grammar` | .env | `grammar` or `native` (§6.9.3) |
-| `MODEL_CTX` | `8192` | .env (also read by the model service) | Context window; don't raise on this host |
+| `MODEL_CTX` | `6144` | .env (also read by the model service) | Context window; don't raise on this host (§5.5) |
 | `MODEL_MAX_NEW_TOKENS` | `768` | .env | Per model call |
 | `MODEL_TEMPERATURE` | `0.2` | .env | |
 | `MODEL_TIMEOUT_S` | `600` | .env | Per model call, including queueing |
@@ -1725,7 +1740,7 @@ No component makes update checks, analytics or telemetry calls.
 | `MODEL_TOOL_OUTPUT_CHARS` | `3000` | .env | Per tool output in context |
 | `MODEL_SYSTEM_PROMPT_BUDGET` | `1500` | .env | Tokens; UI warning threshold (§6.10) |
 | `MODEL_THREADS` | `3` | .env (model service) | llama.cpp threads |
-| `MODEL_MEM_LIMIT` / `MODEL_CPUS` | `3g` / `3.0` | .env (compose interpolation) | Raise only for 7B on a bigger server (§6.9.6) |
+| `MODEL_MEM_LIMIT` / `MODEL_CPUS` | `3840m` / `3.0` | .env (compose interpolation) | Raise only for 7B on a bigger server (§6.9.6) |
 | `MODEL_VISION` | `false` | .env | Send screenshots as images **only** if the active model's manifest lists `vision` (§6.5). The model is always local |
 | `MODEL_KEEP_VERSIONS` | `3` | .env | Besides base, current and previous |
 | `MODEL_IMPORT_MAX_MB` | `6144` | .env (also read by Caddy for `/api/models/import`) | |
@@ -1767,7 +1782,7 @@ No component makes update checks, analytics or telemetry calls.
 | `BROWSER_ENABLED` | `false` (code) | compose: `true` | |
 | `BROWSER_URL` | `http://10.77.4.40:7100` | compose | |
 | `BROWSER_API_TOKEN` / `_FILE` | – | compose: `_FILE` | Secret |
-| `BROWSER_MAX_TABS` | `3` | .env | Keep at 3 on this host (§5.5) |
+| `BROWSER_MAX_TABS` | `2` | .env | Keep at 2 on this host (§5.5) |
 | `BROWSER_ACTION_TIMEOUT_S` / `BROWSER_NAV_TIMEOUT_S` | `30` / `45` | .env | |
 | `BROWSER_VIEWPORT` | `1280x800` | .env | |
 | `BROWSER_CHROMIUM_SANDBOX` | `false` | .env | Q4 |
@@ -1905,7 +1920,7 @@ services:
     user: "1000:1000"
     entrypoint: ["/bin/bash", "/opt/run/run.sh"]
     environment:
-      MODEL_CTX: ${MODEL_CTX:-8192}
+      MODEL_CTX: ${MODEL_CTX:-6144}
       MODEL_THREADS: ${MODEL_THREADS:-3}
     secrets: [model_server_token]
     volumes:
@@ -1917,8 +1932,8 @@ services:
     healthcheck: { test: ["CMD", "/bin/bash", "/opt/run/run.sh", "healthcheck"], interval: 30s, timeout: 10s, retries: 3, start_period: 120s }
     stop_grace_period: 30s
     oom_score_adj: 300
-    mem_limit: ${MODEL_MEM_LIMIT:-3g}
-    memswap_limit: ${MODEL_MEM_LIMIT:-3g}
+    mem_limit: ${MODEL_MEM_LIMIT:-3840m}
+    memswap_limit: ${MODEL_MEM_LIMIT:-3840m}
     cpus: ${MODEL_CPUS:-3.0}
     pids_limit: 128
 
@@ -1991,7 +2006,7 @@ services:
     build: { context: ., dockerfile: docker/browser/Dockerfile }
     image: roland-agent/browser:local
     user: "1000:1000"
-    shm_size: 384m
+    shm_size: 320m
     environment:
       BROWSERD_HOST: 10.77.4.40
       BROWSERD_PORT: "7100"
@@ -2001,7 +2016,7 @@ services:
       HOME: /tmp/home
       TZ: Europe/Helsinki
       BROWSER_VIEWPORT: ${BROWSER_VIEWPORT:-1280x800}
-      BROWSER_MAX_TABS: ${BROWSER_MAX_TABS:-3}
+      BROWSER_MAX_TABS: ${BROWSER_MAX_TABS:-2}
       BROWSER_CHROMIUM_SANDBOX: ${BROWSER_CHROMIUM_SANDBOX:-false}
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
       VNC_PASSWORD_FILE: /run/secrets/vnc_password
@@ -2017,8 +2032,8 @@ services:
       browser_egress: { ipv4_address: 10.77.12.40, gw_priority: 100 }
     healthcheck: { test: ["CMD", "python", "-m", "browserd", "healthcheck"], interval: 30s, timeout: 10s, retries: 3, start_period: 60s }
     oom_score_adj: 500
-    mem_limit: 1536m
-    memswap_limit: 1536m
+    mem_limit: 1280m
+    memswap_limit: 1280m
     cpus: 2.0
     pids_limit: 512
 
@@ -2081,7 +2096,7 @@ Notes:
 
 ### 11.4 `.env.example` (v2) must contain
 
-Every `.env`-settable variable in §11.1, with a one-line comment each, grouped as in v1. These defaults: `ALLOW_SHELL=true`, `SHELL_APPROVAL=tainted`, `AGENT_DOMAIN=`, `AGENT_FALLBACK_HOST=37-60-226-214.sslip.io`, `CADDY_TLS=acme`, `WORKSPACE_HOST_DIR=/srv/roland-agent/workspace`, `MODEL_PROVIDER=llamacpp`, `MODEL_BASE_URL=http://10.77.6.60:8080`, `MODEL_MEM_LIMIT=3g`, `MODEL_CPUS=3.0`, `MODEL_CTX=8192`, `MAX_TOOL_STEPS=6`, `BROWSER_MAX_TABS=3`, `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINING_SCHEDULE=0 3 * * 0`, `TRAINING_LAUNCH_MODE=manual`, `COMPOSE_PROFILES=` (empty; `training` turns on the trainer). It must **not** contain secrets: those live in `secrets/`. It must not contain any hosted model URL, even in comments. Add a comment that `AGENT_PASSWORD_HASH` and `MODEL_SERVER_TOKEN` in `.env` still work for local development without Docker (with llama.cpp running on `127.0.0.1:8080`).
+Every `.env`-settable variable in §11.1, with a one-line comment each, grouped as in v1. These defaults: `ALLOW_SHELL=true`, `SHELL_APPROVAL=tainted`, `AGENT_DOMAIN=`, `AGENT_FALLBACK_HOST=37-60-226-214.sslip.io`, `CADDY_TLS=acme`, `WORKSPACE_HOST_DIR=/srv/roland-agent/workspace`, `MODEL_PROVIDER=llamacpp`, `MODEL_BASE_URL=http://10.77.6.60:8080`, `MODEL_MEM_LIMIT=3840m`, `MODEL_CPUS=3.0`, `MODEL_CTX=6144`, `MAX_TOOL_STEPS=6`, `BROWSER_MAX_TABS=2`, `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINING_SCHEDULE=0 3 * * 0`, `TRAINING_LAUNCH_MODE=manual`, `COMPOSE_PROFILES=` (empty; `training` turns on the trainer). It must **not** contain secrets: those live in `secrets/`. It must not contain any hosted model URL, even in comments. Add a comment that `AGENT_PASSWORD_HASH` and `MODEL_SERVER_TOKEN` in `.env` still work for local development without Docker (with llama.cpp running on `127.0.0.1:8080`).
 
 ---
 
@@ -2187,7 +2202,7 @@ Acceptance:
   - no service has `privileged`, `network_mode`, `pid`, `ipc`, `cap_add`, `/var/run/docker.sock` or `unconfined`;
   - the internal networks are `internal: true`;
   - only core has `env_file`;
-  - the sum of `mem_limit` over the default profile, with `MODEL_MEM_LIMIT` unset, is ≤ 6432 MiB (and ≤ 6560 MiB with profile `training`); the `model` service is attached only to `model`, and `model` is `internal: true`.
+  - the sum of `mem_limit` over the default profile, with `MODEL_MEM_LIMIT` unset, is ≤ 6944 MiB (and ≤ 7072 MiB with profile `training`); the `model` service is attached only to `model`, and `model` is `internal: true`.
 - **A2.2** `tests/test_web_v2.py`:
   - `test_every_route_requires_auth` (route inventory);
   - `test_websocket_requires_session_and_origin` (a dummy test-only websocket route mounted in the test app);
@@ -2215,7 +2230,7 @@ Acceptance:
   - `test_context_budget_trims_oldest_first_and_keeps_system_and_last_user`;
   - `test_model_api_key_is_ignored_with_warning`.
 - **A2.7** Integration (CI, `docker-compose.test.yml`): the `model` service runs the pinned llama.cpp image with a tiny test GGUF (`deploy/models.lock` entry `test-tiny`, ≤ 150 MB, permissive licence, cached in CI by SHA-256). `tests/integration/test_model.py::test_chat_round_trip` gets a valid action from the real server; `test_model_has_no_egress` (from inside the model container, `bash -c 'echo > /dev/tcp/1.1.1.1/443'` fails); `test_model_rejects_missing_token` (401).
-- **A2.8** On Contabo: `make model-fetch MODEL=qwen2.5-3b-q4km` verifies the SHA-256; the model is healthy; a chat reply arrives; `docker stats` peak for `model` is < 3 GiB during an 8k-context prompt; `docs/MODEL.md` has the measured `model-bench` numbers. No outbound connection from any container to a model API (checked with `sudo conntrack -L` or `ss` during a chat: only private addresses for the core's model traffic).
+- **A2.8** On Contabo: `make model-fetch MODEL=qwen3-4b-q4km` verifies the SHA-256; the model is healthy; a chat reply arrives; `docker stats` peak for `model` is ≤ 3,600 MiB while a prompt fills the 6,144-token context (if it's higher, set `MODEL_CTX=5120`, re-measure and record both in the PR); prompt and generation speed at 0 and 4,096 tokens of context are recorded; `docs/MODEL.md` has the measured `model-bench` numbers. No outbound connection from any container to a model API (checked with `sudo conntrack -L` or `ss` during a chat: only private addresses for the core's model traffic).
 
 ### M3: Confirmation gate (branch `v2-m3-gate`)
 
@@ -2354,7 +2369,7 @@ Acceptance:
   - `test_no_cookie_or_eval_endpoints` (OPTIONS and route listing on browserd shows only the §8.4 routes);
   - `test_private_ip_navigation_blocked` (with `BROWSER_ALLOW_PRIVATE_HOSTS` not covering it).
 - **A6.4** The isolation script also covers the browser: from `browser`, `10.77.4.10:8080` and `10.77.1.10:8080` are unreachable.
-- **A6.5** `docker stats` on the server during a 10-minute browsing task keeps the browser below 2 GiB and the host's available memory above 1.5 GiB. Record this in the PR.
+- **A6.5** `docker stats` on the server during a 10-minute browsing task keeps the browser within its 1280 MiB limit with no OOM kill, and the host's available memory at or above 800 MiB. Record this in the PR.
 
 ### M7: Screen and sign-in (branch `v2-m7-screen`)
 
@@ -2424,7 +2439,7 @@ Tasks:
   - `agent/training/loop.py`: the system job with `TRAINING_SCHEDULE`, waiting for the backup, the minimum-data check and notifications.
   - Compose profile `training`, the trainer networks, the firewall rules, `make training-secrets`, and the `docker-compose.training-secrets.yml` generator.
 - **M8.10 Docs.** Write `docs/MODEL.md`. It covers:
-  - the default model, its licence and the NOTICE;
+  - the default model, its licence (Apache-2.0) and where its GGUF comes from;
   - the measured speed;
   - the 7B option;
   - how to swap models;
@@ -2484,7 +2499,7 @@ Acceptance:
   - `test_schedule_from_env`.
 - **A8.9** Model swap integration: install a second tiny GGUF as version B and promote it through the API with a fake click (session plus CSRF). The supervisor restarts llama-server within 60 s. `/api/status` shows B. Roll back, and A is active again. No container restart is needed.
 - **A8.10** Manual, on Roland's choice of GPU (or the documented manual mode):
-  - one real end-to-end loop on the 3B model with at least the seed data and ~50 real examples;
+  - one real end-to-end loop on the 4B model with at least the seed data and ~50 real examples;
   - the candidate appears in the UI with the comparison;
   - Roland promotes or discards it;
   - rollback is tested once;
@@ -2524,7 +2539,7 @@ Acceptance:
 | Frontend | `tests/frontend/*.test.cjs` via `tests/test_frontend.py` | Node ≥ 20, no npm | none |
 | Integration | `tests/integration/` | `docker compose -f docker-compose.yml -f docker-compose.test.yml` | `@pytest.mark.integration` (excluded by default via `addopts = "-m 'not integration'"`) |
 | Isolation | `tests/integration/isolation.sh` | The compose test stack, run on the host | shell script, `set -euo pipefail` |
-| Model integration | `tests/integration/test_model.py` | The pinned llama.cpp image with the tiny `test-tiny` GGUF (never the 3B model in CI) | `@pytest.mark.integration` |
+| Model integration | `tests/integration/test_model.py` | The pinned llama.cpp image with the tiny `test-tiny` GGUF (never the default model in CI) | `@pytest.mark.integration` |
 | Training dry-run | `training/tests/` | CPU, tiny model, `requirements-train.lock` CPU variant (`requirements-train-cpu.lock`), 5 steps | `@pytest.mark.training` (own CI job) |
 | Model eval | `python -m agent.eval` | A real model server. Run on demand (`make model-eval`) or on the GPU machine, not in CI. The CI unit tests cover the harness with `FakeBrain` | – |
 | Server acceptance | §14.8 checklist | The Contabo host | manual, scripted where possible via `make verify` |
@@ -2637,7 +2652,7 @@ docker compose version                # v2.x
 docker info --format '{{.SecurityOptions}}'      # seccomp, apparmor present
 docker info 2>/dev/null | grep -i -E 'firewall|iptables'   # must be iptables backend (DOCKER-USER exists)
 sudo ufw status verbose               # [sudo] 22, 80, 443/tcp, 443/udp only
-free -h; swapon --show; df -h /       # 7.8G RAM, 2G swap, >= 30G free (model versions need ~2 GB each)
+free -h; swapon --show; df -h /       # 7.8G RAM, 2G swap, >= 30G free (model versions need ~2.5 GB each)
 nproc; lscpu | grep -E 'Model name|Flags' | grep -o -E 'avx2|avx512f' | sort -u   # 4 vCPU; avx2 expected (llama.cpp CPU speed)
 sudo -n true && echo sudo-ok          # passwordless sudo
 id deploy                             # note uid; containers run as 1000
@@ -2709,16 +2724,16 @@ There is no model API key to create: the model is local.
 ### 14.7a Install the model
 
 ```bash
-make model-fetch MODEL=qwen2.5-3b-q4km
+make model-fetch MODEL=qwen3-4b-q4km
 #  - one-off container (roland-agent/core image, uid 1000) on a temporary egress network, `models` volume rw
-#  - downloads https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/<pinned revision>/qwen2.5-3b-instruct-q4_k_m.gguf
-#  - checks size 2104932768 and SHA-256 626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d (from deploy/models.lock); deletes on mismatch
-#  - writes /models/versions/qwen2.5-3b-q4km-base/{model.gguf,model.sha256,manifest.json,MODEL_CARD.md,LICENSE,NOTICE}
+#  - downloads https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/<pinned revision>/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+#  - checks size 2497281120 and SHA-256 3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597 (from deploy/models.lock); deletes on mismatch
+#  - writes /models/versions/qwen3-4b-q4km-base/{model.gguf,model.sha256,manifest.json,MODEL_CARD.md,LICENSE,NOTICE}
 #  - first install: creates registry.json and the `current` symlink
-make model-list                  # shows current = qwen2.5-3b-q4km-base
+make model-list                  # shows current = qwen3-4b-q4km-base
 ```
-Offline alternative: copy the GGUF to the server yourself (`scp`) and run `make model-install FILE=/path/model.gguf ID=qwen2.5-3b-q4km-base`. The same `models.lock` check applies; files not in the lock need `ALLOW_UNLISTED=1` and a typed confirmation.
-Read the licence that gets printed (Qwen RESEARCH LICENSE for the 3B default; see Q17) before continuing.
+Offline alternative: copy the GGUF to the server yourself (`scp`) and run `make model-install FILE=/path/model.gguf ID=qwen3-4b-q4km-base`. The same `models.lock` check applies; files not in the lock need `ALLOW_UNLISTED=1` and a typed confirmation.
+Read the licence that gets printed (Apache-2.0 for the 4B default; see Q17) before continuing.
 
 ### 14.8 Deploy and verify
 
@@ -2745,8 +2760,8 @@ make deploy
 - [ ] `docker stats --no-stream` totals are within §5.5. `free -h` shows available memory ≥ 1.2 GiB at idle with the model loaded.
 - [ ] A backup exists (`make backup` then `docker compose exec core ls -l /backups/db`).
 - [ ] `docker compose exec -T model bash /opt/run/run.sh healthcheck` passes. `make model-bench` numbers are written to `docs/MODEL.md`. The model container can't reach the internet: `docker compose exec -T model bash -c 'timeout 5 bash -c "echo > /dev/tcp/1.1.1.1/443"'` fails.
-- [ ] `docker stats --no-stream` with the model loaded during a browser task: the total is ≤ 6.3 GiB, and `free -m` "available" is ≥ 1,000 MiB.
-- [ ] Log in from a phone. Send a chat (the first reply may take ~30–90 s). Shell `uname -a`. Upload and download a file. Watch screen. Run an approval test (§12 A3.4).
+- [ ] `docker stats --no-stream` with the model loaded during a browser task: the total is ≤ 6.8 GiB, and `free -m` "available" is ≥ 800 MiB.
+- [ ] Log in from a phone. Send a chat (the first reply may take ~1–2 minutes). Shell `uname -a`. Upload and download a file. Watch screen. Run an approval test (§12 A3.4).
 
 From Roland's laptop: `nmap -Pn -p- 37.60.226.214` → only 22, 80 and 443 open. `sudo nmap -sU -p 443 37.60.226.214` → open|filtered.
 
@@ -2807,7 +2822,7 @@ Each question has a **default** that Codex implements unless Roland decides othe
 
 | # | Question | Default if unanswered |
 |---|---|---|
-| Q1 | ~~Which model?~~ **Decided:** no hosted or third-party model API in any code path. A self-hosted open-weight model is served by llama.cpp (default) or Ollama on an internal network. The default is a ~3B instruct model in Q4 on CPU, fitting this server. Tool calls use grammar-constrained JSON. The browser gives the model text and accessibility outlines; screenshots go to the model only for a vision-capable local model. An own-model training pipeline follows in M8 | – (§6.9–§6.11) |
+| Q1 | ~~Which model?~~ **Decided:** no hosted or third-party model API in any code path. A self-hosted open-weight model is served by llama.cpp (default) or Ollama on an internal network. The default is a ~4B instruct model in Q4 on CPU (Qwen3-4B-Instruct-2507, Q17), fitting this server. Tool calls use grammar-constrained JSON. The browser gives the model text and accessibility outlines; screenshots go to the model only for a vision-capable local model. An own-model training pipeline follows in M8 | – (§6.9–§6.11) |
 | Q2 | Shell approval policy: `tainted` (commands run freely until the run reads untrusted content or a risky command appears) or `always` (every command needs a tap)? | `tainted` |
 | Q3 | Unrecognised clicks (div/span buttons on modern sites) are gated, so browsing apps like webmail means many approvals. Keep strict default-deny, or allow a per-site "trusted for harmless clicks" list? It would still never apply to keyword or submit actions | Strict default-deny, no allowlist |
 | Q4 | Chromium's own sandbox probably can't run inside the hardened container on Ubuntu 24.04 (userns restrictions). Accept `--no-sandbox` with the container as the boundary, or allow a custom seccomp profile? Also: logged-in sessions in the browser profile are valuable. Which accounts are you OK with the agent's browser holding? | Container boundary (`BROWSER_CHROMIUM_SANDBOX=false`), with the experiment reported in M6 |
@@ -2823,7 +2838,7 @@ Each question has a **default** that Codex implements unless Roland decides othe
 | Q14 | Keyword languages for the click classifier: English and Finnish enough? Add Swedish? | English + Finnish |
 | Q15 | The integration CI job builds a ~2 GB browser image. On a private repo that uses Actions minutes. Run it on every PR to `v2`, or only on demand and on merges? | PRs to `v2`/`main`, plus manual runs |
 | Q16 | ~~Does `deploy` have sudo?~~ **Decided:** `deploy` has passwordless sudo | – |
-| Q17 | **Base model family and a later server upgrade.** The default, Qwen2.5-3B-Instruct, fits and works well with tools, but its licence is the **Qwen RESEARCH LICENSE** (non-commercial), not Apache-2.0. Is that OK for personal use, or do you want a permissive ~3–4B base? Candidates, each re-measured against the 3 GiB cap before switching, possibly with `MODEL_CTX=4096`: Qwen3-4B-Instruct (Apache-2.0), SmolLM3-3B (Apache-2.0), Phi-4-mini-instruct (MIT, 3.8B), IBM Granite 3B-class (Apache-2.0) and Llama 3.2 3B (Llama community licence). And do you plan to upgrade to a ≥ 16 GB server for Qwen2.5-7B-Instruct (Apache-2.0, noticeably better at multi-step tool use; §6.9.6)? The base you choose is also what gets fine-tuned, so switching families later means retraining from that base | Qwen2.5-3B-Instruct Q4_K_M on this server. 7B documented, not deployed. The M8 eval suite is used to compare any candidate base before switching |
+| Q17 | ~~Base model family?~~ **Decided:** Qwen3-4B-Instruct-2507 (Apache-2.0), so Roland can sell or share his fine-tuned model without asking anyone. It replaces Qwen2.5-3B-Instruct, whose Qwen RESEARCH LICENSE is non-commercial. It is the non-thinking 2507 release, run with an f16 KV cache at 6,144 tokens of context in a 3,840 MiB limit, measured (§5.5, §6.9.6). Still open: upgrading to a ≥ 16 GB server for Qwen2.5-7B-Instruct (Apache-2.0, §6.9.6). The M8 eval suite compares any later candidate base before switching | – (§5.5, §6.9.6) |
 | Q18 | **Training loop operations.** Which GPU provider, if any (EU region preferred), and which launch mode: `manual` (default; you run the script), `ssh` (you rent the machine, the trainer drives it) or `hook` (scripted provision and teardown)? What spending cap? Weekly on Sunday 03:00, or another schedule? | `manual`, weekly schedule, capture **off** until you turn it on |
 
 ---
