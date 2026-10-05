@@ -178,11 +178,15 @@ async def run_shell(ctx: ToolContext, args: dict) -> str:
 
     try:
         out, cut = await asyncio.wait_for(read_capped(), timeout=SHELL_TIMEOUT)
+        await finish()
+    except asyncio.CancelledError:
+        kill()
+        await finish()
+        raise
     except TimeoutError:
         kill()
         await finish()
         return f"Error: the command took longer than {SHELL_TIMEOUT} seconds and was stopped."
-    await finish()
     text = clip(out.decode(errors="replace"))
     if cut:
         return f"{text}\n[stopped: the command printed more than {MAX_OUTPUT} characters]"
@@ -193,7 +197,12 @@ async def run_shell(ctx: ToolContext, args: dict) -> str:
 async def read_file(ctx: ToolContext, args: dict) -> str:
     try:
         target = _workspace_path(ctx, str(args.get("path", "")))
-        return clip(target.read_text(errors="replace"))
+        # Read one extra character to detect truncation without loading the whole file.
+        with target.open(errors="replace") as f:
+            text = f.read(MAX_OUTPUT + 1)
+        if len(text) > MAX_OUTPUT:
+            return text[:MAX_OUTPUT] + "\n... [cut, file continues]"
+        return text
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 
