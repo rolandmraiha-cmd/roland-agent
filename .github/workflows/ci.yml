@@ -41,7 +41,7 @@ jobs:
           cache-dependency-path: |
             requirements.lock
             requirements-dev.lock
-      - uses: actions/setup-node@1e60f620b9541d7c2439c8f7a8cea4a018f13b9b # v4.0.3
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: "20"
       - run: python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
