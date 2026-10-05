@@ -166,4 +166,6 @@ async def test_facts_are_one_short_line(ctx):
 async def test_fact_count_is_capped(ctx):
     for i in range(MAX_FACTS - 1):
         ctx.memory.remember(f"fact {i}")
+    assert "Remembered" in await call_tool(ctx, "remember", {"fact": "the last one"})
     assert "Error" in await call_tool(ctx, "remember", {"fact": "one more"})
+    assert len(ctx.memory.facts()) == MAX_FACTS
