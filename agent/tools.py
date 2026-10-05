@@ -25,6 +25,9 @@ LIST_PROMPT_CHARS = 300    # how much of each prompt list_jobs shows
 MAX_LISTED_JOBS = 30       # list_jobs shows at most this many
 MAX_JOB_PROMPT = 5000      # characters, same as the Jobs tab form
 FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
+MAX_FACT_CHARS = 200       # one saved fact; every fact goes into every prompt
+MAX_FACTS = 50             # saved facts in total
+MAX_FACTS_PROMPT_CHARS = 1500  # the whole facts block in the system prompt (~500 tokens)
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
 # Environment variables the shell never gets, so commands can't print the agent's secrets.
@@ -225,9 +228,42 @@ async def list_files(ctx: ToolContext, args: dict) -> str:
 
 
 # --- memory ---
+def one_line(text: str) -> str:
+    """Joins all lines into one, so a fact can't start what looks like a new prompt line."""
+    return " ".join(text.split())
+
+
 async def remember(ctx: ToolContext, args: dict) -> str:
-    fact_id = ctx.memory.remember(str(args.get("fact", "")))
+    fact = one_line(str(args.get("fact", "")))
+    if not fact:
+        return "Error: the fact is empty."
+    if len(fact) > MAX_FACT_CHARS:
+        return f"Error: a fact can be at most {MAX_FACT_CHARS} characters. Save a shorter one."
+    fact_id = ctx.memory.remember(fact, limit=MAX_FACTS)
+    if fact_id is None:
+        return (f"Error: {MAX_FACTS} facts are saved already. Forget one first, or ask Roland "
+                "to delete some on the Jobs tab.")
     return f"Remembered as fact {fact_id}."
+
+
+def prompt_facts(memory: Memory) -> str:
+    """Saved facts as prompt lines, newest first: one line each, shortened, and the whole block
+    at most MAX_FACTS_PROMPT_CHARS. The system prompt is never trimmed, so this keeps it inside
+    a small model's context however many facts are saved (older versions saved without limits)."""
+    facts = memory.facts()
+    room = MAX_FACTS_PROMPT_CHARS - 100  # left for the "not shown" line
+    lines: list[str] = []
+    used = 0
+    for fact_id, text in reversed(facts):
+        line = f"{fact_id}: {_short(text, MAX_FACT_CHARS)}"
+        used += len(line) + 1
+        if used > room:
+            break
+        lines.append(line)
+    if len(facts) > len(lines):
+        lines.append(f"({len(facts) - len(lines)} older saved facts not shown here; Roland can "
+                     "see them on the Jobs tab.)")
+    return "\n".join(lines)
 
 
 async def forget(ctx: ToolContext, args: dict) -> str:
@@ -254,7 +290,7 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
 
 def _short(text: str, limit: int) -> str:
     """One line, at most `limit` characters, with … when something was left out."""
-    text = " ".join(text.split())
+    text = one_line(text)
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
@@ -320,7 +356,8 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
                        ["path", "content"]), write_file),
     "list_files": (_fn("list_files", "List files in a workspace folder (relative path, default the workspace itself).",
                        {"path": S}, []), list_files),
-    "remember": (_fn("remember", "Save a lasting fact about Roland or your work.",
+    "remember": (_fn("remember", "Save a lasting fact about Roland or your work: one short line, "
+                     f"at most {MAX_FACT_CHARS} characters.",
                      {"fact": S}, ["fact"]), remember),
     "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": I}, ["fact_id"]), forget),
     "schedule_job": (_fn("schedule_job", "Schedule a background job: a prompt you will run on a "
