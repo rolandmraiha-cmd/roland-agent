@@ -84,7 +84,6 @@ def test_idle_session_expires(client, monkeypatch):
 
 
 def test_password_change_ends_sessions(tmp_path, make_agent):
-    from agent.memory import Memory
     agent = make_agent()
     s1 = auth.Sessions(agent.memory, 14, 72, agent.config.password_hash)
     token = s1.create()
@@ -204,6 +203,7 @@ def test_wrong_guesses_dont_hold_up_roland(make_agent, monkeypatch):
     """The slowdown sleep happens outside the login lock: while attackers' wrong guesses sleep,
     Roland's login still goes straight through."""
     import asyncio
+
     import httpx
     real_sleep = asyncio.sleep
 
@@ -234,6 +234,7 @@ def test_wrong_guesses_dont_hold_up_roland(make_agent, monkeypatch):
 
 def test_one_attempt_per_address_at_a_time(make_agent, monkeypatch):
     import asyncio
+
     import httpx
     real_sleep = asyncio.sleep
 
@@ -262,7 +263,7 @@ def test_forwarded_for_only_from_trusted_proxy(make_agent, monkeypatch, caplog):
     agent = make_agent(trusted_proxies=("172.17.0.1",))
     app = create_app(agent, run_scheduler=False)
     with TestClient(app, client=("172.17.0.1", 1)) as proxy:
-        for i in range(auth.PER_IP_FAILS):  # 5 wrong from one visitor behind the proxy
+        for _i in range(auth.PER_IP_FAILS):  # 5 wrong from one visitor behind the proxy
             proxy.post("/login", data={"password": "x"},
                        headers={**ORIGIN, "X-Forwarded-For": "6.6.6.6"})
         r = proxy.post("/login", data={"password": PW},
@@ -344,7 +345,9 @@ def test_blank_job_rejected(client, field):
 @pytest.mark.parametrize("scheduled", [False, True])
 async def test_shutdown_cancels_and_awaits_job(make_agent, monkeypatch, scheduled):
     import asyncio
+
     import httpx
+
     from agent.scheduler import running_jobs
 
     agent = make_agent()

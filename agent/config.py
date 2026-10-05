@@ -81,7 +81,7 @@ class Config:
             )
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         load_dotenv()
         return cls(
             model_base_url=os.getenv("MODEL_BASE_URL", "http://localhost:11434/v1"),
