@@ -276,7 +276,7 @@ Rules:
 | workspace | **bind**: `${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}` (a 10 GB ext4 loop filesystem, `nodev,nosuid`) | core `/workspace` (rw), sandbox `/workspace` (rw), browser `/files` = `${WORKSPACE_HOST_DIR}/browser` (rw) | | The filesystem size is the hard quota. It holds a `.trash/` subfolder |
 | `browser-profile` | named | browser | `/profile` | Chromium user data dir (cookies and logins). **Never mounted anywhere else** |
 | `caddy-data`, `caddy-config` | named | caddy | `/data`, `/config` | Certificates (persisted, to avoid ACME rate limits) |
-| `models` | named | model `/models` (**ro**), core `/models` (**ro**, reads `registry.json`, manifests, model cards and eval reports only), trainer `/models` (**rw**) | `/models` | Model versions (GGUF, manifest, model card, eval report, licence), `registry.json`, and the `current` symlink (§6.11.6). Written only by trainerd or the one-off `make model-*` containers (§14.7a). About 2 GB per 3B version; keep ≤ 3 versions plus base |
+| `models` | named | model `/models` (**ro**), core `/models` (**ro**, reads `registry.json`, manifests, model cards and eval reports only), trainer `/models` (**rw**) | `/models` | Model versions (GGUF, manifest, model card, eval report, licence), `registry.json`, and the `current` symlink (§6.11.6). Written only by trainerd or the one-off `make model-*` containers (§14.7a). About 2.5 GB per 4B version; keep ≤ 3 versions plus base |
 | `training-data` | named | core `/training-data` (rw), trainer `/training-data` (ro) | | Exported, scrubbed datasets (§6.11.3), mode 0600. Pruned to the last 5 datasets |
 | `training-runs` | named | trainer `/training-runs` (rw), core `/training-runs` (ro) | | Run logs (scrubbed), imported `candidate.tar` staging, eval reports. Pruned after 30 days |
 
@@ -2643,7 +2643,7 @@ docker compose version                # v2.x
 docker info --format '{{.SecurityOptions}}'      # seccomp, apparmor present
 docker info 2>/dev/null | grep -i -E 'firewall|iptables'   # must be iptables backend (DOCKER-USER exists)
 sudo ufw status verbose               # [sudo] 22, 80, 443/tcp, 443/udp only
-free -h; swapon --show; df -h /       # 7.8G RAM, 2G swap, >= 30G free (model versions need ~2 GB each)
+free -h; swapon --show; df -h /       # 7.8G RAM, 2G swap, >= 30G free (model versions need ~2.5 GB each)
 nproc; lscpu | grep -E 'Model name|Flags' | grep -o -E 'avx2|avx512f' | sort -u   # 4 vCPU; avx2 expected (llama.cpp CPU speed)
 sudo -n true && echo sudo-ok          # passwordless sudo
 id deploy                             # note uid; containers run as 1000
@@ -2752,7 +2752,7 @@ make deploy
 - [ ] A backup exists (`make backup` then `docker compose exec core ls -l /backups/db`).
 - [ ] `docker compose exec -T model bash /opt/run/run.sh healthcheck` passes. `make model-bench` numbers are written to `docs/MODEL.md`. The model container can't reach the internet: `docker compose exec -T model bash -c 'timeout 5 bash -c "echo > /dev/tcp/1.1.1.1/443"'` fails.
 - [ ] `docker stats --no-stream` with the model loaded during a browser task: the total is ≤ 6.8 GiB, and `free -m` "available" is ≥ 800 MiB.
-- [ ] Log in from a phone. Send a chat (the first reply may take ~30–90 s). Shell `uname -a`. Upload and download a file. Watch screen. Run an approval test (§12 A3.4).
+- [ ] Log in from a phone. Send a chat (the first reply may take ~40–120 s). Shell `uname -a`. Upload and download a file. Watch screen. Run an approval test (§12 A3.4).
 
 From Roland's laptop: `nmap -Pn -p- 37.60.226.214` → only 22, 80 and 443 open. `sudo nmap -sU -p 443 37.60.226.214` → open|filtered.
 
