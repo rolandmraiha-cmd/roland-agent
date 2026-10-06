@@ -23,7 +23,7 @@ services:
     depends_on:
       - ollama
 
-  # Local model (free). Remove this service if you use Grok or another paid API instead.
+  # Local development model. See the runbook for v2 configuration overrides.
   ollama:
     image: ollama/ollama:0.35.1   # pinned; update on purpose
     restart: unless-stopped

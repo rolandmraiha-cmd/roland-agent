@@ -3,8 +3,12 @@
 Roland's own always-on AI agent. You chat with it on its own password-protected web page, it
 remembers things, uses tools, and runs scheduled jobs in the background while nobody is chatting.
 
-The agent's brain is any **OpenAI-compatible model API**, so one setting picks it: a free local
-model through [Ollama](https://ollama.com) or vLLM, or a paid one like Grok.
+The `v2` branch is under development. Its brain connects only to an approved **local model**,
+such as llama.cpp or [Ollama](https://ollama.com). The current client uses native `/v1`
+completions; the full v2 provider implementations come in M2.
+
+The isolated terminal, browser, screen viewing and sign-in services are still planned.
+See [RUNBOOK](docs/RUNBOOK.md) for the current configuration stage and development overrides.
 
 ## What it can do
 
@@ -26,9 +30,12 @@ model through [Ollama](https://ollama.com) or vLLM, or a paid one like Grok.
 - **Safety:** a daily cap on model calls (`DAILY_CALL_LIMIT`) and a cap on tool steps per message
   (`MAX_TOOL_STEPS`).
 
-## Run it with Docker (recommended)
+## Run the current development baseline with Docker
 
 1. Copy the settings file: `cp .env.example .env`
+   For the existing compose file, set `MODEL_PROVIDER=ollama`,
+   `MODEL_BASE_URL=http://ollama:11434/v1`, `MODEL_NAME=qwen2.5:7b`,
+   `MODEL_TOOL_MODE=native` and `MODEL_ALLOWED_HOSTS=ollama,127.0.0.1,localhost,::1`.
 2. Make your password hash and paste the line it prints into `.env`:
    `docker compose run --rm --no-deps agent python -m agent hash-password`
 3. Start everything: `docker compose up -d --build`
@@ -36,15 +43,18 @@ model through [Ollama](https://ollama.com) or vLLM, or a paid one like Grok.
 5. Open <http://localhost:8080>. For testing on plain `http://localhost`, set
    `COOKIE_SECURE=false` in `.env`.
 
-To use Grok instead of a local model, set `MODEL_BASE_URL=https://api.x.ai/v1`, `MODEL_NAME` and
-`MODEL_API_KEY` in `.env`, and remove the `ollama` service from `docker-compose.yml`.
+The example's static model IP belongs to the future v2 compose deployment. The current
+development compose file needs the overrides above. Public model endpoints are refused;
+`MODEL_API_KEY` is ignored. Use `MODEL_SERVER_TOKEN` for a local server requiring authentication.
 
 ## Run it without Docker (development)
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
+pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+pip install --no-deps --no-build-isolation --no-index -e .
 cp .env.example .env              # set MODEL_BASE_URL=http://localhost:11434/v1, DATA_DIR=./data
+# For Ollama, also set MODEL_PROVIDER=ollama, MODEL_NAME to an installed tag and MODEL_TOOL_MODE=native.
 python -m agent hash-password     # paste the printed line into .env
 python -m agent                   # web page on http://localhost:8080
 python -m agent chat              # or chat in the terminal
@@ -55,6 +65,9 @@ Shell commands are off by default everywhere. Never set `ALLOW_SHELL=true` on yo
 
 ## Putting it online
 
+The final isolated Linux deployment comes in later milestones. The settings below describe
+the current web edge only; they do not install browser, screen or sandbox services.
+
 The container only listens on `127.0.0.1:8080`. To reach it from your phone anywhere, put a
 reverse proxy with HTTPS in front of it, such as [Caddy](https://caddyserver.com) or Nginx with
 Let's Encrypt, and keep `COOKIE_SECURE=true`. Never expose port 8080 directly.
@@ -62,6 +75,8 @@ Let's Encrypt, and keep `COOKIE_SECURE=true`. Never expose port 8080 directly.
 Then set these in `.env`:
 
 - `ALLOWED_HOSTS` to your hostname, like `agent.example.com`.
+- `AGENT_ENV=production`, which requires secure cookies, an allowed web hostname, and
+  `MODEL_SERVER_TOKEN` when using llama.cpp. Local shell execution is refused in production.
 - `FORWARDED_ALLOW_IPS` to the proxy's IP as the agent sees it (for Caddy on the same machine
   talking to the container, usually the Docker gateway, like `172.17.0.1`). Only that address
   may say who the real visitor is, so the per-address lockout counts real visitors and a stranger
@@ -98,7 +113,7 @@ Then set these in `.env`:
     capabilities and a read-only filesystem apart from `/data` and `/tmp`, with CPU, memory and
     process limits.
   - Each command stops after 60 seconds or 8000 characters of output.
-  - Commands don't get the API key or password hash in their environment, and the agent
+  - Commands don't get model tokens or the password hash in their environment, and the agent
     process blocks other processes from reading its memory (`/proc/<pid>/environ`).
 - **Untrusted tool output:** web pages, files and command output reach the model marked as
   untrusted data, and it's told never to follow instructions inside them. That lowers the risk
@@ -116,7 +131,19 @@ Then set these in `.env`:
   one database step, so parallel chats and jobs can't slip past it. The database uses WAL mode
   and waits for a busy lock instead of failing. Job runs cut off by a restart are marked failed.
 - **Known limit:** with the shell on, a command runs as the agent's user and can reach its
-  database. Use an API key with a spending limit. v2 moves commands into a separate sandbox.
+  database. Production refuses this local backend. The isolated sandbox arrives in M4;
+  startup refuses to enable it until implemented.
+
+## v2 M1 configuration
+
+- File-based secrets override environment values without logging their contents.
+- Production checks refuse insecure cookies, missing web hosts, local shell execution and
+  incomplete service secrets. `ALLOWED_HOSTS` defaults to `AGENT_HOST`.
+- Model connections use approved local hosts only. DNS is checked for every request and the
+  checked address is pinned. Environment proxies, redirects and public destinations are refused.
+- Browser, screen and sandbox integrations remain unavailable; enabling them stops startup.
+- New settings for later milestones are parsed foundations. They do not activate those features.
+- Migration, audit and backup work remains separate from this configuration PR.
 
 ## v2 M0 fixes
 
@@ -131,6 +158,6 @@ The `v2` branch starts with fixes to the v1 agent; the later v2 services are not
 - A job that overruns its cron interval waits for a future scheduled time after it finishes.
 - Deleting the open chat suppresses errors from its pending history request.
 
-M0 preserves the existing model setup and security controls. Its tests use a fake model and
-make no hosted-model or LLM API calls. See [RUNBOOK](docs/RUNBOOK.md) and
-[SECURITY](docs/SECURITY.md) for M0 validation and the regex audit.
+M0 preserved the original model setup; M1 now restricts it to local destinations. Tests use
+fake models and a loopback HTTP fixture, without real inference calls. See
+[RUNBOOK](docs/RUNBOOK.md) and [SECURITY](docs/SECURITY.md) for validation and the regex audit.
