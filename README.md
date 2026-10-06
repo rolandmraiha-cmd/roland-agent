@@ -143,7 +143,28 @@ Then set these in `.env`:
   checked address is pinned. Environment proxies, redirects and public destinations are refused.
 - Browser, screen and sandbox integrations remain unavailable; enabling them stops startup.
 - New settings for later milestones are parsed foundations. They do not activate those features.
-- Migration, audit and backup work remains separate from this configuration PR.
+- Versioned database upgrades are described below. Audit writing and nightly backups remain upcoming work.
+
+## v2 M1 database migrations
+
+Opening the agent's database applies numbered upgrades automatically. Each upgrade and its
+version number commit together; a failure rolls back that upgrade. Existing v1 chats, facts,
+jobs, results, usage and sessions with idle timestamps are preserved. Very old jobs still need
+approval, and sessions from before idle tracking still require a fresh login, as in v1.
+
+Inspect the database without creating it or applying upgrades:
+
+```sh
+python -m agent migrate --check
+```
+
+The target schema is version 2. New tables and storage helpers prepare approvals, action
+history, file metadata, sign-in requests and screen sessions. They do not activate those
+features or add new web routes. Text-only chat history keeps its existing format.
+
+When `serve` upgrades an already versioned database and `BACKUP_DIR` points to an existing
+directory, it first writes a private compressed snapshot under `BACKUP_DIR/db`. Nightly
+backups, retention, restore commands and the audit writer arrive in separate M1 work.
 
 ## v2 M0 fixes
 

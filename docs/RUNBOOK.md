@@ -1,6 +1,6 @@
 # v2 foundations runbook
 
-This document covers the v1 fixes, CI and M1.2 configuration on `v2`. The final Linux
+This document covers the v1 fixes, CI, M1.2 configuration and M1.3 persistence on `v2`. The final Linux
 deployment, isolated shell, browser and live screen milestones remain unimplemented.
 
 From the repository root, with Python 3.12 and Node.js available:
@@ -63,3 +63,32 @@ and `MODEL_SERVER_TOKEN` for llama.cpp. It refuses `ALLOW_SHELL=true` with the l
 The configured model must stay local in every environment, including terminal chat and jobs.
 Setting an unavailable browser, screen, or sandbox feature causes a clear startup refusal;
 those flags should remain off until their milestones are implemented.
+
+## Database upgrades (M1.3)
+
+The database is now upgraded through `agent/migrations/`, using SQLite `user_version`.
+Migration 1 preserves the v1 schema and its legacy job/session upgrades. Migration 2 adds
+the v2 columns and tables. Every migration runs inside `BEGIN IMMEDIATE`; schema edits,
+data edits and the version number roll back together if that migration fails. A previously
+completed migration stays committed. Databases from a newer unsupported version are refused.
+
+```sh
+python -m agent migrate --check
+```
+
+This reads the version in read-only mode and prints current/target versions. It does not
+create a missing database or apply upgrades, and it does not construct a model client.
+Normal agent startup applies pending upgrades. There is no downgrade command.
+
+For an automatic snapshot before `serve` upgrades a database already at version 1 or higher,
+set `BACKUP_DIR` to an existing private directory accessible by the core. It writes
+`BACKUP_DIR/db/pre-migrate-v<from>-to-v<to>-<timestamp>.db.gz` using SQLite's online backup
+API, checks integrity, compresses to a private temporary file, fsyncs and atomically renames
+it. The file has mode 0600. Failure stops startup before the upgrade. This hook is off when
+`BACKUP_DIR` is empty or its directory does not exist. The old development compose does not
+mount that directory automatically. Nightly backups, retention and restore are separate work.
+
+The fixture `tests/fixtures/v1_4fb0950.sql` contains the exact v1 baseline schema; tests add
+synthetic data to it. No real database, account data or credentials are committed. Run
+`pytest -q tests/test_migrations.py tests/test_memory_v2.py` for migration, rollback and helper
+coverage. The existing full suite continues to run with `make test`.

@@ -4,6 +4,7 @@
     python -m agent chat       chat in the terminal, for quick local tests
     python -m agent run-jobs   run any due background jobs once and exit
     python -m agent hash-password   make the AGENT_PASSWORD_HASH line for .env
+    python -m agent migrate --check   inspect schema versions without upgrading
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ def build(*, validate: bool = False) -> Agent:
         raise SystemExit("The sandbox shell backend is not implemented yet; keep ALLOW_SHELL=false")
     if config.browser_enabled or config.screen_enabled:
         raise SystemExit("Browser and screen services are not implemented yet; keep their flags false")
-    memory = Memory(config.db_path)
+    memory = Memory(config.db_path, backup_dir=config.backup_dir if validate else None)
     brain = OpenAICompatibleBrain(
         config.model_base_url, config.model_name, config.model_server_token,
         allowed_hosts=config.model_allowed_hosts, timeout=config.model_timeout_s,
@@ -88,8 +89,27 @@ def make_hash() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="agent")
-    parser.add_argument("command", nargs="?", default="serve", choices=["serve", "chat", "run-jobs", "hash-password"])
+    parser.add_argument("command", nargs="?", default="serve", choices=["serve", "chat", "run-jobs", "hash-password", "migrate"])
+    parser.add_argument("--check", action="store_true", help="inspect database versions without applying migrations")
     args = parser.parse_args()
+    if args.command == "migrate":
+        if not args.check:
+            parser.error("Use migrate --check; normal startup applies pending migrations")
+        from .migrations import inspect_version, latest_version
+
+        harden_process()  # Configuration may read mounted secret files, as in normal startup.
+        current = inspect_version(Config.from_env().db_path)
+        target = latest_version()
+        if current == target:
+            status = "up to date"
+        elif current < target:
+            status = "upgrade pending"
+        else:
+            status = "newer than supported"
+        print(f"Database version: {current}; target: {target}; {status}")
+        return
+    if args.check:
+        parser.error("--check is only valid with migrate")
     if args.command == "hash-password":
         make_hash()
         return

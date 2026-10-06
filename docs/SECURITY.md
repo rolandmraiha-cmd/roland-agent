@@ -24,7 +24,32 @@ This is M1.2, not completion of v2: the old model SDK and native completions pro
 temporarily behind the local guard. M2.10 removes that SDK and implements provider selection
 and grammar mode. Most newly parsed settings belong to later milestones and do not activate
 their features. The existing compose file is a development baseline, not the final isolated
-server deployment. M1 audit, migrations and backups remain separate work.
+server deployment. M1 audit writing and scheduled backups remain separate work.
+
+## M1 database migrations and storage
+
+Numbered migrations use one SQLite write transaction per version, including the version
+update. They execute constant SQL without `executescript`'s implicit commit. Failures roll
+back schema and data edits; future unsupported versions are refused. Concurrent initializers
+re-read the version after obtaining the write lock. Existing database permissions stay 0600,
+with foreign keys, a 10-second busy timeout, WAL for files and synchronous=NORMAL.
+
+When an optional pre-upgrade snapshot is enabled, it uses SQLite's consistent online backup
+API. Temporary and final files are private, integrity is checked, and publication is atomic.
+This is the migration snapshot hook only; nightly backups and restore remain forthcoming.
+
+New storage methods use bound parameters. Timeline metadata is limited to 16 KiB, and
+canonical action arguments to 64 KiB (UTF-8 bytes). Approval decisions compare status,
+expiry, argument hash and confirmation in one update; only one concurrent decision wins.
+Sensitive action categories require confirmation. These methods do not execute actions;
+the full tool gate and approval routes come in M3. The audit table has append-only triggers;
+the redacting hash-chain writer is the next M1 task.
+
+File/trash helpers change metadata only and reject absolute or traversal paths; actual
+filesystem and symlink safety belong to M5. Sign-in URLs reject embedded credentials,
+and screen records store a login-session hash with matching required for refresh/close.
+Browser control, sign-in handling, screen authentication and cleanup scheduling arrive later.
+No credentials, telemetry, new network requests or application dependencies are added.
 
 ## M0 review
 
