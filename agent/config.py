@@ -17,27 +17,54 @@ MIN_PASSWORD_LENGTH = 16
 log = logging.getLogger("agent.config")
 
 
-def trusted_proxy_networks(
-    entries: tuple[str, ...],
+def _explicit_networks(
+    entries: tuple[str, ...], name: str,
 ) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    """Validate proxy addresses without allowing trust of every address."""
+    """Validate explicit peer networks without allowing trust of every address."""
     if "*" in entries:
-        raise ValueError("FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP")
+        label = "proxy IP" if name == "FORWARDED_ALLOW_IPS" else "allowed peer IP"
+        raise ValueError(f"{name}='*' is not allowed; list the {label}")
     networks = []
     for entry in entries:
         try:
             network = ipaddress.ip_network(entry, strict=False)
         except ValueError as error:
             raise ValueError(
-                f"Invalid FORWARDED_ALLOW_IPS entry {entry!r}; use an IP address or CIDR",
+                f"Invalid {name} entry {entry!r}; use an IP address or CIDR",
             ) from error
         if network.prefixlen == 0:
+            label = "proxy IPs" if name == "FORWARDED_ALLOW_IPS" else "peer IPs"
             raise ValueError(
-                f"FORWARDED_ALLOW_IPS entry {entry!r} has prefix length 0; "
-                "list explicit proxy IPs or narrower CIDRs",
+                f"{name} entry {entry!r} has prefix length 0; "
+                f"list explicit {label} or narrower CIDRs",
             )
         networks.append(network)
     return networks
+
+
+def trusted_proxy_networks(entries: tuple[str, ...]) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    return _explicit_networks(entries, "FORWARDED_ALLOW_IPS")
+
+
+def core_peer_networks(entries: tuple[str, ...]) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    return _explicit_networks(entries, "CORE_ALLOWED_PEERS")
+
+
+def validate_agent_host(host: str) -> None:
+    """AGENT_HOST is a served DNS hostname, never a URL or CSP fragment."""
+    if not host:
+        return
+    labels = host.split(".")
+    if len(host) > 253 or any(
+        not 1 <= len(label) <= 63
+        or not label[0].isascii()
+        or not label[0].isalnum()
+        or not label[-1].isascii()
+        or not label[-1].isalnum()
+        or any(not (char.isascii() and (char.isalnum() or char == "-")) for char in label)
+        for label in labels
+    ):
+        raise ValueError("AGENT_HOST must be a DNS hostname or IPv4 address without a scheme, port or path")
 
 
 def _secret(name: str, default: str = "") -> str:
@@ -171,6 +198,8 @@ class Config:
     def __post_init__(self) -> None:
         if not self.allowed_hosts and self.agent_host:
             object.__setattr__(self, "allowed_hosts", (self.agent_host,))
+        if self.agent_env == "production" and not self.core_allowed_peers:
+            object.__setattr__(self, "core_allowed_peers", ("10.77.1.2",))
 
     @property
     def db_path(self) -> Path:
@@ -199,6 +228,8 @@ class Config:
         """Refuse unsafe server settings before opening the DB or model client."""
         try:
             trusted_proxy_networks(self.trusted_proxies)
+            core_peer_networks(self.core_allowed_peers)
+            validate_agent_host(self.agent_host)
         except ValueError as error:
             raise SystemExit(str(error)) from error
         if not self.password_hash.startswith("$argon2"):

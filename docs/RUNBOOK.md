@@ -1,7 +1,8 @@
 # v2 foundations runbook
 
-This document covers the v1 fixes and M1 config, persistence, audit, backups and CLI on `v2`. The final Linux
-deployment, isolated shell, browser and live screen milestones remain unimplemented.
+This document covers the v1 fixes, M1 config/persistence/audit/backups/CLI and M2 core web
+controls on `v2`. The final Linux deployment, isolated shell, browser and live screen
+milestones remain unimplemented.
 
 From the repository root, with Python 3.12 and Node.js available:
 
@@ -63,6 +64,36 @@ and `MODEL_SERVER_TOKEN` for llama.cpp. It refuses `ALLOW_SHELL=true` with the l
 The configured model must stay local in every environment, including terminal chat and jobs.
 Setting an unavailable browser, screen, or sandbox feature causes a clear startup refusal;
 those flags should remain off until their milestones are implemented.
+
+## Core web controls (M2.3)
+
+Local development keeps `CORE_ALLOWED_PEERS` empty to disable its peer filter; it keeps
+browser, screen and shell features off. In production, an empty peer list now defaults to
+the future Caddy IP `10.77.1.2`. Use explicit IPs or narrower CIDRs for a different proxy,
+and configure `FORWARDED_ALLOW_IPS` separately with the same proxy's address. The peer
+filter checks the connection address before processing forwarded visitor headers.
+
+`AGENT_HOST` takes a DNS hostname or IPv4 address, without `https://`, port or path.
+It defaults `ALLOWED_HOSTS` and supplies the CSP/websocket origin. Secure mode requires
+HTTPS for state changes and websocket Origins. Enabling secure cookies changes the
+session cookie to `__Host-agent_session`; log in again once after upgrading. The old
+cookie is ignored in secure mode. Local development with `COOKIE_SECURE=false` retains
+the legacy cookie. No credentials or session tokens should be committed.
+
+The health CLI can still request only `/healthz` through the core's own literal bind IP;
+this exception grants no access to other routes. Internal paths are restricted to a peer
+explicitly listed in both allowlists. `/internal/screen-auth` remains refused until M7.
+The forthcoming Caddy configuration must block external health and internal paths; the
+old development compose does not yet provide that edge isolation.
+
+```sh
+pytest -q tests/test_web_v2.py
+```
+
+These tests inventory HTTP routes and mount a test-only websocket to check sessions,
+expiry, Origin, peer restrictions, cookie attributes, CSRF and security headers. They
+make no model request and add no production websocket route. See SECURITY.md for the
+handshake-only limit and the next screen milestone's revocation responsibilities.
 
 ## Database upgrades (M1.3)
 

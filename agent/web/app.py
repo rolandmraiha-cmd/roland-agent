@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import html
-import ipaddress
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -24,33 +21,35 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from ..config import trusted_proxy_networks
+from ..config import validate_agent_host
 from ..core import Agent, sse
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
 from .auth import (
-    COOKIE,
     MAX_WAITING,
     LoginGate,
     LoginLimiter,
     Sessions,
     client_key,
+    cookie_name,
     csrf_token,
     password_ok,
 )
+from .middleware import (
+    AuthMiddleware,
+    CSRFMiddleware,
+    PeerAllowlist,
+    SecurityHeaders,
+    security_headers,
+)
+from .middleware import (
+    ProxyHeaders as ProxyHeaders,
+)
+from .middleware import (
+    _strip_port as _strip_port,
+)
 
 STATIC = Path(__file__).parent / "static"
-
-SECURITY_HEADERS = {
-    "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; object-src 'none'; "
-                               "base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
-    "X-Content-Type-Options": "nosniff",
-    "X-Frame-Options": "DENY",
-    # "no-referrer" would make browsers send "Origin: null" on the login form and break the
-    # Origin check; "same-origin" sends it to this site only.
-    "Referrer-Policy": "same-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-}
 
 
 class SendBody(BaseModel):
@@ -80,66 +79,10 @@ class JobBody(BaseModel):
 log = logging.getLogger("agent.web")
 
 
-def _strip_port(hop: str) -> str:
-    """'1.2.3.4:5678' becomes '1.2.3.4' and '[2001:db8::1]:443' becomes '2001:db8::1'."""
-    hop = hop.strip()
-    if hop.startswith("["):
-        return hop[1:hop.find("]")] if "]" in hop else hop
-    if hop.count(":") == 1:
-        return hop.split(":")[0]
-    return hop
-
-
-class ProxyHeaders:
-    """Takes the visitor's IP from X-Forwarded-For, but only when the request comes straight
-    from a trusted reverse proxy (FORWARDED_ALLOW_IPS). Anyone else's header is ignored, and a
-    warning is logged once, since a forgotten setting makes every visitor look like the proxy and
-    share one login lockout."""
-
-    def __init__(self, app, trusted: tuple[str, ...]):
-        self.app = app
-        self.nets = trusted_proxy_networks(trusted)
-        self.warned = False
-        self.warned_all_trusted = False
-
-    def trusted(self, host: str) -> bool:
-        try:
-            ip = ipaddress.ip_address(host)
-        except ValueError:
-            return False
-        return any(ip in n for n in self.nets)
-
-    async def __call__(self, scope, receive, send):
-        if scope["type"] in ("http", "websocket") and scope.get("client"):
-            host, port = scope["client"]
-            # Several X-Forwarded-For lines count as one list, in order.
-            fwd = ",".join(v.decode("latin-1") for k, v in scope["headers"]
-                           if k == b"x-forwarded-for")
-            if fwd and self.trusted(host):
-                # The rightmost address not added by a trusted proxy is the real visitor;
-                # anything further left could have been typed by the visitor.
-                hops = [_strip_port(h) for h in fwd.split(",") if h.strip()]
-                visitor = next((h for h in reversed(hops) if not self.trusted(h)), None)
-                if visitor is not None:
-                    host = visitor
-                elif hops and not self.warned_all_trusted:
-                    self.warned_all_trusted = True
-                    log.warning("Every X-Forwarded-For hop is trusted; keeping direct peer %s.", host)
-                proto = next((v.decode("latin-1") for k, v in scope["headers"]
-                              if k == b"x-forwarded-proto"), None)
-                scope = dict(scope, client=(host, port))
-                if proto in ("http", "https") and scope["type"] == "http":
-                    scope["scheme"] = proto
-            elif fwd and not self.warned:
-                self.warned = True
-                log.warning("Got X-Forwarded-For from %s, which isn't in FORWARDED_ALLOW_IPS, so "
-                            "it was ignored. If that's your reverse proxy, add its IP there; "
-                            "otherwise every visitor shares one login lockout.", host)
-        await self.app(scope, receive, send)
-
-
 def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     config = agent.config
+    validate_agent_host(config.agent_host)
+    cookie = cookie_name(config)
     sessions = Sessions(agent.memory, config.session_days, config.idle_hours, config.password_hash)
     limiter = LoginLimiter()
     gate = LoginGate()
@@ -166,42 +109,35 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
     def logged_in(request: Request) -> bool:
-        return sessions.valid(request.cookies.get(COOKIE))
+        return sessions.valid(request.cookies.get(cookie))
 
-    @app.middleware("http")
-    async def guard(request: Request, call_next):
-        path = request.url.path
-        # CSRF, two layers: every state-changing request must come from this site's own page
-        # (Origin check), and once logged in it must also carry the session's CSRF token.
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = urlparse(request.headers.get("origin") or request.headers.get("referer") or "")
-            host = request.headers.get("host", "")
-            # With secure cookies (online, behind HTTPS) only an https:// origin is accepted.
-            schemes = {"https"} if config.cookie_secure else {"http", "https"}
-            if origin.scheme not in schemes or origin.netloc != host:
-                return JSONResponse({"error": "bad origin"}, status_code=403)
-            token = request.cookies.get(COOKIE)
-            if path != "/login" and token:
-                sent = request.headers.get("x-csrf-token", "")
-                if not hmac.compare_digest(sent, csrf_token(token)):
-                    return JSONResponse({"error": "bad csrf token"}, status_code=403)
-        public = path in {"/login", "/favicon.ico", "/healthz"} or path.startswith("/static/")
-        if not public and not logged_in(request):
-            if path.startswith("/api/"):
-                return JSONResponse({"error": "not logged in"}, status_code=401)
-            return RedirectResponse("/login", status_code=303)
-        response = await call_next(request)
-        for k, v in SECURITY_HEADERS.items():
-            response.headers.setdefault(k, v)
-        if path.startswith("/api/") or path in {"/", "/login"}:
-            response.headers["Cache-Control"] = "no-store"
-        return response
-
+    # Access checks run Peer -> Proxy -> Host -> Auth -> CSRF. The outer header wrapper
+    # also secures their refusal responses; Starlette's error handler covers uncaught errors.
+    app.add_middleware(CSRFMiddleware, config=config)
+    app.add_middleware(AuthMiddleware, config=config, sessions=sessions)
     if config.allowed_hosts:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=config.allowed_hosts)
-    app.add_middleware(ProxyHeaders, trusted=config.trusted_proxies)  # outermost: runs first
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=config.allowed_hosts, www_redirect=False)
+    app.add_middleware(ProxyHeaders, trusted=config.trusted_proxies)
+    app.add_middleware(PeerAllowlist, config=config)
+    app.add_middleware(SecurityHeaders, config=config)
+
+    @app.exception_handler(Exception)
+    async def server_error(request: Request, error: Exception):
+        return JSONResponse(
+            {"error": "internal server error"},
+            status_code=500,
+            headers={**security_headers(config), "Cache-Control": "no-store"},
+        )
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+    @app.api_route("/internal", methods=["GET", "POST", "HEAD", "OPTIONS"])
+    @app.api_route("/internal/{rest:path}", methods=["GET", "POST", "HEAD", "OPTIONS"])
+    async def internal_stub(request: Request):
+        # AuthMiddleware has already checked the original proxy peer. M7 wires screen auth.
+        return JSONResponse(
+            {"error": "unavailable"}, status_code=403 if request.url.path == "/internal/screen-auth" else 404
+        )
 
     # --- login ---
     @app.get("/healthz")
@@ -232,8 +168,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             agent.audit.write("roland", "login_fail", detail={"client": ip, "reason": reason})
 
         def locked_page(wait: float) -> HTMLResponse:
-            return login_page(
-                f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
+            return login_page(f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
 
         # A locked address is turned away before it can take a place in the queue.
         if wait := limiter.locked(ip):
@@ -275,17 +210,26 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         with agent.memory.transaction():
             token = sessions.create()
             agent.audit.write("roland", "login_ok", detail={"client": ip})
-        response.set_cookie(COOKIE, token, max_age=config.session_days * 86400,
-                            httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
+        response.set_cookie(
+            cookie,
+            token,
+            max_age=config.session_days * 86400,
+            httponly=True,
+            secure=config.cookie_secure,
+            samesite="strict",
+            path="/",
+        )
         return response
 
     @app.post("/logout")
     async def logout(request: Request):
         with agent.memory.transaction():
-            sessions.end(request.cookies.get(COOKIE))
+            sessions.end(request.cookies.get(cookie))
             agent.audit.write("roland", "logout")
         response = JSONResponse({"ok": True})
-        response.delete_cookie(COOKIE, path="/")
+        response.delete_cookie(
+            cookie, path="/", secure=config.cookie_secure, httponly=True, samesite="strict"
+        )
         return response
 
     @app.get("/")
@@ -295,12 +239,16 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     # --- chats ---
     @app.get("/api/status")
     async def status(request: Request):
-        return {"name": config.agent_name, "model": config.model_name,
-                "csrf": csrf_token(request.cookies.get(COOKIE, "")),
-                "calls_left": agent.calls_left(), "daily_limit": config.daily_call_limit,
-                "shell": agent.allow_shell,
-                "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
-                "last_backup_error": agent.memory.get_meta("last_backup_error")}
+        return {
+            "name": config.agent_name,
+            "model": config.model_name,
+            "csrf": csrf_token(request.cookies.get(cookie, "")),
+            "calls_left": agent.calls_left(),
+            "daily_limit": config.daily_call_limit,
+            "shell": agent.allow_shell,
+            "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
+            "last_backup_error": agent.memory.get_meta("last_backup_error"),
+        }
 
     @app.get("/api/chats")
     async def chats():
@@ -356,17 +304,28 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
                 yield sse(event)
             yield sse({"type": "end"})
 
-        return StreamingResponse(stream(), media_type="text/event-stream",
-                                 headers={"X-Accel-Buffering": "no"})
+        return StreamingResponse(
+            stream(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no"}
+        )
 
     # --- background jobs ---
     @app.get("/api/jobs")
     async def jobs():
         return {
-            "jobs": [{"id": j.id, "name": j.name, "cron": j.cron, "prompt": j.prompt,
-                      "enabled": j.enabled, "approved": j.approved, "origin": j.origin,
-                      "next_run": j.next_run,
-                      "running": j.id in running_jobs} for j in agent.memory.jobs()],
+            "jobs": [
+                {
+                    "id": j.id,
+                    "name": j.name,
+                    "cron": j.cron,
+                    "prompt": j.prompt,
+                    "enabled": j.enabled,
+                    "approved": j.approved,
+                    "origin": j.origin,
+                    "next_run": j.next_run,
+                    "running": j.id in running_jobs,
+                }
+                for j in agent.memory.jobs()
+            ],
             "facts": [{"id": i, "text": t} for i, t in agent.memory.facts()],
             "runs": agent.memory.runs(30),
             "timezone": config.timezone,
@@ -378,10 +337,12 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             raise HTTPException(400, "not a valid 5-field cron schedule")
         cron = body.cron.strip()
         with agent.memory.transaction():
-            job_id = agent.memory.add_job(body.name, cron, body.prompt,
-                                          next_run_after(cron, config.timezone))
-            agent.audit.write("roland", "job_created",
-                              detail={"job_id": job_id, "name": body.name, "cron": cron, "approved": True})
+            job_id = agent.memory.add_job(body.name, cron, body.prompt, next_run_after(cron, config.timezone))
+            agent.audit.write(
+                "roland",
+                "job_created",
+                detail={"job_id": job_id, "name": body.name, "cron": cron, "approved": True},
+            )
         return {"id": job_id}
 
     @app.post("/api/jobs/{job_id}/toggle")
