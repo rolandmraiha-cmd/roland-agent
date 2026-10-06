@@ -31,8 +31,12 @@ async def test_files_stay_in_workspace(ctx, tmp_path):
 @pytest.mark.asyncio
 async def test_shell_runs_in_workspace_without_secrets(ctx, monkeypatch):
     monkeypatch.setenv("MODEL_API_KEY", "topsecret")
-    out = await call_tool(ctx, "run_shell", {"command": "pwd; echo pw=$MODEL_API_KEY"})
-    assert str(ctx.workspace) in out and "topsecret" not in out and "exit code 0" in out
+    monkeypatch.setenv("MODEL_SERVER_TOKEN", "serversecret")
+    out = await call_tool(
+        ctx, "run_shell", {"command": "pwd; echo pw=$MODEL_API_KEY; echo tok=$MODEL_SERVER_TOKEN"}
+    )
+    assert str(ctx.workspace) in out and "topsecret" not in out and "serversecret" not in out
+    assert "exit code 0" in out
 
 
 @pytest.mark.asyncio

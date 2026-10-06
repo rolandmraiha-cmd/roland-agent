@@ -134,6 +134,62 @@ def runtime_version() -> dict[str, str]:
     return dict(line.split("=", 1) for line in path.read_text().splitlines() if line)
 
 
+def load_or_recover_registry(root: Path, versions: Path, current: Path, registry: Path) -> dict | None:
+    """Return None for a fresh root; load or repair registry/current; refuse broken trees."""
+    has_current = current.exists() or current.is_symlink()
+    has_registry = registry.exists() or registry.is_symlink()
+    if not has_current and not has_registry:
+        return None
+    if has_registry and registry.is_symlink():
+        raise InstallRefused("Incomplete model registry; refusing to alter current")
+    if has_current and not current.is_symlink():
+        raise InstallRefused("Incomplete model registry; refusing to alter current")
+
+    if has_registry:
+        if not registry.is_file():
+            raise InstallRefused("Incomplete model registry; refusing to alter current")
+        state = json.loads(read_regular(registry, 1024 * 1024))
+        current_id = state.get("current")
+        if not isinstance(current_id, str) or not ID.fullmatch(current_id):
+            raise InstallRefused("Incomplete model registry; refusing to alter current")
+        if not (versions / current_id).is_dir():
+            raise InstallRefused("Incomplete model registry; refusing to alter current")
+        if not has_current:
+            current.symlink_to(f"versions/{current_id}")
+            sync_directory(root)
+        elif current.resolve() != versions / current_id:
+            raise InstallRefused("Model registry and current symlink disagree")
+        return state
+
+    # current without registry: rebuild from the symlink target
+    link = current.readlink()
+    if link.is_absolute() or len(link.parts) != 2 or link.parts[0] != "versions":
+        raise InstallRefused("Incomplete model registry; refusing to alter current")
+    current_id = link.parts[1]
+    if not ID.fullmatch(current_id) or current.resolve() != versions / current_id:
+        raise InstallRefused("Incomplete model registry; refusing to alter current")
+    if not (versions / current_id).is_dir():
+        raise InstallRefused("Incomplete model registry; refusing to alter current")
+    created = datetime.now(UTC).isoformat()
+    state = {
+        "current": current_id,
+        "previous": None,
+        "versions": {current_id: {"status": "active", "created": created}},
+    }
+    with tempfile.NamedTemporaryFile(mode="w", prefix=".registry-", dir=root, delete=False) as stream:
+        temporary = Path(stream.name)
+        json.dump(state, stream, indent=2)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    try:
+        os.replace(temporary, registry)
+        sync_directory(root)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return state
+
+
 def install(
     root: Path, model: str, entry: dict, *, source: Path | None = None, version_id: str | None = None
 ) -> str:
@@ -151,13 +207,8 @@ def install(
         versions.mkdir(mode=0o700, exist_ok=True)
         private_directory(versions)
         current, registry = root / "current", root / "registry.json"
-        initial = not (current.exists() or current.is_symlink() or registry.exists() or registry.is_symlink())
-        if not initial:
-            if not current.is_symlink() or not registry.is_file() or registry.is_symlink():
-                raise InstallRefused("Incomplete model registry; refusing to alter current")
-            current_id = json.loads(read_regular(registry, 1024 * 1024))["current"]
-            if not ID.fullmatch(current_id) or current.resolve() != versions / current_id:
-                raise InstallRefused("Model registry and current symlink disagree")
+        recovered = load_or_recover_registry(root, versions, current, registry)
+        initial = recovered is None
         target = versions / version_id
         created = datetime.now(UTC).isoformat()
         if target.exists() or target.is_symlink():
@@ -219,7 +270,7 @@ def install(
         if initial:
             state = {"current": version_id, "previous": None, "versions": {}}
         else:
-            state = json.loads(read_regular(registry, 1024 * 1024))
+            state = recovered if recovered is not None else json.loads(read_regular(registry, 1024 * 1024))
         state["versions"].setdefault(
             version_id,
             {"status": "active" if state["current"] == version_id else "available", "created": created},
@@ -231,9 +282,12 @@ def install(
             stream.flush()
             os.fsync(stream.fileno())
         try:
-            os.replace(temporary, registry)
-            if initial:
+            # Symlink before registry on first install so a crash cannot leave
+            # registry.json without current (previously unrecoverable).
+            if initial and not current.exists() and not current.is_symlink():
                 current.symlink_to(f"versions/{version_id}")
+                sync_directory(root)
+            os.replace(temporary, registry)
             sync_directory(root)
         finally:
             temporary.unlink(missing_ok=True)

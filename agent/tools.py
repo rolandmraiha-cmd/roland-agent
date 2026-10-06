@@ -32,7 +32,7 @@ MAX_FACTS_PROMPT_CHARS = 1500  # the whole facts block in the system prompt (~50
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
 # Environment variables the shell never gets, so commands can't print the agent's secrets.
-SECRET_ENV = {"AGENT_PASSWORD_HASH", "MODEL_API_KEY"}
+SECRET_ENV = {"AGENT_PASSWORD_HASH", "MODEL_API_KEY", "MODEL_SERVER_TOKEN"}
 
 
 def clip(text: str, limit: int = MAX_OUTPUT) -> str:
