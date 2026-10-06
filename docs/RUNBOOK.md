@@ -1,7 +1,7 @@
 # v2 foundations runbook
 
 This document covers the v1 fixes, M1 config/persistence/audit/backups/CLI and M2 core web
-controls on `v2`. The final Linux deployment, isolated shell, browser and live screen
+controls and the Caddy/core edge on `v2`. The final Linux deployment, isolated shell, browser and live screen
 milestones remain unimplemented.
 
 From the repository root, with Python 3.12 and Node.js available:
@@ -46,18 +46,18 @@ BROWSER_ENABLED=false
 SCREEN_ENABLED=false
 ```
 
-The existing development compose file still uses its `ollama` service. To use that file,
-override `MODEL_PROVIDER=ollama`, `MODEL_BASE_URL=http://ollama:11434/v1`, set
-`MODEL_ALLOWED_HOSTS=ollama,127.0.0.1,localhost,::1`, and set `MODEL_NAME` to a locally
-installed model tag. Full provider implementations replace this compatibility path in M2.
-The static `10.77.6.60` code default belongs to the future v2 deployment, not this old compose.
+For native development with an installed Ollama model, use `MODEL_PROVIDER=ollama`,
+`MODEL_BASE_URL=http://localhost:11434/v1`, `MODEL_NAME` set to the installed tag,
+`MODEL_TOOL_MODE=native`, `DATA_DIR=./data` and `COOKIE_SECURE=false`. Full providers replace
+this compatibility path later in M2. The static `10.77.6.60` default is reserved for the
+future model container; this edge compose slice does not yet implement model inference.
 
 Make the login hash with `python -m agent hash-password`. Put the printed hash in a private
 file and set `AGENT_PASSWORD_HASH_FILE` to its path, or set `AGENT_PASSWORD_HASH` directly
 for local development. Apply the same pattern to `MODEL_SERVER_TOKEN` when the model server
 requires authentication. Files win over environment values; failed file reads stop startup.
-No secret value belongs in the repository. Secret files are not automatically mounted by
-the old compose file; host file paths work only when they also exist inside the container.
+No secret value belongs in the repository. The edge Compose mounts its two required secret
+files; native development paths work only when accessible to that process.
 
 `AGENT_ENV=production` requires `COOKIE_SECURE=true`, `AGENT_HOST` or `ALLOWED_HOSTS`,
 and `MODEL_SERVER_TOKEN` for llama.cpp. It refuses `ALLOW_SHELL=true` with the local backend.
@@ -83,8 +83,7 @@ the legacy cookie. No credentials or session tokens should be committed.
 The health CLI can still request only `/healthz` through the core's own literal bind IP;
 this exception grants no access to other routes. Internal paths are restricted to a peer
 explicitly listed in both allowlists. `/internal/screen-auth` remains refused until M7.
-The forthcoming Caddy configuration must block external health and internal paths; the
-old development compose does not yet provide that edge isolation.
+The Caddy configuration below now blocks external health and internal paths.
 
 ```sh
 pytest -q tests/test_web_v2.py
@@ -94,6 +93,67 @@ These tests inventory HTTP routes and mount a test-only websocket to check sessi
 expiry, Origin, peer restrictions, cookie attributes, CSRF and security headers. They
 make no model request and add no production websocket route. See SECURITY.md for the
 handshake-only limit and the next screen milestone's revocation responsibilities.
+
+## Caddy/core edge slice (M2.1–M2.2)
+
+The root Compose file replaces the old agent/Ollama development layout with caddy/core.
+Only Caddy publishes 80/tcp, 443/tcp and 443/udp. Core listens at `10.77.1.10:8080`, with
+`10.77.1.2` as its only configured proxy/peer. Reserved internal bridges are declared for
+future services; currently core joins edge/model/core_egress, and Caddy joins public/edge/screen.
+Docker Engine 28+ and Compose 2.33.1+ are required for explicit gateway priority.
+
+Both services run as uid/gid 1000, with read-only roots, ALL capabilities dropped and
+no-new-privileges. Caddy's base-image file capability is removed; its own network namespace
+allows low ports through `ip_unprivileged_port_start=0`. No extra process capability is added.
+Memory limits equal memswap limits, so there is no container swap allowance. This stage
+uses 736 MiB in total (core 640, Caddy 96), before the future model/service budgets.
+
+Compose sets the served hostname to AGENT_DOMAIN, otherwise AGENT_FALLBACK_HOST (default
+`37-60-226-214.sslip.io`), and passes it to Caddy/core/ALLOWED_HOSTS together. An explicit
+AGENT_HOST in .env is for native development and does not override this computed value.
+ACME is the default. Internal TLS is for testing and produces an untrusted local-CA certificate;
+Caddy does not install that CA in any host/browser trust store. ACME_EMAIL may remain empty.
+Core security and unfinished-feature flags are overridden by Compose, so an .env change
+cannot accidentally turn on the local shell, browser, screen or training in this stage.
+
+Private source files `secrets/agent_password_hash` and `secrets/model_server_token` must
+already exist, owned by uid 1000 and mode 0400, with their parent directory mode 0700.
+The workspace source must already exist, uid 1000/mode 0700. Compose refuses to create a
+missing bind directory. Named agent-data/backups volumes get their private ownership from
+the core image; Caddy data/config volumes persist certificates. Keeping the project name
+`roland-agent` preserves the existing `roland-agent_agent-data` volume name. This does not
+automatically migrate the old `/data/workspace` contents into the new workspace bind.
+Before activating this stack on an existing installation, back up its data and stop the
+legacy agent/Ollama stack. Do not run the old agent and new core against the same data volume.
+
+```sh
+make compose-config       # quiet syntax/resolution check; needs a private .env
+make preflight-edge       # read-only versions, resolved security, and private-path metadata
+make build                # build pinned caddy/core images
+```
+
+The edge preflight prints setting names and value-free errors, never resolved environment
+or credential contents. It requires two implemented services and verifies UID/permissions,
+secret-file metadata, secure flags, hostname agreement and exact published ports. It does
+not verify the future model, host firewall, disk/swap sizing or loop-filesystem workspace
+quota. Full `preflight`, secret/bootstrap, firewall, workspace migration and `deploy` commands
+remain to be implemented; **this is not the final server installation procedure**.
+
+No model service is enabled yet, so this slice validates login/storage/proxy behavior,
+not model inference. Screen paths use forward_auth and remain 403 until M7. Public health
+and internal paths (including the exact `/internal` root) return 404 at Caddy. Caddy replaces
+forwarded visitor headers and flushes SSE immediately. Non-upload request bodies have a
+2 MB edge cap; the future file-content upload route has UPLOAD_MAX_MB. Core upload enforcement
+arrives with M5. ACME certificates and HTTP/3 need acceptance on the actual Linux host later.
+
+GitHub CI runs `make test-integration` on a disposable project with internal TLS and newly
+generated, private synthetic credentials. The script refuses existing config/credentials
+and refuses to run outside GitHub CI. It builds both images, validates ACME/internal Caddy
+configuration, checks real HTTPS login/CSRF/forwarded spoofing/screen refusals, restarts core
+and verifies stored chats/sessions survive. It checks writable private mounts, uid 1000,
+zero effective capabilities, no-new-privileges and no listener on the model interface.
+Its cleanup removes only that CI project's containers/networks/volumes. No model request,
+real account login or server deployment is made.
 
 ## Database upgrades (M1.3)
 
@@ -116,8 +176,8 @@ set `BACKUP_DIR` to an existing private directory accessible by the core. It wri
 `BACKUP_DIR/db/pre-migrate-v<from>-to-v<to>-<timestamp>.db.gz` using SQLite's online backup
 API, checks integrity, compresses to a private temporary file, fsyncs and atomically renames
 it. The file has mode 0600. Failure stops startup before the upgrade. This hook is off when
-`BACKUP_DIR` is empty or its directory does not exist. The old development compose does not
-mount that directory automatically. Fresh empty databases do not need a pre-upgrade snapshot.
+`BACKUP_DIR` is empty or its directory does not exist. Edge Compose mounts the named backups
+volume at `/backups`; fresh empty databases do not need a pre-upgrade snapshot.
 
 The fixture `tests/fixtures/v1_4fb0950.sql` contains the exact v1 baseline schema; tests add
 synthetic data to it. No real database, account data or credentials are committed. Run
@@ -152,7 +212,7 @@ for focused checks.
 
 These commands and workspace archives use Linux file locks and descriptor-based traversal.
 Set `BACKUP_DIR` to a private location outside the workspace, accessible to the core. The
-old development compose does not mount it; the final deployment will provide the volume.
+edge Compose mounts the named backups volume at `/backups`.
 An empty BACKUP_DIR keeps automatic backups off. The directory is created when a manual
 or nightly backup runs. Existing directory permissions are the administrator's settings;
 new backup directories use 0700 and archives use 0600.

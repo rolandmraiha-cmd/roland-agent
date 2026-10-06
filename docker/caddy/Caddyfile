@@ -1,0 +1,69 @@
+{
+	email "{$ACME_EMAIL}"
+	skip_install_trust
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+(tls-acme) {
+}
+(tls-internal) {
+	tls internal
+}
+
+http://127.0.0.1:8081 {
+	respond /healthz "ok" 200
+}
+
+{$AGENT_HOST} {
+	import tls-{$CADDY_TLS:acme}
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+		-Via
+	}
+
+	route {
+		@blocked path /internal /internal/* /healthz /healthz/*
+		respond @blocked 404
+
+		@upload path /api/files/content
+		request_body @upload {
+			max_size {$UPLOAD_MAX_MB:100}MB
+		}
+		@notupload not path /api/files/content
+		request_body @notupload {
+			max_size 2MB
+		}
+
+		# The core stub refuses these until M7; no noVNC service is enabled here.
+		handle /screen/websockify {
+			forward_auth 10.77.1.10:8080 {
+				uri /internal/screen-auth?kind=ws
+				header_up X-Forwarded-For {remote_host}
+				header_up X-Forwarded-Proto {scheme}
+			}
+			rewrite * /websockify
+			reverse_proxy 10.77.2.30:6080
+		}
+		handle /screen/novnc/* {
+			forward_auth 10.77.1.10:8080 {
+				uri /internal/screen-auth?kind=static
+				header_up X-Forwarded-For {remote_host}
+				header_up X-Forwarded-Proto {scheme}
+			}
+			uri strip_prefix /screen/novnc
+			header Cache-Control "no-store"
+			reverse_proxy 10.77.2.30:6080
+		}
+		handle {
+			reverse_proxy 10.77.1.10:8080 {
+				header_up X-Forwarded-For {remote_host}
+				header_up X-Forwarded-Proto {scheme}
+				flush_interval -1
+			}
+		}
+	}
+}

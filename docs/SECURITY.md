@@ -18,7 +18,7 @@ refused even when explicitly named in `MODEL_ALLOWED_HOSTS`.
 Secret settings accept `NAME_FILE`; the file wins over `NAME`, with a value-free warning.
 Unreadable files fail closed. Secret fields are excluded from the configuration repr.
 `MODEL_API_KEY` is ignored, with a warning. Git and Docker build contexts exclude secret
-contents; only the empty `secrets/.gitkeep` placeholder is included.
+contents. Git tracks only the empty `secrets/.gitkeep`; Docker excludes the entire directory.
 No secret files, credentials, telemetry or new dependencies are added.
 
 This is M1.2, not completion of v2: the old model SDK and native completions protocol remain
@@ -77,6 +77,7 @@ The current patterns are:
 | `_NOT_NAME = re.compile(r"[^A-Za-z0-9_.-]")`; `_NOT_NAME.sub` in `tool_name` | Single-character class, no quantifiers; linear scan with the resulting name capped to 80 characters. |
 | Audit redaction in `agent/audit.py` | An alternation of `re.escape`d loaded secret literals, sorted longest first. No quantified subexpressions or interpretation of secret text as a regex. |
 | Backup filename patterns and HH:MM check in `agent/backup.py` | Fixed-length digit groups and escaped extensions; only generated filename shapes are accepted for retention. |
+| Docker/Compose version check in `deploy/preflight_edge.py` | Digit groups separated by literal dots, followed by an optional suffix. No nested quantifiers or overlapping repeated subexpressions. |
 
 No nested or adjacent overlapping unbounded quantifiers were found. No regex rewrite was
 needed. The new timing regression processes the specified whitespace input in under 0.5 s.
@@ -176,6 +177,42 @@ same-origin referrer/opener/resource policies and restricted browser permissions
 it. API/account/health responses use no-store. AGENT_HOST is validated as a DNS hostname
 or IPv4 address without scheme, port or path before use in CSP.
 
-This is the core prerequisite for M2 deployment, not the complete milestone. Caddy, final
-compose isolation, model containers/providers and Linux installation scripts remain to be
-implemented. No secrets, telemetry, new dependencies or outbound requests are introduced.
+This core prerequisite does not complete M2. The Caddy/core slice below implements the
+edge, while model containers/providers and full Linux installation scripts remain pending.
+The core controls add no secrets, telemetry, dependencies or outbound requests.
+
+## M2 Caddy/core edge (M2.1–M2.2)
+
+Only Caddy publishes ports. It denies external health/internal paths, including the exact
+internal root, before proxying; explicit forwarded-header replacements prevent visitor
+spoofing. Screen forward_auth remains connected to the denying core stub until M7. Caddy
+flushes streamed core responses immediately and applies HSTS. Upload/body limits are set
+at the edge; the core's future file upload implementation still needs its independent cap.
+No access logging or telemetry is enabled. Real deployment will contact ACME certificate
+authorities and download the pinned image/hash-checked build dependencies as expected.
+
+Both current services run with uid/gid 1000, read-only roots, no-new-privileges and all
+capabilities dropped. The official Caddy image is pinned by its verified multi-platform
+registry digest; its file capability is removed before the non-root build finishes.
+A per-container network sysctl allows its low listening ports without adding capabilities.
+No default seccomp/AppArmor profile is disabled. Only core reads the two current file
+secrets. No socket, privileged container, shared host PID/IPC namespace or model port is exposed.
+
+Core's bind address, trusted peer, allowed Host, secure cookies and disabled shell/browser/
+screen/training flags are fixed in Compose. Private data/backup mounts are writable by uid
+1000. Workspace is an existing bind directory, never silently created by Docker. Named
+certificate volumes persist across restarts. Docker excludes the entire secrets directory,
+including the empty Git placeholder, to avoid scanning a private directory owned by a
+different host uid. .env and the CI workspace also stay outside build contexts.
+
+The preflight-edge helper is read-only, checks the resolved config and private-path metadata,
+and suppresses Compose error output that could contain environment values. It does not
+replace the final host preflight. The CI fixture/probe are explicitly restricted to GitHub
+CI, refuse existing private config, use fresh synthetic credentials and never print their
+values. TLS verification is disabled only in the localhost internal-CA probe. CI teardown
+targets only a distinctly named disposable project, never the production project.
+
+Model services/providers, workspace hard quotas/migration, host firewall rules and full
+Linux bootstrap/deployment are still pending. No real host firewall, data, account session
+or deployment is changed here. Browser/sandbox/model container isolation must be completed
+and accepted before those services or the final 24/7 installation are enabled.
