@@ -30,17 +30,17 @@ See [RUNBOOK](docs/RUNBOOK.md) for the implemented edge, configuration and persi
 - **Safety:** a daily cap on model calls (`DAILY_CALL_LIMIT`) and a cap on tool steps per message
   (`MAX_TOOL_STEPS`).
 
-## Docker edge foundation (M2.1–M2.2)
+## Docker edge and model runtime (M2)
 
-The root compose file now contains **Caddy and core**. Caddy is the only service publishing
-ports (80/tcp, 443/tcp and 443/udp); core binds only to its private edge address. Both run
+The root compose file contains **Caddy, core and the isolated llama.cpp model server**.
+Caddy is the only service publishing ports (80/tcp, 443/tcp and 443/udp); core binds only to its private edge address. All run
 as uid 1000 with read-only roots, dropped capabilities, bounded resources and persistent
 data. Caddy blocks public health/internal routes and proxies streamed replies without buffering.
 
-This is a tested edge foundation, with the model container/providers, full Linux preflight,
-firewall and workspace quota still to follow. Chat inference and the browser/screen/sandbox
-services are not supplied by this compose slice. The old 8 GB Ollama development service is
-removed. Use the native development instructions below for an already installed local model.
+The model runtime loads only a verified local GGUF, with no published port or internet egress.
+The provider/grammar/context rewrite, full Linux preflight, firewall and workspace quota
+remain pending, as do the browser/screen/sandbox services. The old 8 GB Ollama development
+service is removed. Use the native development instructions below for an already installed local model.
 
 `.env.example` has no credentials. Compose mounts private `agent_password_hash` and
 `model_server_token` files from `secrets/`, and requires an existing workspace bind directory.
@@ -51,7 +51,9 @@ builds the pinned images. No `make deploy` is provided for this incomplete stage
 
 GitHub CI builds the real images and tests HTTPS login, CSRF, forwarded-address spoofing,
 screen refusal, private storage permissions and restart persistence with disposable fixtures.
-It uses only a localhost test CA and makes no model request. See the runbook for scope and limits.
+It uses a localhost test CA and a 1.2 MB model fixture for authenticated JSON-schema inference,
+missing-token refusal, read-only weights and model egress refusal. It downloads no production
+weights. See the runbook for scope and limits.
 
 ## Run it without Docker (development)
 

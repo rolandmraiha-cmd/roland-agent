@@ -36,6 +36,8 @@ def main():
         "AGENT_DOMAIN": "localhost",
         "CADDY_TLS": "internal",
         "ACME_EMAIL": "",
+        "MODEL_CTX": "512",
+        "MODEL_MAX_NEW_TOKENS": "128",
         "WORKSPACE_HOST_DIR": str(workspace),
     }
     lines = (ROOT / ".env.example").read_text().splitlines()

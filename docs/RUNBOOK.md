@@ -1,7 +1,8 @@
 # v2 foundations runbook
 
 This document covers the v1 fixes, M1 config/persistence/audit/backups/CLI and M2 core web
-controls and the Caddy/core edge on `v2`. The final Linux deployment, isolated shell, browser and live screen
+controls, the Caddy/core edge and the isolated model runtime on `v2`. The final Linux
+deployment, isolated shell, browser and live screen
 milestones remain unimplemented.
 
 From the repository root, with Python 3.12 and Node.js available:
@@ -49,8 +50,8 @@ SCREEN_ENABLED=false
 For native development with an installed Ollama model, use `MODEL_PROVIDER=ollama`,
 `MODEL_BASE_URL=http://localhost:11434/v1`, `MODEL_NAME` set to the installed tag,
 `MODEL_TOOL_MODE=native`, `DATA_DIR=./data` and `COOKIE_SECURE=false`. Full providers replace
-this compatibility path later in M2. The static `10.77.6.60` default is reserved for the
-future model container; this edge compose slice does not yet implement model inference.
+this compatibility path later in M2. The `10.77.6.60` default now points to the isolated
+model container. The grammar/context/provider rewrite remains pending.
 
 Make the login hash with `python -m agent hash-password`. Put the printed hash in a private
 file and set `AGENT_PASSWORD_HASH_FILE` to its path, or set `AGENT_PASSWORD_HASH` directly
@@ -102,11 +103,11 @@ Only Caddy publishes 80/tcp, 443/tcp and 443/udp. Core listens at `10.77.1.10:80
 future services; currently core joins edge/model/core_egress, and Caddy joins public/edge/screen.
 Docker Engine 28+ and Compose 2.33.1+ are required for explicit gateway priority.
 
-Both services run as uid/gid 1000, with read-only roots, ALL capabilities dropped and
+Caddy and core run as uid/gid 1000, with read-only roots, ALL capabilities dropped and
 no-new-privileges. Caddy's base-image file capability is removed; its own network namespace
 allows low ports through `ip_unprivileged_port_start=0`. No extra process capability is added.
 Memory limits equal memswap limits, so there is no container swap allowance. This stage
-uses 736 MiB in total (core 640, Caddy 96), before the future model/service budgets.
+uses 4576 MiB in total (core 640, Caddy 96, model 3840), before future sidecars.
 
 Compose sets the served hostname to AGENT_DOMAIN, otherwise AGENT_FALLBACK_HOST (default
 `37-60-226-214.sslip.io`), and passes it to Caddy/core/ALLOWED_HOSTS together. An explicit
@@ -133,14 +134,15 @@ make build                # build pinned caddy/core images
 ```
 
 The edge preflight prints setting names and value-free errors, never resolved environment
-or credential contents. It requires two implemented services and verifies UID/permissions,
+or credential contents. It requires three implemented services and verifies UID/permissions,
 secret-file metadata, secure flags, hostname agreement and exact published ports. It does
-not verify the future model, host firewall, disk/swap sizing or loop-filesystem workspace
-quota. Full `preflight`, secret/bootstrap, firewall, workspace migration and `deploy` commands
+not verify installed model-file integrity, host firewall, disk/swap sizing or loop-filesystem
+workspace quota. Full `preflight`, secret/bootstrap, firewall, workspace migration and `deploy` commands
 remain to be implemented; **this is not the final server installation procedure**.
 
-No model service is enabled yet, so this slice validates login/storage/proxy behavior,
-not model inference. Screen paths use forward_auth and remain 403 until M7. Public health
+The model service requires verified weights installed through the tools below. The core
+currently retains its legacy native completions protocol; grammar/context/providers follow.
+Screen paths use forward_auth and remain 403 until M7. Public health
 and internal paths (including the exact `/internal` root) return 404 at Caddy. Caddy replaces
 forwarded visitor headers and flushes SSE immediately. Non-upload request bodies have a
 2 MB edge cap; the future file-content upload route has UPLOAD_MAX_MB. Core upload enforcement
@@ -148,12 +150,59 @@ arrives with M5. ACME certificates and HTTP/3 need acceptance on the actual Linu
 
 GitHub CI runs `make test-integration` on a disposable project with internal TLS and newly
 generated, private synthetic credentials. The script refuses existing config/credentials
-and refuses to run outside GitHub CI. It builds both images, validates ACME/internal Caddy
+and refuses to run outside GitHub CI. It builds the core/Caddy and installer images, pulls the pinned model image, validates ACME/internal Caddy
 configuration, checks real HTTPS login/CSRF/forwarded spoofing/screen refusals, restarts core
 and verifies stored chats/sessions survive. It checks writable private mounts, uid 1000,
 zero effective capabilities, no-new-privileges and no listener on the model interface.
-Its cleanup removes only that CI project's containers/networks/volumes. No model request,
-real account login or server deployment is made.
+CI also performs synthetic inference against a 1.2 MB fixture, checks missing-token and
+egress refusals, read-only weights and model restart health. Cleanup removes only that
+CI project's containers/networks/volumes. No real account login or server deployment is made.
+
+## Local model runtime and verified installation (M2.9)
+
+The official CPU llama.cpp image `server-b11434` is pinned by the multi-platform SHA-256
+and source commit recorded in `docker/model/VERSION`. Supervisor flags were checked against
+that image's actual `--help`. The server binds only `10.77.6.60:8080`, publishes no port and
+joins only the internal model network. It receives the model token, not the login hash.
+Web UI, built-in agent/MCP features and slots are disabled; `/props` writes are not enabled.
+
+The supervisor verifies the active model's SHA-256 before starting. It uses one slot,
+three threads, f16 KV caches, flash attention off and `--load-mode none`. MODEL_CTX must
+be 1–6144 and MODEL_THREADS 1–3 for this host. The token must be one URL-safe 32–128 character
+value, generated through the existing token CLI. Every 15 seconds it checks whether
+`current` changed, terminates/reaps the old child within 25 seconds and verifies the new
+target before loading it. It never downloads or chooses/promotes a model.
+
+Installation uses a separate one-off Python image and temporary bridge, without secrets,
+core data or a Docker socket. It streams catalogue-listed GGUF data from revision-pinned
+HTTPS URLs, follows only HTTPS redirects, ignores proxy settings and verifies size,
+SHA-256 and the GGUF signature. Its temporary network is removed on exit. Failed installs
+remove staging files; complete versions are published atomically. Docker-owned directories
+use uid 1000/mode 0700 and their files 0400.
+
+```sh
+make model-fetch MODEL=qwen3-4b-q4km
+# Or install an existing copy of exactly the catalogue-approved GGUF:
+make model-install FILE=/absolute/path/model.gguf ID=qwen3-4b-q4km
+```
+
+The default download is 2,497,281,120 bytes, approximately 2.5 GB. The catalogue currently
+contains that Qwen3 instruct Q4_K_M model and the CI fixture. Unlisted weights, 7B options
+and the Ollama override remain later work. Test fixtures require an explicit
+MODEL_INSTALL_TEST_ONLY opt-in and are unsuitable as an assistant.
+
+The `roland-agent_models` volume contains `versions/<catalogue-id>-base/`, weights, their
+checksum, manifest, licence, NOTICE and a minimal model card. The first install creates
+`registry.json` and `current`; later installs add available versions and preserve current.
+Reinstalling identical data verifies it; corrupt existing versions and incomplete registries
+are refused. An installation lock prevents concurrent writers. Base manifests explicitly
+say project evaluations have not run. The runtime mounts the whole volume read-only.
+
+Human-reviewed promotion/rollback and training arrive later. No model tool can call the
+installer or switch current. MODEL_PROJECT defaults to `roland-agent`; CI supplies its
+disposable project name so its weights never enter the production volume. Actual-host
+memory/speed acceptance is pending (`MODEL.md`). Provider/actions/context and full
+deploy/bootstrap/firewall/quota commands remain pending. This is not the final installation.
 
 ## Database upgrades (M1.3)
 

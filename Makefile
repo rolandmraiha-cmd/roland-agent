@@ -1,4 +1,7 @@
-.PHONY: lint fmt-check test test-integration build compose-config preflight-edge
+.PHONY: lint fmt-check test test-integration build compose-config preflight-edge model-fetch model-install
+
+# Pass file paths and catalogue ids as environment values, never shell source.
+export MODEL FILE ID MODEL_PROJECT MODEL_INSTALL_TEST_ONLY
 
 lint:
 	ruff check agent tests deploy
@@ -21,3 +24,9 @@ compose-config:
 
 preflight-edge:
 	python3 deploy/preflight_edge.py
+
+model-fetch:
+	bash deploy/model.sh fetch
+
+model-install:
+	bash deploy/model.sh install
