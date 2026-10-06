@@ -9,7 +9,6 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 mode=iptables
 do_install=0
-do_apply_rules=1
 while [[ $# -gt 0 ]]; do
     case $1 in
         --nft) mode=nft ;;

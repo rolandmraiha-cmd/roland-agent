@@ -4,8 +4,8 @@
 set -euo pipefail
 
 deploy_repo=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-deploy_comment=roland-agent
-deploy_project=${COMPOSE_PROJECT_NAME:-roland-agent}
+export deploy_comment=roland-agent
+export deploy_project=${COMPOSE_PROJECT_NAME:-roland-agent}
 
 die() {
     printf '%s\n' "$*" >&2

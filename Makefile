@@ -1,6 +1,6 @@
 .PHONY: lint fmt-check test test-integration build compose-config \
 	preflight-edge preflight \
-	up down ps logs deploy secrets hash-password firewall \
+	up down ps logs deploy secrets hash-password firewall firewall-install \
 	workspace-fs backup restore restore-test verify \
 	migrate-v1-workspace ship \
 	model-fetch model-install
@@ -53,6 +53,9 @@ hash-password:
 	bash deploy/hash-password.sh
 
 firewall:
+	bash deploy/firewall.sh
+
+firewall-install:
 	bash deploy/firewall.sh --install
 
 workspace-fs:

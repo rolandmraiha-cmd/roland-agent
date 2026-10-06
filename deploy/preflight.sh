@@ -169,7 +169,7 @@ services:
     environment:
       AGENT_HOST: ${AGENT_DOMAIN:-${AGENT_FALLBACK_HOST:-37-60-226-214.sslip.io}}
 YAML
-    if AGENT_DOMAIN= AGENT_FALLBACK_HOST=nested-probe.example docker compose -f "$probe" config 2>/dev/null | grep -q 'nested-probe.example'; then
+    if AGENT_DOMAIN='' AGENT_FALLBACK_HOST=nested-probe.example docker compose -f "$probe" config 2>/dev/null | grep -q 'nested-probe.example'; then
         nested_ok=1
         ok "Compose supports nested AGENT_HOST defaults"
     else

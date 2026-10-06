@@ -36,8 +36,8 @@ if ! findmnt -n "$mnt" >/dev/null 2>&1; then
     note "mount loop image at $mnt"
 fi
 if [[ -f /etc/fstab ]] && ! grep -Fqx "$fstab_line" /etc/fstab 2>/dev/null; then
-    # Also accept an existing line that points at the same img→mnt.
-    if ! grep -E "^[^#]*$(printf '%s' "$img" | sed 's/[.[\*^$()+?{|]/g')[[:space:]]" /etc/fstab >/dev/null 2>&1; then
+    # Also accept an uncommented line whose $1 equals img (field equality; no regex).
+    if ! awk -v img="$img" '$1 == img { found=1; exit } END { exit !found }' /etc/fstab; then
         note "append fstab entry for $img"
     fi
 fi
@@ -66,7 +66,7 @@ else
 fi
 
 if [[ -f /etc/fstab ]] && ! grep -Fqx "$fstab_line" /etc/fstab; then
-    if ! grep -E "^[^#]*$(printf '%s' "$img" | sed 's/[.[\*^$()+?{|]/g')[[:space:]]" /etc/fstab >/dev/null 2>&1; then
+    if ! awk -v img="$img" '$1 == img { found=1; exit } END { exit !found }' /etc/fstab; then
         printf '%s\n' "$fstab_line" | sudo tee -a /etc/fstab >/dev/null
     fi
 fi

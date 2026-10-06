@@ -10,7 +10,7 @@ source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 mode=restore
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --test) mode=test ;;
+        --test) mode='test' ;;
         --help|-h)
             printf 'Usage: FILE=/path/to.bak.db.gz restore.sh [--test]\n'
             exit 0

@@ -95,6 +95,48 @@ def test_workspace_fs_never_reformats_existing(tmp_path, monkeypatch):
     assert "APPLY=1" in result.stderr or "APPLY=1" in result.stdout
 
 
+def test_workspace_fs_fstab_img_match_with_regex_metacharacters(tmp_path):
+    """fstab img check must use field equality, not regex (GNU sed class bug)."""
+    text = (DEPLOY / "workspace-fs.sh").read_text()
+    assert "sed 's/[" not in text  # old broken character-class escape
+    assert 'awk -v img="$img"' in text
+    assert "$1 == img" in text
+
+    # Path with regex metacharacters that would break a character-class escape.
+    img = str(tmp_path / "workspace.(test)[0]+?.img")
+    fstab = tmp_path / "fstab"
+    # Uncommented line whose $1 equals img (different mount options than canonical).
+    fstab.write_text(f"# comment with {img} decoy\n{img} /mnt/other ext4 loop 0 0\n")
+    # Exact same awk used by workspace-fs.sh
+    result = subprocess.run(
+        ["awk", "-v", f"img={img}", "$1 == img { found=1; exit } END { exit !found }", str(fstab)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+
+    # Commented-only mention must not match.
+    fstab.write_text(f"# {img} /mnt/ws ext4 loop 0 0\n")
+    result = subprocess.run(
+        ["awk", "-v", f"img={img}", "$1 == img { found=1; exit } END { exit !found }", str(fstab)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode != 0
+
+    # Missing img must not match.
+    fstab.write_text("/other/path.img /mnt/ws ext4 loop 0 0\n")
+    result = subprocess.run(
+        ["awk", "-v", f"img={img}", "$1 == img { found=1; exit } END { exit !found }", str(fstab)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert result.returncode != 0
+
+
 def test_deploy_and_ship_refuse_without_apply():
     for name in ("deploy.sh", "ship.sh", "restore.sh", "migrate-v1-workspace.sh"):
         env = {**os.environ, "APPLY": "0"}
@@ -186,6 +228,7 @@ def test_makefile_has_section_14_3_targets():
         "secrets",
         "hash-password",
         "firewall",
+        "firewall-install",
         "backup",
         "restore",
         "restore-test",

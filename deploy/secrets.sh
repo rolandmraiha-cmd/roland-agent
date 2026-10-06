@@ -13,8 +13,6 @@ token_names=(
     sandbox_api_token
     browser_api_token
 )
-vnc_names=(vnc_password vnc_view_password)
-
 mkdir -p -- "$secrets_dir"
 chmod 0700 -- "$secrets_dir" || true
 

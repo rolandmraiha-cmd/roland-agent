@@ -70,7 +70,8 @@ make preflight-edge       # read-only partial edge checks only
 make preflight            # full host preflight (read-only; APPLY=1 only to write AGENT_HOST)
 make secrets              # create missing secrets/*; never prints values; APPLY=1 to chown 1000
 make hash-password        # writes secrets/agent_password_hash (FORCE=1 to overwrite)
-make firewall             # dry-run; APPLY=1 installs iptables/nft rules + systemd unit
+make firewall             # dry-run iptables/nft rules (no --install)
+make firewall-install     # APPLY=1 required: install unit/script + apply rules
 make workspace-fs         # dry-run; APPLY=1 creates 10G loop FS (never reformats)
 make deploy               # APPLY=1 required: preflight → build → up → smoke
 make ship HOST=… REF=v2   # APPLY=1: remote git pull + make deploy
