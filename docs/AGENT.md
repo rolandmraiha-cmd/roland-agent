@@ -22,7 +22,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. Small loc
 3. No secrets in the repo, no telemetry, no hosted model APIs, no obfuscated code.  
 4. Shell / browser / screen / training stay off in production until their milestones ship.  
 5. Docs and instruction markdown: draft → **Roland approves text** → then PR.  
-6. Do not run commands that are not listed in §5 — especially not speculative `make deploy` / `make ship`.
+6. Do not run host-mutating deploy commands against Contabo without Roland's go-ahead and `APPLY=1`.
 
 ## 3. Done on `v2` (merged)
 
@@ -34,7 +34,8 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. Small loc
 | M1 | File secrets, local model URL guard, migrations, audit, backups, CLI | #16–#18 |
 | M2 web | Peer allowlist, auth middleware, cookies, CSP | #19 |
 | M2 edge | Caddy + core compose, limits, only Caddy publishes 80/443 | #20 |
-| M2 model runtime | Isolated llama.cpp, installer, CI probes | #21 → tip **`dece4be`** |
+| M2 model runtime | Isolated llama.cpp, installer, CI probes | #21 |
+| M2 providers | Local brains, grammar actions, context budget; `test_no_hosted_llm` in unit CI | #24 → tip **`07340cc`** |
 
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).  
 - Contabo: VPS exists and is healthy; **`/opt/roland-agent` empty** — nothing deployed.  
@@ -42,8 +43,8 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. Small loc
 
 ## 4. Not done (do not document as available)
 
-- ~~**M2.10–13:**~~ provider factory, local brains, grammar actions, context budget, no-hosted-LLM CI — in PR on `v2-m2-provider`  
-- **M2.5–6:** full `preflight.sh`, secrets helper, workspace quota FS, firewall, deploy/ship/verify  
+- **M2.5–6:** deploy scripts + Makefile targets on `v2-m2-deploy` (this PR). `model-bench` deferred.
+- Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit/pytest already runs `tests/test_no_hosted_llm.py`.
 - Contabo acceptance checklist (§6) numbers  
 - M3 approval gate · M4 sandbox · M5 files UI · M6 browser · M7 screen/sign-in · M8 persona/training · M9 release  
 
@@ -61,16 +62,28 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. Small loc
 ```bash
 make lint
 make fmt-check
-make test                 # pytest + frontend node tests
+make test                 # pytest + frontend node tests (includes test_no_hosted_llm)
 make test-integration     # real edge/model Docker; disposable fixtures; not production
 make build
 make compose-config
 make preflight-edge       # read-only partial edge checks only
+make preflight            # full host preflight (read-only; APPLY=1 only to write AGENT_HOST)
+make secrets              # create missing secrets/*; never prints values; APPLY=1 to chown 1000
+make hash-password        # writes secrets/agent_password_hash (FORCE=1 to overwrite)
+make firewall             # dry-run iptables/nft rules (no --install)
+make firewall-install     # APPLY=1 required: install unit/script + apply rules
+make workspace-fs         # dry-run; APPLY=1 creates 10G loop FS (never reformats)
+make deploy               # APPLY=1 required: preflight → build → up → smoke
+make ship HOST=… REF=v2   # APPLY=1: remote git pull + make deploy
+make verify               # PASS/FAIL checklist; skips unavailable checks
+make backup / restore FILE=… / restore-test FILE=…
+make migrate-v1-workspace # APPLY=1; fresh Contabo usually skips
 make model-fetch MODEL=qwen3-4b-q4km
 make model-install FILE=/absolute/path.gguf ID=qwen3-4b-q4km
+# make model-bench        # deferred
 ```
 
-There is **no** `make deploy`, `make ship`, `make verify`, `make secrets`, `make firewall`, or `make model-bench`.
+Host-mutating steps need `APPLY=1`. No live Contabo/DNS/ACME from this PR. `make model-bench` is deferred.
 
 ### CLI (`python -m agent …`)
 
@@ -173,9 +186,10 @@ Repo `docs/v2-spec.md` is the **detailed target** (long). This **AGENT.md** is t
 | `agent/tools.py`, `scheduler.py`, `memory.py`, `audit.py`, `backup.py` | Tools, jobs, persistence |
 | `agent/web/` | FastAPI + static UI |
 | `docker-compose.yml`, `docker/caddy/`, `docker/model/` | Edge + model |
-| `deploy/model.sh`, `model_store.py`, `models.lock`, `preflight_edge.py` | Installer + partial preflight |
+| `deploy/model.sh`, `model_store.py`, `models.lock`, `preflight_edge.py` | Installer + partial edge preflight |
+| `deploy/{preflight,secrets,workspace-fs,firewall,deploy,ship,verify,restore,hash-password}.sh` | M2.5 host deploy baseline (APPLY=1 for mutations) |
 | `tests/` | Unit, frontend, edge/model integration |
 
 ## 12. Last verified tests (handoff)
 
-On PR #21 source: full CI green (lint, unit, frontend, edge). Locally rechecked 2026-10-07: **382 passed, 14 skipped** (suite shape may differ slightly from handoff counts; re-run `make test` before claiming). CI TinyStories does **not** prove Qwen RAM or Contabo speed.
+Remote `v2` tip **`07340cc`** (#24). Locally rechecked after M2.5–6 scripts: re-run `make test` before claiming. CI TinyStories does **not** prove Qwen RAM or Contabo speed.
