@@ -1,4 +1,8 @@
-"""Ollama local brain: httpx streaming with schema/json format."""
+"""Ollama local brain: httpx streaming with schema/json format.
+
+Factory passes ``server_token`` and ``tool_mode`` for API parity with llama.cpp;
+Ollama has no API-key auth and always uses schema/json ``format`` (those args are ignored).
+"""
 
 from __future__ import annotations
 
@@ -37,9 +41,11 @@ class OllamaBrain:
         ctx: int = 6144,
     ):
         validate_endpoint(base_url, allowed_hosts)
+        del server_token  # Ollama has no API-key auth; accepted for factory parity only.
         self.model = model
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
+        # tool_mode is unused: Ollama always uses schema/json format (no GBNF/native modes).
         self.tool_mode = tool_mode
         self.ctx = ctx
         self.root = _root(base_url)

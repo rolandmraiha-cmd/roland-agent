@@ -49,7 +49,6 @@ class LlamaCppBrain:
     ):
         validate_endpoint(base_url, allowed_hosts)
         self.model = model
-        self.server_token = server_token
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.tool_mode = tool_mode

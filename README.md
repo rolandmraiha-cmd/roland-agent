@@ -2,7 +2,7 @@
 
 Roland's private, always-on AI agent: password-protected web chat, local open-weight model only, tools, and approved background jobs. Target host is a Contabo VPS — **not deployed there yet**.
 
-**Branch:** `v2` (verified tip at handoff: `dece4be`, PR #21 merged).
+**Branch:** `v2` (tip includes #24 providers; host deploy scripts land via `v2-m2-deploy`).
 
 ## What works now
 
@@ -10,7 +10,7 @@ Web chat, SQLite memory/jobs/audit/backups, public web fetch and workspace file 
 
 ## What does not
 
-Local provider/grammar/context rewrite (M2.10–13), full host deploy scripts, Contabo model measurements, terminal sandbox, browser, screen/sign-in. There is **no** `make deploy` / `make ship`.
+Local provider/grammar/context rewrite (M2.10–13; see open PR if any), Contabo model measurements, terminal sandbox, browser, screen/sign-in. Host deploy scripts exist (`make preflight` / `secrets` / `firewall` / `deploy` / `ship` / `verify`) but require `APPLY=1` and are **not** run against Contabo yet. `make model-bench` is deferred.
 
 ## Commands that exist
 
@@ -28,6 +28,15 @@ make build && make compose-config && make preflight-edge
 make test-integration           # needs Docker; disposable fixtures
 make model-fetch MODEL=qwen3-4b-q4km
 make model-install FILE=/abs/path.gguf ID=qwen3-4b-q4km
+
+# Host deploy baseline (destructive steps need APPLY=1; no Contabo/DNS from here)
+make secrets                    # create missing secrets/* (never prints values)
+make hash-password              # writes secrets/agent_password_hash
+make preflight                  # full read-only host checks
+# APPLY=1 make firewall         # install iptables/nft rules + systemd unit
+# APPLY=1 make deploy           # preflight → build → up → smoke
+# APPLY=1 make ship HOST=deploy@host REF=v2
+make verify                     # PASS/FAIL checklist (skips what is unavailable)
 ```
 
 Also: `python -m agent` subcommands `chat`, `migrate --check`, `audit-verify`, `backup-now`, `restore`, `healthcheck`, `gen-token`.
