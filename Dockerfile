@@ -2,9 +2,8 @@
 # python:3.12-slim as of 4 Oct 2026; bump the digest on purpose when updating.
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
-# Tools the agent's shell can use when ALLOW_SHELL=true.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl git jq ca-certificates procps \
+# The core does not run user commands; the isolated sandbox arrives in M4.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -21,7 +20,10 @@ RUN pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
 # Runs as a normal user, never root. Its data lives in the /data volume. HOME points at the
 # throwaway /tmp, and Python ignores per-user packages, so the shell can't plant code there
 # that the agent would load on its next start.
-RUN useradd --create-home --uid 1000 agent && mkdir -p /data && chown agent:agent /data
+RUN useradd --create-home --uid 1000 agent \
+    && mkdir -p /data /backups /workspace \
+    && chown -R agent:agent /data /backups /workspace \
+    && chmod 0700 /data /backups /workspace
 USER agent
 ENV DATA_DIR=/data HOME=/tmp/home PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 VOLUME /data

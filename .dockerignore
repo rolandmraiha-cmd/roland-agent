@@ -1,6 +1,5 @@
 .env
-secrets/*
-!secrets/.gitkeep
+secrets/
 .ci-workspace/
 .venv
 data

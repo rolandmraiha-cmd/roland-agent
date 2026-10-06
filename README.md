@@ -8,7 +8,7 @@ such as llama.cpp or [Ollama](https://ollama.com). The current client uses nativ
 completions; the full v2 provider implementations come in M2.
 
 The isolated terminal, browser, screen viewing and sign-in services are still planned.
-See [RUNBOOK](docs/RUNBOOK.md) for the current configuration stage and development overrides.
+See [RUNBOOK](docs/RUNBOOK.md) for the implemented edge, configuration and persistence stages.
 
 ## What it can do
 
@@ -30,22 +30,28 @@ See [RUNBOOK](docs/RUNBOOK.md) for the current configuration stage and developme
 - **Safety:** a daily cap on model calls (`DAILY_CALL_LIMIT`) and a cap on tool steps per message
   (`MAX_TOOL_STEPS`).
 
-## Run the current development baseline with Docker
+## Docker edge foundation (M2.1–M2.2)
 
-1. Copy the settings file: `cp .env.example .env`
-   For the existing compose file, set `MODEL_PROVIDER=ollama`,
-   `MODEL_BASE_URL=http://ollama:11434/v1`, `MODEL_NAME=qwen2.5:7b`,
-   `MODEL_TOOL_MODE=native` and `MODEL_ALLOWED_HOSTS=ollama,127.0.0.1,localhost,::1`.
-2. Make your password hash and paste the line it prints into `.env`:
-   `docker compose run --rm --no-deps agent python -m agent hash-password`
-3. Start everything: `docker compose up -d --build`
-4. Download a model into Ollama (once): `docker compose exec ollama ollama pull qwen2.5:7b`
-5. Open <http://localhost:8080>. For testing on plain `http://localhost`, set
-   `COOKIE_SECURE=false` in `.env`.
+The root compose file now contains **Caddy and core**. Caddy is the only service publishing
+ports (80/tcp, 443/tcp and 443/udp); core binds only to its private edge address. Both run
+as uid 1000 with read-only roots, dropped capabilities, bounded resources and persistent
+data. Caddy blocks public health/internal routes and proxies streamed replies without buffering.
 
-The example's static model IP belongs to the future v2 compose deployment. The current
-development compose file needs the overrides above. Public model endpoints are refused;
-`MODEL_API_KEY` is ignored. Use `MODEL_SERVER_TOKEN` for a local server requiring authentication.
+This is a tested edge foundation, with the model container/providers, full Linux preflight,
+firewall and workspace quota still to follow. Chat inference and the browser/screen/sandbox
+services are not supplied by this compose slice. The old 8 GB Ollama development service is
+removed. Use the native development instructions below for an already installed local model.
+
+`.env.example` has no credentials. Compose mounts private `agent_password_hash` and
+`model_server_token` files from `secrets/`, and requires an existing workspace bind directory.
+Both secret files must be uid 1000/mode 0400, and their directory and the workspace must be
+uid 1000/mode 0700. Full bootstrap/deployment commands arrive with the next deployment work.
+The edge's read-only checks are `make compose-config` and `make preflight-edge`; `make build`
+builds the pinned images. No `make deploy` is provided for this incomplete stage.
+
+GitHub CI builds the real images and tests HTTPS login, CSRF, forwarded-address spoofing,
+screen refusal, private storage permissions and restart persistence with disposable fixtures.
+It uses only a localhost test CA and makes no model request. See the runbook for scope and limits.
 
 ## Run it without Docker (development)
 
@@ -55,6 +61,7 @@ pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 pip install --no-deps --no-build-isolation --no-index -e .
 cp .env.example .env              # set MODEL_BASE_URL=http://localhost:11434/v1, DATA_DIR=./data
 # For Ollama, also set MODEL_PROVIDER=ollama, MODEL_NAME to an installed tag and MODEL_TOOL_MODE=native.
+# Local HTTP development also needs COOKIE_SECURE=false and BACKUP_DIR left empty.
 python -m agent hash-password     # paste the printed line into .env
 python -m agent                   # web page on http://localhost:8080
 python -m agent chat              # or chat in the terminal
@@ -65,23 +72,12 @@ Shell commands are off by default everywhere. Never set `ALLOW_SHELL=true` on yo
 
 ## Putting it online
 
-The final isolated Linux deployment comes in later milestones. The settings below describe
-the current web edge only; they do not install browser, screen or sandbox services.
-
-The container only listens on `127.0.0.1:8080`. To reach it from your phone anywhere, put a
-reverse proxy with HTTPS in front of it, such as [Caddy](https://caddyserver.com) or Nginx with
-Let's Encrypt, and keep `COOKIE_SECURE=true`. Never expose port 8080 directly.
-
-Then set these in `.env`:
-
-- `ALLOWED_HOSTS` to your hostname, like `agent.example.com`.
-- `AGENT_ENV=production`, which requires secure cookies, an allowed web hostname, and
-  `MODEL_SERVER_TOKEN` when using llama.cpp. Local shell execution is refused in production.
-- `FORWARDED_ALLOW_IPS` to the proxy's IP as the agent sees it (for Caddy on the same machine
-  talking to the container, usually the Docker gateway, like `172.17.0.1`). Only that address
-  may say who the real visitor is, so the per-address lockout counts real visitors and a stranger
-  can't pretend to be someone else. If a request carries `X-Forwarded-For` from an address that
-  isn't listed, the agent ignores the header and logs a warning once.
+Final Linux installation is still pending. The implemented edge computes the hostname from
+`AGENT_DOMAIN`, or `AGENT_FALLBACK_HOST` when no domain is set. Caddy uses ACME by default;
+`CADDY_TLS=internal` is for a local test CA and is not publicly trusted. It passes the same
+hostname to core and enforces secure cookies, production mode and trust of only its fixed
+private proxy IP. Core has no published port. Shell, browser, screen and training flags
+remain forced off until those services are implemented.
 
 ## Security notes
 
@@ -90,7 +86,7 @@ Then set these in `.env`:
   - Sessions are random tokens, and only their hash is kept in the database.
   - The cookie is `HttpOnly`, `SameSite=Strict` and `Secure`.
   - A login ends after `SESSION_DAYS`, or after `SESSION_IDLE_HOURS` (default 72) unused.
-  - Changing the password hash in `.env` and restarting logs out every device.
+  - Changing the configured password hash (the mounted file in Compose) and restarting logs out every device.
 - **Wrong passwords:**
   - 5 wrong passwords from one address within 15 minutes lock that address for 15 minutes.
     Other addresses, like yours, can still log in. IPv6 is counted per /64 network, since one

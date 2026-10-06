@@ -1,43 +1,127 @@
+name: roland-agent
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging: *logging
+
+x-host: &agent_host ${AGENT_DOMAIN:-${AGENT_FALLBACK_HOST:-37-60-226-214.sslip.io}}
+
+# M2 edge slice: model/provider, firewall and workspace quota work follows.
+# Only implemented services are enabled. Do not treat this as the final deployment.
 services:
-  agent:
-    build: .
+  caddy:
+    <<: *hardening
+    build: { context: ., dockerfile: docker/caddy/Dockerfile }
+    image: roland-agent/caddy:local
+    user: "1000:1000"
+    sysctls: { net.ipv4.ip_unprivileged_port_start: "0" }
+    ports: ["80:80/tcp", "443:443/tcp", "443:443/udp"]
+    environment:
+      AGENT_HOST: *agent_host
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      CADDY_TLS: ${CADDY_TLS:-acme}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-100}
+    volumes: [caddy-data:/data, caddy-config:/config]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    networks:
+      public: { ipv4_address: 10.77.0.2, gw_priority: 100 }
+      edge: { ipv4_address: 10.77.1.2 }
+      screen: { ipv4_address: 10.77.2.2 }
+    depends_on: { core: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 96m
+    memswap_limit: 96m
+    cpus: 0.5
+    pids_limit: 64
+
+  core:
+    <<: *hardening
+    build: { context: ., dockerfile: Dockerfile }
+    image: roland-agent/core:local
+    user: "1000:1000"
     env_file: .env
-    restart: unless-stopped
-    ports:
-      # Only reachable from this machine. Put a reverse proxy with HTTPS in front to go online.
-      - "127.0.0.1:8080:8080"
+    environment:
+      AGENT_ENV: production
+      AGENT_HOST: *agent_host
+      ALLOWED_HOSTS: *agent_host
+      COOKIE_SECURE: "true"
+      HOST: 10.77.1.10
+      PORT: "8080"
+      FORWARDED_ALLOW_IPS: 10.77.1.2
+      CORE_ALLOWED_PEERS: 10.77.1.2
+      DATA_DIR: /data
+      WORKSPACE_DIR: /workspace
+      BACKUP_DIR: /backups
+      ALLOW_SHELL: "false"
+      SHELL_BACKEND: local
+      BROWSER_ENABLED: "false"
+      SCREEN_ENABLED: "false"
+      TRAINING_CAPTURE: "false"
+      TRAINING_LOOP_ENABLED: "false"
+      TRAINER_URL: ""
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-llamacpp}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-http://10.77.6.60:8080}
+      MODEL_MAX_CONCURRENCY: "1"
+      MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
+      AGENT_PASSWORD_HASH_FILE: /run/secrets/agent_password_hash
+    secrets: [model_server_token, agent_password_hash]
     volumes:
       - agent-data:/data
-    # No Docker socket and no host folders. If you turn on ALLOW_SHELL, its commands stay inside
-    # this container, but they still run as the agent's user (a separate sandbox comes in v2).
-    # The container's own files are read-only; only /data (and a small /tmp) can be written.
-    read_only: true
-    tmpfs:
-      - /tmp:size=256m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
+      - backups:/backups
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}
+        target: /workspace
+        bind: { create_host_path: false }
+    tmpfs: ["/tmp:size=96m,mode=1777"]
+    networks:
+      edge: { ipv4_address: 10.77.1.10 }
+      model: { ipv4_address: 10.77.6.10 }
+      core_egress: { gw_priority: 100 }
+    healthcheck:
+      test: ["CMD", "python", "-m", "agent", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    mem_limit: 640m
+    memswap_limit: 640m
+    cpus: 1.0
     pids_limit: 256
-    mem_limit: 2g
-    cpus: 1.5
-    depends_on:
-      - ollama
 
-  # Local development model. See the runbook for v2 configuration overrides.
-  ollama:
-    image: ollama/ollama:0.35.1   # pinned; update on purpose
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
-    pids_limit: 512
-    # A 7b model needs about 6 GB. Raise these for bigger models.
-    mem_limit: 8g
-    cpus: 4
-    # No ports published: only the agent can reach it, on the internal compose network.
-    volumes:
-      - ollama-models:/root/.ollama
+# Reserved bridges are declared now; later services attach when implemented.
+networks:
+  public:         { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.0.0/24 }] } }
+  edge:           { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.1.0/24 }] } }
+  screen:         { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.2.0/24 }] } }
+  sandbox_ctl:    { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.3.0/24 }] } }
+  browser_ctl:    { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.4.0/24 }] } }
+  vnc:            { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.5.0/24 }] } }
+  model:          { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.6.0/24 }] } }
+  trainer_ctl:    { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.7.0/24 }] } }
+  core_egress:    { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.10.0/24 }] } }
+  sandbox_egress: { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.11.0/24 }] } }
+  browser_egress: { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.12.0/24 }] } }
+  trainer_egress: { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.13.0/24 }] } }
 
 volumes:
   agent-data:
-  ollama-models:
+  backups:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  model_server_token: { file: ./secrets/model_server_token }
+  agent_password_hash: { file: ./secrets/agent_password_hash }
