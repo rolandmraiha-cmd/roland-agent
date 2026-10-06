@@ -1,6 +1,6 @@
 # v2 foundations runbook
 
-This document covers the v1 fixes, CI, M1.2 configuration and M1.3 persistence on `v2`. The final Linux
+This document covers the v1 fixes and M1 config, persistence, audit, backups and CLI on `v2`. The final Linux
 deployment, isolated shell, browser and live screen milestones remain unimplemented.
 
 From the repository root, with Python 3.12 and Node.js available:
@@ -80,15 +80,129 @@ This reads the version in read-only mode and prints current/target versions. It 
 create a missing database or apply upgrades, and it does not construct a model client.
 Normal agent startup applies pending upgrades. There is no downgrade command.
 
-For an automatic snapshot before `serve` upgrades a database already at version 1 or higher,
+For an automatic snapshot before `serve` upgrades any existing non-empty database (including unversioned v1),
 set `BACKUP_DIR` to an existing private directory accessible by the core. It writes
 `BACKUP_DIR/db/pre-migrate-v<from>-to-v<to>-<timestamp>.db.gz` using SQLite's online backup
 API, checks integrity, compresses to a private temporary file, fsyncs and atomically renames
 it. The file has mode 0600. Failure stops startup before the upgrade. This hook is off when
 `BACKUP_DIR` is empty or its directory does not exist. The old development compose does not
-mount that directory automatically. Nightly backups, retention and restore are separate work.
+mount that directory automatically. Fresh empty databases do not need a pre-upgrade snapshot.
 
 The fixture `tests/fixtures/v1_4fb0950.sql` contains the exact v1 baseline schema; tests add
 synthetic data to it. No real database, account data or credentials are committed. Run
 `pytest -q tests/test_migrations.py tests/test_memory_v2.py` for migration, rollback and helper
 coverage. The existing full suite continues to run with `make test`.
+
+## Audit log (M1.4)
+
+The agent writes startup, login success/failure, logout, job creation/approval/deletion and
+fact-deletion events into `audit_log`. Model-created jobs are recorded too. Password attempts
+and session cookies are never included. Loaded Config secrets are replaced by `[redacted]`
+in nested string values, keys and labels before UTF-8 byte truncation. Detail stays valid JSON;
+truncated details have `truncated` and `preview` fields. The default limit is 8192 bytes;
+`AUDIT_DETAIL_MAX_BYTES` must be at least 64.
+
+```sh
+python -m agent audit-verify
+```
+
+Verification opens the existing database read-only, without upgrades or model requests.
+It prints JSON containing `ok`, `rows` (rows checked), and `first_bad_id`, and exits non-zero
+on a broken chain or an unavailable audit table. No missing database is created. The hash
+uses canonical JSON with `detail` decoded as an object, and excludes `id`, `prev_hash` and
+`hash`. The first previous hash is 64 zeros. Related session/job/fact changes and their audit
+entry commit in one transaction. A logging failure prevents that change.
+
+The audit API, UI, tool/gate/browser/screen events arrive in their later milestones. This
+stage does not add those features or log screen input. Run `pytest -q tests/test_audit.py`
+for focused checks.
+
+## Backups and restore (M1.5)
+
+These commands and workspace archives use Linux file locks and descriptor-based traversal.
+Set `BACKUP_DIR` to a private location outside the workspace, accessible to the core. The
+old development compose does not mount it; the final deployment will provide the volume.
+An empty BACKUP_DIR keeps automatic backups off. The directory is created when a manual
+or nightly backup runs. Existing directory permissions are the administrator's settings;
+new backup directories use 0700 and archives use 0600.
+
+```dotenv
+BACKUP_DIR=/srv/roland-agent/backups
+BACKUP_TIME=03:30
+BACKUP_KEEP_DAILY=14
+BACKUP_KEEP_WEEKLY=8
+BACKUP_WORKSPACE=true
+BACKUP_WORKSPACE_KEEP=3
+BACKUP_WORKSPACE_MAX_MB=2048
+```
+
+The separate scheduler task runs once per local date at or after BACKUP_TIME, catches up on
+restart, and retries a failed attempt after an hour. Long model jobs do not delay that task.
+Shutdown waits for an already started backup thread before closing Memory or releasing the
+restore lock. Manual backups also satisfy that day's scheduled backup.
+
+```sh
+python -m agent backup-now
+```
+
+No model client is built. Normal Memory startup upgrades still apply; if this command opens
+an older database it first makes a pre-migration snapshot. The SQLite online backup uses a
+separate read connection, checks integrity, compresses, fsyncs, and atomically publishes
+`BACKUP_DIR/db/agent-YYYYMMDD-HHMM.db.gz`. Names use UTC; a repeat within the same minute
+replaces that minute's snapshot atomically. Retention keeps the newest snapshot on each of
+the latest 14 UTC dates, plus the newest snapshot in each of the latest 8 ISO weeks.
+Overlapping daily and weekly selections are stored once. Pre-migration files and unrelated
+files are not pruned. A second backup process is refused while the backup lock is held.
+
+Workspace archives use `BACKUP_DIR/workspace/workspace-YYYYMMDD.tar.gz` and keep the newest
+3; another backup on the same UTC day atomically replaces that day's archive. They exclude
+`.trash/`, `.uploads-tmp/`, and `.sandbox-home/.cache/`. Symlinks are stored as links, never
+followed. Sockets, FIFOs and devices are omitted; hard links are refused. Files are read
+through directory descriptors with O_NOFOLLOW, including after a hostile symlink swap.
+The size limit sums regular-file bytes as files are archived. An oversized workspace is
+skipped while the database backup succeeds; the audit entry records `skipped_over_limit`.
+A workspace archive is a live file copy, not a filesystem snapshot; concurrent deletions or
+shortened files can fail that backup safely without replacing its previous archive.
+
+Success/failure updates `last_backup_ok`/`last_backup_error` in meta and `/api/status` and
+writes a redacted audit entry. Stored errors include only the error class, without paths
+or exception values. The core checkpoints WAL after a successful backup. A busy checkpoint
+does not invalidate the consistent snapshot. Admin backup API/UI remain M2 work.
+
+To restore, first stop the core and any chat/run-jobs/backup command. Keep the previous files
+until you have checked the result:
+
+```sh
+python -m agent restore /srv/roland-agent/backups/db/agent-YYYYMMDD-HHMM.db.gz
+python -m agent migrate --check
+python -m agent audit-verify
+```
+
+The command holds exclusive `/data/.serve.lock` access (the path uses DATA_DIR); normal
+serve/chat/jobs/backup commands hold a shared lock for their lifetime. A retained lock file
+with no process holding it does not block restore. Restore accepts a compressed SQLite
+agent database, verifies integrity and foreign keys, applies migrations and checks its
+audit chain on a private temporary copy. Future schemas and invalid/tampered snapshots are
+refused before touching current data. Old login sessions are removed and a restore audit
+entry is added to the staged copy. Existing `agent.db`, WAL/SHM/journal files are moved to
+`agent.db.pre-restore-<UTC timestamp>*` before installing it. Caught rename/install failures
+put those old files back. Restoring requires a fresh web login. Workspace restoration is
+manual and is not part of this command; inspect archived symlinks before extracting an
+archive to an empty directory.
+
+## Health and token utilities (M1.6)
+
+```sh
+python -m agent healthcheck
+python -m agent gen-token
+```
+
+Healthcheck returns exit 0 only for HTTP 200 with exactly `{"ok":true}` from the configured
+literal bind address and PORT (wildcard binds become loopback). It supplies the allowed
+web Host header, ignores environment proxies, refuses redirects and has a three-second
+HTTP timeout. It does not create a database, upgrade it or call the model. `/healthz` is
+public and minimal; M2 Caddy/firewall work restricts its external reachability.
+
+Gen-token prints a cryptographically random, URL-safe token encoding 32 bytes. It reads no
+configuration and creates no database or file. Redirect its output directly to a private
+secret file when configuring the later service containers; never commit the token.

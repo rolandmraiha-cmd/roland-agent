@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import AsyncIterator
 
+from .audit import Audit
 from .brain import Brain, Step
 from .config import Config
 from .memory import Job, Memory
@@ -61,11 +62,13 @@ class Agent:
         self.config = config
         self.memory = memory
         self.brain = brain
+        self.audit = Audit.from_config(memory, config)
         # Off unless ALLOW_SHELL=true. Commands run as the agent's own user, so they could reach
         # its database and settings; a separate sandbox is planned for v2.
         self.allow_shell = config.allow_shell
         self._streams = asyncio.Semaphore(MAX_STREAMS)
         self.ctx = ToolContext(memory, config.workspace, config.timezone, self.allow_shell)
+        self.ctx.audit = self.audit
         config.workspace.mkdir(parents=True, exist_ok=True)
 
     def system_prompt(self, extra: str = "") -> str:

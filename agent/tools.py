@@ -8,13 +8,14 @@ import json
 import os
 import socket
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
+from .audit import Audit, NullAudit
 from .memory import Memory
 from .schedule import next_run_after, valid_cron
 
@@ -46,6 +47,7 @@ class ToolContext:
     workspace: Path
     timezone: str
     allow_shell: bool
+    audit: Audit | NullAudit = field(default_factory=NullAudit)
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[str]]
@@ -292,7 +294,10 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
     if len(prompt) > MAX_JOB_PROMPT:
         return f"Error: a job prompt can be at most {MAX_JOB_PROMPT} characters."
     nxt = next_run_after(cron, ctx.timezone)
-    job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False, origin="agent")
+    with ctx.memory.transaction():
+        job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False, origin="agent")
+        ctx.audit.write("agent", "job_created", tool="schedule_job",
+                        detail={"job_id": job_id, "name": name, "cron": cron, "approved": False})
     return (f"Created job {job_id} '{name}' ({cron}, {ctx.timezone}). It is waiting for Roland's "
             "approval: tell him to press Approve on the Jobs tab. It won't run until then.")
 

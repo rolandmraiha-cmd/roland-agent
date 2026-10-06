@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from .core import Agent
 from .memory import Job
@@ -74,9 +76,55 @@ async def execute(agent: Agent, job: Job) -> None:
 
 
 async def scheduler_loop(agent: Agent, every: float = 20.0) -> None:
+    backup_task = asyncio.create_task(backup_loop(agent)) if agent.config.backup_dir is not None else None
+    try:
+        while True:
+            try:
+                await run_due_jobs(agent)
+            except Exception:
+                log.exception("scheduler error")
+            await asyncio.sleep(every)
+    finally:
+        if backup_task:
+            backup_task.cancel()
+            await asyncio.gather(backup_task, return_exceptions=True)
+
+
+async def run_backup_if_due(agent: Agent, now: float | None = None) -> bool:
+    """Run once per local day, retry failures hourly, and catch up after a restart."""
+    from .backup import backup_now, validate_backup_config
+
+    if agent.config.backup_dir is None:
+        return False
+    validate_backup_config(agent.config)
+    now = time.time() if now is None else now
+    zone = ZoneInfo(agent.config.timezone)
+    local = datetime.fromtimestamp(now, zone)
+    hour, minute = map(int, agent.config.backup_time.split(":"))
+    if (local.hour, local.minute) < (hour, minute):
+        return False
+    success = agent.memory.get_meta("last_backup_ok")
+    if success and datetime.fromtimestamp(float(success), zone).date() >= local.date():
+        return False
+    attempt = agent.memory.get_meta("last_backup_attempt")
+    if attempt and now - float(attempt) < 3600:
+        return False
+    agent.memory.set_meta("last_backup_attempt", str(now))
+    task = asyncio.create_task(asyncio.to_thread(backup_now, agent.config, agent.memory, agent.audit, now=now))
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # The thread cannot be cancelled. Keep Memory and the server's restore lock alive.
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+    return True
+
+
+async def backup_loop(agent: Agent, every: float = 20.0) -> None:
+    """Separate from model jobs so a long model reply cannot delay the nightly backup."""
     while True:
         try:
-            await run_due_jobs(agent)
-        except Exception:
-            log.exception("scheduler error")
+            await run_backup_if_due(agent)
+        except Exception as error:
+            log.error("scheduled backup failed: %s", type(error).__name__)
         await asyncio.sleep(every)

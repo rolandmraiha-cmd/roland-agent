@@ -41,8 +41,14 @@ jobs:
           cache-dependency-path: |
             requirements.lock
             requirements-dev.lock
+      - run: python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+      - run: pytest -q
+
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
           node-version: "20"
-      - run: python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
-      - run: make test
+      - run: node --test tests/frontend/chat.test.cjs

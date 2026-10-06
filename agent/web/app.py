@@ -150,6 +150,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     async def lifespan(app: FastAPI):
         if run_scheduler and (n := agent.memory.fail_unfinished_runs()):
             log.info("marked %s unfinished job run(s) as failed", n)
+        agent.audit.write("system", "startup", detail={"scheduler": run_scheduler})
         loop_task = asyncio.create_task(scheduler_loop(agent)) if run_scheduler else None
         try:
             yield
@@ -184,7 +185,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
                 sent = request.headers.get("x-csrf-token", "")
                 if not hmac.compare_digest(sent, csrf_token(token)):
                     return JSONResponse({"error": "bad csrf token"}, status_code=403)
-        public = path in {"/login", "/favicon.ico"} or path.startswith("/static/")
+        public = path in {"/login", "/favicon.ico", "/healthz"} or path.startswith("/static/")
         if not public and not logged_in(request):
             if path.startswith("/api/"):
                 return JSONResponse({"error": "not logged in"}, status_code=401)
@@ -203,6 +204,10 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     # --- login ---
+    @app.get("/healthz")
+    async def healthz():
+        return {"ok": True}
+
     def login_page(message: str = "", status: int = 200) -> HTMLResponse:
         page = (STATIC / "login.html").read_text()
         page = page.replace("{{name}}", html.escape(config.agent_name))
@@ -223,16 +228,22 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         form = await request.form()
         given = str(form.get("password", ""))[:1024]
 
+        def failed(reason: str) -> None:
+            agent.audit.write("roland", "login_fail", detail={"client": ip, "reason": reason})
+
         def locked_page(wait: float) -> HTMLResponse:
             return login_page(
                 f"Too many wrong passwords. Try again in {int(wait // 60) + 1} min.", 429)
 
         # A locked address is turned away before it can take a place in the queue.
         if wait := limiter.locked(ip):
+            failed("locked")
             return locked_page(wait)
         if ip in gate.inflight:
+            failed("inflight")
             return login_page("A login from your address is already being checked.", 429)
         if gate.waiting >= MAX_WAITING:
+            failed("busy")
             return login_page("The login is busy. Try again in a moment.", 429)
         gate.inflight.add(ip)
         try:
@@ -242,12 +253,14 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
                 # time. Only that happens under the lock; the slowdown runs after releasing it.
                 async with gate.lock:
                     if wait := limiter.locked(ip):
+                        failed("locked")
                         return locked_page(wait)
                     ok = await asyncio.to_thread(password_ok, given, config.password_hash)
                     if ok:
                         limiter.succeeded(ip)
                     else:
                         limiter.failed(ip)
+                        failed("wrong_password")
                         delay = 1 + limiter.slowdown()
             finally:
                 gate.waiting -= 1
@@ -259,13 +272,18 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         finally:
             gate.inflight.discard(ip)
         response = RedirectResponse("/", status_code=303)
-        response.set_cookie(COOKIE, sessions.create(), max_age=config.session_days * 86400,
+        with agent.memory.transaction():
+            token = sessions.create()
+            agent.audit.write("roland", "login_ok", detail={"client": ip})
+        response.set_cookie(COOKIE, token, max_age=config.session_days * 86400,
                             httponly=True, secure=config.cookie_secure, samesite="strict", path="/")
         return response
 
     @app.post("/logout")
     async def logout(request: Request):
-        sessions.end(request.cookies.get(COOKIE))
+        with agent.memory.transaction():
+            sessions.end(request.cookies.get(COOKIE))
+            agent.audit.write("roland", "logout")
         response = JSONResponse({"ok": True})
         response.delete_cookie(COOKIE, path="/")
         return response
@@ -280,7 +298,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         return {"name": config.agent_name, "model": config.model_name,
                 "csrf": csrf_token(request.cookies.get(COOKIE, "")),
                 "calls_left": agent.calls_left(), "daily_limit": config.daily_call_limit,
-                "shell": agent.allow_shell}
+                "shell": agent.allow_shell,
+                "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
+                "last_backup_error": agent.memory.get_meta("last_backup_error")}
 
     @app.get("/api/chats")
     async def chats():
@@ -357,8 +377,11 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         if not valid_cron(body.cron.strip()):
             raise HTTPException(400, "not a valid 5-field cron schedule")
         cron = body.cron.strip()
-        job_id = agent.memory.add_job(body.name, cron, body.prompt,
-                                      next_run_after(cron, config.timezone))
+        with agent.memory.transaction():
+            job_id = agent.memory.add_job(body.name, cron, body.prompt,
+                                          next_run_after(cron, config.timezone))
+            agent.audit.write("roland", "job_created",
+                              detail={"job_id": job_id, "name": body.name, "cron": cron, "approved": True})
         return {"id": job_id}
 
     @app.post("/api/jobs/{job_id}/toggle")
@@ -395,20 +418,27 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         job = agent.memory.job(job_id)
         if not job:
             raise HTTPException(404, "no such job")
-        agent.memory.set_next_run(job_id, next_run_after(job.cron, config.timezone))
-        agent.memory.approve_job(job_id)
+        with agent.memory.transaction():
+            agent.memory.set_next_run(job_id, next_run_after(job.cron, config.timezone))
+            if not agent.memory.approve_job(job_id):
+                raise HTTPException(404, "no such job")
+            agent.audit.write("roland", "job_approved", detail={"job_id": job_id})
         return {"ok": True}
 
     @app.delete("/api/facts/{fact_id}")
     async def delete_fact(fact_id: int):
-        if not agent.memory.forget(fact_id):
-            raise HTTPException(404, "no such fact")
+        with agent.memory.transaction():
+            if not agent.memory.forget(fact_id):
+                raise HTTPException(404, "no such fact")
+            agent.audit.write("roland", "fact_deleted", detail={"fact_id": fact_id})
         return {"ok": True}
 
     @app.delete("/api/jobs/{job_id}")
     async def delete_job(job_id: int):
-        if not agent.memory.delete_job(job_id):
-            raise HTTPException(404, "no such job")
+        with agent.memory.transaction():
+            if not agent.memory.delete_job(job_id):
+                raise HTTPException(404, "no such job")
+            agent.audit.write("roland", "job_deleted", detail={"job_id": job_id})
         return {"ok": True}
 
     @app.get("/favicon.ico")

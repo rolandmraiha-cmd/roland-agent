@@ -9,6 +9,8 @@ import secrets
 import sqlite3
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
@@ -63,6 +65,7 @@ class Job:
 
 class Memory:
     def __init__(self, path: Path | str, *, backup_dir: Path | None = None):
+        existing_database = str(path) != ":memory:" and Path(path).is_file() and Path(path).stat().st_size > 0
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).touch(mode=0o600, exist_ok=True)
@@ -71,7 +74,8 @@ class Memory:
         # writing at the same moment.
         self._db = sqlite3.connect(str(path), check_same_thread=False, timeout=10)
         self._db.row_factory = sqlite3.Row
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._transaction_depth = 0
         try:
             with self._lock:
                 self._db.execute("PRAGMA foreign_keys = ON")
@@ -80,7 +84,12 @@ class Memory:
                     self._db.execute("PRAGMA journal_mode = WAL")
                 self._db.execute("PRAGMA synchronous = NORMAL")
                 version = current_version(self._db)
-                if 1 <= version < latest_version() and backup_dir is not None and backup_dir.is_dir():
+                if (
+                    (version >= 1 or existing_database)
+                    and version < latest_version()
+                    and backup_dir is not None
+                    and backup_dir.is_dir()
+                ):
                     pre_migration_backup(self._db, backup_dir, version, latest_version())
                 migrate(self._db)
         except BaseException:
@@ -97,9 +106,33 @@ class Memory:
             return current_version(self._db)
 
     def _exec(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
-        with self._lock, self._db:
+        with self.transaction():
             cur = self._db.execute(sql, args)
             return cur
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Commit related changes together, including nested Memory and audit writes."""
+        with self._lock:
+            depth = self._transaction_depth
+            savepoint = f"memory_transaction_{depth}"
+            self._db.execute("BEGIN IMMEDIATE" if depth == 0 else f"SAVEPOINT {savepoint}")
+            self._transaction_depth += 1
+            try:
+                yield self._db
+                if depth == 0:
+                    self._db.commit()
+                else:
+                    self._db.execute(f"RELEASE SAVEPOINT {savepoint}")
+            except BaseException:
+                if depth == 0:
+                    self._db.rollback()
+                else:
+                    self._db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    self._db.execute(f"RELEASE SAVEPOINT {savepoint}")
+                raise
+            finally:
+                self._transaction_depth -= 1
 
     def _all(self, sql: str, args: tuple = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -134,7 +167,7 @@ class Memory:
         self, chat_id: int, role: str, content: str, kind: str, meta: str | None, run_id: str | None
     ) -> int:
         now = time.time()
-        with self._lock, self._db:
+        with self.transaction():
             cursor = self._db.execute(
                 "INSERT INTO messages(chat_id, role, content, created, kind, meta, run_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
