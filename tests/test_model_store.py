@@ -98,6 +98,50 @@ def test_installer_refuses_storage_symlinks_and_incomplete_registry(fixture):
         store.install(root, "test-tiny", entry, source=source)
 
 
+def test_recovers_registry_without_current_symlink(fixture):
+    root, source, entry = fixture
+    version = store.install(root, "test-tiny", entry, source=source)
+    (root / "current").unlink()
+    assert not (root / "current").exists()
+    second = store.install(root, "test-tiny", entry, source=source, version_id="test-tiny-second")
+    assert (root / "current").resolve() == root / "versions" / version
+    registry = json.loads((root / "registry.json").read_text())
+    assert registry["current"] == version
+    assert registry["versions"][second]["status"] == "available"
+
+
+def test_recovers_current_without_registry(fixture):
+    root, source, entry = fixture
+    version = store.install(root, "test-tiny", entry, source=source)
+    (root / "registry.json").unlink()
+    second = store.install(root, "test-tiny", entry, source=source, version_id="test-tiny-second")
+    registry = json.loads((root / "registry.json").read_text())
+    assert registry["current"] == version
+    assert (root / "current").resolve() == root / "versions" / version
+    assert registry["versions"][second]["status"] == "available"
+
+
+def test_first_install_symlink_survives_missing_registry(fixture):
+    """Crash after symlink / before registry must be recoverable (new publish order)."""
+    root, source, entry = fixture
+    version = store.install(root, "test-tiny", entry, source=source)
+    # Simulate the recoverable half-state the old order could leave, and the
+    # new order intentionally prefers: current present, registry absent.
+    (root / "registry.json").unlink()
+    assert (root / "current").is_symlink()
+    again = store.install(root, "test-tiny", entry, source=source)
+    assert again == version
+    registry = json.loads((root / "registry.json").read_text())
+    assert registry["current"] == version and registry["versions"][version]["status"] == "active"
+
+
+def test_model_sh_install_uses_network_none():
+    script = Path(__file__).resolve().parents[1] / "deploy" / "model.sh"
+    body = script.read_text()
+    assert "--network none" in body
+    assert 'if [[ $1 == fetch ]]; then' in body
+
+
 @pytest.mark.parametrize("model", ["missing", "../test-tiny", "/test-tiny"])
 def test_catalogue_refuses_unknown_ids(model):
     with pytest.raises(store.InstallRefused):

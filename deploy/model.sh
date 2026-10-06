@@ -35,11 +35,18 @@ if ! docker volume inspect "${model_project}_models" >/dev/null 2>&1; then
     docker volume create --label "com.docker.compose.project=$model_project" \
         --label com.docker.compose.volume=models "${model_project}_models" >/dev/null
 fi
-model_network="$model_project-model-fetch-$model_suffix"
-docker network create --driver bridge "$model_network" >/dev/null
-model_cleanup() { docker network rm "$model_network" >/dev/null || true; }
-trap model_cleanup EXIT
-docker run --rm --name "$model_network" --network "$model_network" \
+model_run_name="$model_project-model-$1-$model_suffix"
+if [[ $1 == fetch ]]; then
+    model_network="$model_project-model-fetch-$model_suffix"
+    docker network create --driver bridge "$model_network" >/dev/null
+    model_cleanup() { docker network rm "$model_network" >/dev/null || true; }
+    trap model_cleanup EXIT
+    model_network_args=(--network "$model_network")
+else
+    # Local FILE installs need no egress.
+    model_network_args=(--network none)
+fi
+docker run --rm --name "$model_run_name" "${model_network_args[@]}" \
     --user 1000:1000 --read-only --cap-drop ALL --security-opt no-new-privileges \
     --memory 128m --memory-swap 128m --cpus 1 --pids-limit 64 \
     --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
