@@ -39,9 +39,9 @@ async def test_shell_runs_in_workspace_without_secrets(ctx, monkeypatch):
 async def test_shell_off_by_default(ctx, make_agent, monkeypatch):
     monkeypatch.delenv("ALLOW_SHELL", raising=False)
     monkeypatch.setenv("AGENT_IN_CONTAINER", "1")  # being in a container no longer turns it on
-    assert make_agent().allow_shell is False
+    assert make_agent(allow_shell=False).allow_shell is False
     monkeypatch.setenv("ALLOW_SHELL", "true")
-    assert make_agent().allow_shell is True
+    assert make_agent(allow_shell=True).allow_shell is True
     ctx.allow_shell = False
     assert "turned off" in await call_tool(ctx, "run_shell", {"command": "ls"})
 

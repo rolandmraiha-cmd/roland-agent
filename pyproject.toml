@@ -1,7 +1,7 @@
 [project]
 name = "roland-agent"
 version = "0.1.0"
-description = "Roland's own always-on AI agent: web chat, memory, tools and background jobs, with any OpenAI-compatible model as the brain."
+description = "Roland's own always-on AI agent: web chat, memory, tools and background jobs with a local model."
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.40",
@@ -24,7 +24,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["agent", "agent.web"]
+packages = ["agent", "agent.web", "agent.models"]
 
 [tool.setuptools.package-data]
 "agent.web" = ["static/*"]

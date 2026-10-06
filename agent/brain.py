@@ -1,4 +1,4 @@
-"""The agent's brain: any OpenAI-compatible chat API (Grok, OpenAI, Ollama, vLLM...)."""
+"""Legacy completions protocol, restricted to the configured local model server."""
 
 from __future__ import annotations
 
@@ -7,7 +7,10 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
+import httpx
 from openai import AsyncOpenAI
+
+from .models.endpoint_guard import DEFAULT_MODEL_HOSTS, LocalModelTransport, validate_endpoint
 
 
 @dataclass
@@ -41,10 +44,34 @@ class Brain(Protocol):
 
 
 class OpenAICompatibleBrain:
-    def __init__(self, base_url: str, model: str, api_key: str):
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        server_token: str,
+        *,
+        allowed_hosts: tuple[str, ...] = DEFAULT_MODEL_HOSTS,
+        timeout: float = 600,
+    ):
+        validate_endpoint(base_url, allowed_hosts)
         self.model = model
-        self.client = AsyncOpenAI(base_url=base_url, api_key=api_key or "none", timeout=300,
-                                  max_retries=0)  # one counted call is one paid call
+        # M2 replaces this legacy SDK/protocol. It cannot use proxies, redirects or public IPs.
+        http_client = httpx.AsyncClient(
+            transport=LocalModelTransport(base_url, allowed_hosts),
+            trust_env=False,
+            follow_redirects=False,
+            timeout=timeout,
+        )
+        completions_url = base_url.rstrip("/")
+        if not httpx.URL(completions_url).path.strip("/"):
+            completions_url += "/v1"
+        self.client = AsyncOpenAI(
+            base_url=completions_url,
+            api_key=server_token or "local",
+            timeout=timeout,
+            max_retries=0,
+            http_client=http_client,
+        )
 
     async def stream(self, messages: list[dict], tools: list[dict]) -> AsyncIterator[str | Step]:
         kwargs: dict = {"model": self.model, "messages": messages, "stream": True}
