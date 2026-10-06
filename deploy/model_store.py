@@ -168,6 +168,8 @@ def load_or_recover_registry(root: Path, versions: Path, current: Path, registry
     current_id = link.parts[1]
     if not ID.fullmatch(current_id) or current.resolve() != versions / current_id:
         raise InstallRefused("Incomplete model registry; refusing to alter current")
+    if not (versions / current_id).is_dir():
+        raise InstallRefused("Incomplete model registry; refusing to alter current")
     created = datetime.now(UTC).isoformat()
     state = {
         "current": current_id,

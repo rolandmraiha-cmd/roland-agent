@@ -110,6 +110,16 @@ def test_recovers_registry_without_current_symlink(fixture):
     assert registry["versions"][second]["status"] == "available"
 
 
+
+def test_refuses_dangling_current_without_version_dir(fixture):
+    root, source, entry = fixture
+    (root / "versions").mkdir(mode=0o700, exist_ok=True)
+    (root / "current").symlink_to("versions/missing-base")
+    with pytest.raises(store.InstallRefused, match="Incomplete model registry"):
+        store.install(root, "test-tiny", entry, source=source)
+    assert not (root / "registry.json").exists()
+
+
 def test_recovers_current_without_registry(fixture):
     root, source, entry = fixture
     version = store.install(root, "test-tiny", entry, source=source)
