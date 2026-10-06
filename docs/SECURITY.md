@@ -84,3 +84,19 @@ The final permitted model call cannot start another tool round. Jobs that overru
 interval are rescheduled after completion, using the current saved schedule so a later
 user-set schedule is preserved. Deleted jobs are not recreated. Existing cancellation,
 approval and daily-cap behavior remains in place.
+
+### Audit records (M1.4)
+
+Audit details and labels redact the loaded Config secret values using literal matches, before
+truncation or serialization. Empty values are ignored. Extra secrets loaded by future services
+must be passed to their audit writer; encoded/changed spellings of a secret are not matched.
+Login passwords and raw session/CSRF tokens must never be supplied to the writer at all.
+
+SQLite triggers block audit updates/deletes. BEGIN IMMEDIATE serializes writers across core
+and CLI connections; nested savepoints let audit entries commit with their state change.
+SHA-256 chaining detects edited rows and missing interior rows. It is not a signed log:
+someone who controls the database and can remove triggers can recompute the chain, truncate
+its tail, or replace the whole database. There is no external anchor or off-site copy.
+Verification reports the first bad row without printing stored details. The app does not
+prune audit entries. This stage records existing account/job/fact endpoints; later milestones
+add action gate and browser events.

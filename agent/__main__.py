@@ -5,6 +5,7 @@
     python -m agent run-jobs   run any due background jobs once and exit
     python -m agent hash-password   make the AGENT_PASSWORD_HASH line for .env
     python -m agent migrate --check   inspect schema versions without upgrading
+    python -m agent audit-verify   check the stored audit chain without changing it
 """
 
 from __future__ import annotations
@@ -13,7 +14,9 @@ import argparse
 import asyncio
 import ctypes
 import getpass
+import json
 import logging
+import sqlite3
 import sys
 
 from .brain import OpenAICompatibleBrain
@@ -89,7 +92,7 @@ def make_hash() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="agent")
-    parser.add_argument("command", nargs="?", default="serve", choices=["serve", "chat", "run-jobs", "hash-password", "migrate"])
+    parser.add_argument("command", nargs="?", default="serve", choices=["serve", "chat", "run-jobs", "hash-password", "migrate", "audit-verify"])
     parser.add_argument("--check", action="store_true", help="inspect database versions without applying migrations")
     args = parser.parse_args()
     if args.command == "migrate":
@@ -110,6 +113,18 @@ def main() -> None:
         return
     if args.check:
         parser.error("--check is only valid with migrate")
+    if args.command == "audit-verify":
+        from .audit import verify_file
+
+        harden_process()
+        try:
+            result = verify_file(Config.from_env().db_path)
+        except sqlite3.Error as error:
+            raise SystemExit("Cannot inspect the audit log; check that the database exists and has been upgraded") from error
+        print(json.dumps(result, sort_keys=True))
+        if not result["ok"]:
+            raise SystemExit(1)
+        return
     if args.command == "hash-password":
         make_hash()
         return

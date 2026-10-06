@@ -182,3 +182,8 @@ The `v2` branch starts with fixes to the v1 agent; the later v2 services are not
 M0 preserved the original model setup; M1 now restricts it to local destinations. Tests use
 fake models and a loopback HTTP fixture, without real inference calls. See
 [RUNBOOK](docs/RUNBOOK.md) and [SECURITY](docs/SECURITY.md) for validation and the regex audit.
+
+The M1.4 audit foundation records existing login/logout, job and fact-deletion events with
+loaded-secret redaction and an append-only SHA-256 chain. Use `python -m agent audit-verify`
+to inspect it read-only without making a model request. Related state changes roll back if
+logging fails. See [the runbook](docs/RUNBOOK.md#audit-log-m14) for limits and verification.

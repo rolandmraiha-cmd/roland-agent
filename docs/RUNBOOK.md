@@ -92,3 +92,27 @@ The fixture `tests/fixtures/v1_4fb0950.sql` contains the exact v1 baseline schem
 synthetic data to it. No real database, account data or credentials are committed. Run
 `pytest -q tests/test_migrations.py tests/test_memory_v2.py` for migration, rollback and helper
 coverage. The existing full suite continues to run with `make test`.
+
+## Audit log (M1.4)
+
+The agent writes startup, login success/failure, logout, job creation/approval/deletion and
+fact-deletion events into `audit_log`. Model-created jobs are recorded too. Password attempts
+and session cookies are never included. Loaded Config secrets are replaced by `[redacted]`
+in nested string values, keys and labels before UTF-8 byte truncation. Detail stays valid JSON;
+truncated details have `truncated` and `preview` fields. The default limit is 8192 bytes;
+`AUDIT_DETAIL_MAX_BYTES` must be at least 64.
+
+```sh
+python -m agent audit-verify
+```
+
+Verification opens the existing database read-only, without upgrades or model requests.
+It prints JSON containing `ok`, `rows` (rows checked), and `first_bad_id`, and exits non-zero
+on a broken chain or an unavailable audit table. No missing database is created. The hash
+uses canonical JSON with `detail` decoded as an object, and excludes `id`, `prev_hash` and
+`hash`. The first previous hash is 64 zeros. Related session/job/fact changes and their audit
+entry commit in one transaction. A logging failure prevents that change.
+
+The audit API, UI, tool/gate/browser/screen events arrive in their later milestones. This
+stage does not add those features or log screen input. Run `pytest -q tests/test_audit.py`
+for focused checks.
