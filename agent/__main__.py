@@ -13,7 +13,6 @@ import asyncio
 import ctypes
 import getpass
 import logging
-import os
 import sys
 
 from .brain import OpenAICompatibleBrain
@@ -39,8 +38,17 @@ def build(*, validate: bool = False) -> Agent:
     config = Config.from_env()
     if validate:
         config.check()  # Refuse unsafe settings before opening the DB or model client.
+    else:
+        config.check_model()  # Terminal chat and background jobs also stay local.
+    if config.allow_shell and config.shell_backend != "local":
+        raise SystemExit("The sandbox shell backend is not implemented yet; keep ALLOW_SHELL=false")
+    if config.browser_enabled or config.screen_enabled:
+        raise SystemExit("Browser and screen services are not implemented yet; keep their flags false")
     memory = Memory(config.db_path)
-    brain = OpenAICompatibleBrain(config.model_base_url, config.model_name, config.model_api_key)
+    brain = OpenAICompatibleBrain(
+        config.model_base_url, config.model_name, config.model_server_token,
+        allowed_hosts=config.model_allowed_hosts, timeout=config.model_timeout_s,
+    )
     return Agent(config, memory, brain)
 
 
@@ -106,8 +114,8 @@ def main() -> None:
 
         from .web.app import create_app
 
-        uvicorn.run(create_app(agent), host=os.getenv("HOST", "0.0.0.0"),  # noqa: S104 -- serving externally is intentional
-                    port=int(os.getenv("PORT", "8080")),
+        uvicorn.run(create_app(agent), host=agent.config.host,
+                    port=agent.config.port,
                     # The app reads X-Forwarded-For itself, only from FORWARDED_ALLOW_IPS.
                     proxy_headers=False, server_header=False)
 

@@ -28,7 +28,7 @@ class FakeBrain:
 
 
 def make_config(tmp_path, **kw):
-    base = dict(model_base_url="http://x", model_name="fake", model_api_key="",
+    base = dict(model_base_url="http://127.0.0.1:8080", model_name="fake",
                 password_hash=HASH, cookie_secure=False, session_days=14,
                 daily_call_limit=50, max_tool_steps=4, agent_name="Test", timezone="Europe/Helsinki",
                 data_dir=tmp_path)

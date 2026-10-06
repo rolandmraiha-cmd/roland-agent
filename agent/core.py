@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from collections.abc import AsyncIterator
 
@@ -64,7 +63,7 @@ class Agent:
         self.brain = brain
         # Off unless ALLOW_SHELL=true. Commands run as the agent's own user, so they could reach
         # its database and settings; a separate sandbox is planned for v2.
-        self.allow_shell = os.getenv("ALLOW_SHELL", "").strip().lower() == "true"
+        self.allow_shell = config.allow_shell
         self._streams = asyncio.Semaphore(MAX_STREAMS)
         self.ctx = ToolContext(memory, config.workspace, config.timezone, self.allow_shell)
         config.workspace.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,32 @@
-# M0 security notes
+# Security notes for current v2 foundations
+
+## M1 configuration and local model guard
+
+`serve` validates configuration before opening the database or model client. Production
+requires secure cookies, an allowed web hostname, and a local model server token for
+llama.cpp. It refuses same-user shell execution. Configuring sandbox, browser or screen
+services requires their secrets; startup also refuses to enable those services until their
+implementations arrive. No sidecar, screen access or deployment is added by this change.
+
+`chat` and `run-jobs` also check model settings before opening resources. Every model URL
+must be HTTP, on the configured hostname allowlist, and resolve **only** to loopback,
+RFC1918 IPv4 or ULA IPv6 addresses. The HTTP transport resolves again for each request,
+connects to the checked literal IP while retaining the Host header, ignores environment
+proxies, and refuses redirects. Public, link-local, shared and reserved addresses remain
+refused even when explicitly named in `MODEL_ALLOWED_HOSTS`.
+
+Secret settings accept `NAME_FILE`; the file wins over `NAME`, with a value-free warning.
+Unreadable files fail closed. Secret fields are excluded from the configuration repr.
+`MODEL_API_KEY` is ignored, with a warning. Git and Docker build contexts exclude `secrets/`.
+No secret files, credentials, telemetry or new dependencies are added.
+
+This is M1.2, not completion of v2: the old model SDK and native completions protocol remain
+temporarily behind the local guard. M2.10 removes that SDK and implements provider selection
+and grammar mode. Most newly parsed settings belong to later milestones and do not activate
+their features. The existing compose file is a development baseline, not the final isolated
+server deployment. M1 audit, migrations and backups remain separate work.
+
+## M0 review
 
 M0 retains the v1 login, slowdown, lockout, sessions, CSRF/Origin checks, SSRF filtering,
 DNS pinning, path checks, shell default, tool-output envelope, job approval and daily cap.
