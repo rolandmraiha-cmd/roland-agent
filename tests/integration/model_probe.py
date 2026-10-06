@@ -33,7 +33,10 @@ with httpx.Client(base_url='http://10.77.6.60:8080', trust_env=False, timeout=60
     assert response.status_code == 200, 'Authenticated inference failed'
     answer = json.loads(response.json()['choices'][0]['message']['content'])
     assert answer == {'action': 'reply', 'text': 'ok'}
-    assert client.get('/slots', headers=headers).status_code == 404
+    slots = client.get('/slots', headers=headers)
+    assert slots.status_code == 501
+    assert slots.json()['error']['type'] == 'not_supported_error'
+    assert slots.json()['error']['message'] == 'This server does not support slots endpoint. Start it with `--slots`'
 print('Authenticated JSON-schema inference passed; a missing token was refused.')
 """
     subprocess.run(compose + ["exec", "-T", "core", "python", "-c", checks], check=True, timeout=90)

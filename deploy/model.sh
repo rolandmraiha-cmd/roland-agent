@@ -19,6 +19,10 @@ case ${1:-} in
             exit 2
         fi
         model_source=$(readlink -e -- "$FILE")
+        if [[ $model_source == *','* || $model_source == *$'\n'* ]]; then
+            echo "Source paths must not contain mount-option separators." >&2
+            exit 2
+        fi
         [[ -f $model_source ]] || exit 2
         model_mount=(--mount "type=bind,source=$model_source,target=/input/model.gguf,readonly")
         model_args=(install --model "$ID" --file /input/model.gguf)
@@ -27,6 +31,10 @@ case ${1:-} in
 esac
 docker build -t roland-agent/model-installer:local -f "$model_repo/docker/model-installer/Dockerfile" "$model_repo"
 model_suffix=$(python3 -c 'import uuid; print(uuid.uuid4().hex)')
+if ! docker volume inspect "${model_project}_models" >/dev/null 2>&1; then
+    docker volume create --label "com.docker.compose.project=$model_project" \
+        --label com.docker.compose.volume=models "${model_project}_models" >/dev/null
+fi
 model_network="$model_project-model-fetch-$model_suffix"
 docker network create --driver bridge "$model_network" >/dev/null
 model_cleanup() { docker network rm "$model_network" >/dev/null || true; }
