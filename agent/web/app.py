@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ..config import validate_agent_host
 from ..core import Agent, sse
+from ..models.modelreg import load_model_info
 from ..schedule import next_run_after, valid_cron
 from ..scheduler import MAX_PARALLEL_JOBS, execute, running_jobs, scheduler_loop
 from .auth import (
@@ -239,9 +240,11 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     # --- chats ---
     @app.get("/api/status")
     async def status(request: Request):
+        info = load_model_info(config.model_provider)
         return {
             "name": config.agent_name,
             "model": config.model_name,
+            "model_info": None if info is None else info.public_dict(),
             "csrf": csrf_token(request.cookies.get(cookie, "")),
             "calls_left": agent.calls_left(),
             "daily_limit": config.daily_call_limit,

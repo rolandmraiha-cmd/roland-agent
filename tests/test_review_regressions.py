@@ -1,9 +1,11 @@
 import asyncio
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
-from agent.brain import OpenAICompatibleBrain, ToolCall
+from agent.brain import ToolCall
+from agent.models.llamacpp import LlamaCppBrain
 from agent.tools import MAX_OUTPUT, ToolContext, call_tool
 from tests.conftest import call
 
@@ -96,32 +98,45 @@ async def test_shell_cancellation_kills_process_group(make_agent, monkeypatch, d
 async def test_model_response_closed_on_completion_or_error(failure):
     closed = []
 
-    class Response:
-        def __aiter__(self):
-            return self.chunks()
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/props"):
+            return httpx.Response(200, json={})
+        if failure:
+            raise RuntimeError("stream failed")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {"content": '{"action":"reply","text":"hello"}'},
+                    "finish_reason": None,
+                }
+            ]
+        }
+        import json as _json
 
-        async def chunks(self):
-            if failure:
-                raise RuntimeError("stream failed")
-            yield SimpleNamespace(
-                choices=[SimpleNamespace(delta=SimpleNamespace(content="hello", tool_calls=None))]
-            )
+        body = f"data: {_json.dumps(chunk)}\n\ndata: [DONE]\n\n"
+        return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
 
-        async def close(self):
-            closed.append(True)
+    class TrackingTransport(httpx.MockTransport):
+        async def handle_async_request(self, request):
+            try:
+                return await super().handle_async_request(request)
+            finally:
+                if str(request.url.path).endswith("/chat/completions"):
+                    closed.append(True)
 
-    async def create(**kwargs):
-        return Response()
-
-    brain = OpenAICompatibleBrain.__new__(OpenAICompatibleBrain)
-    brain.model = "fake"
-    brain.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    if failure:
-        with pytest.raises(RuntimeError):
-            _ = [item async for item in brain.stream([], [])]
-    else:
-        items = [item async for item in brain.stream([], [])]
-        assert items[-1].text == "hello"
+    brain = LlamaCppBrain("http://127.0.0.1:8080", "test", "tok")
+    await brain._client.aclose()
+    brain._client = httpx.AsyncClient(transport=TrackingTransport(handler))
+    brain._supports_tool_role = False
+    try:
+        if failure:
+            with pytest.raises(RuntimeError):
+                _ = [item async for item in brain.stream([{"role": "user", "content": "hi"}], [])]
+        else:
+            items = [item async for item in brain.stream([{"role": "user", "content": "hi"}], [])]
+            assert any(getattr(item, "text", None) == "hello" for item in items)
+    finally:
+        await brain.aclose()
     assert closed == [True]
 
 
@@ -137,33 +152,35 @@ async def test_modified_tool_name_cannot_dispatch_an_action(make_agent):
 async def test_model_response_closed_on_cancellation():
     started, closed = asyncio.Event(), asyncio.Event()
 
-    class Response:
-        def __aiter__(self):
-            return self.chunks()
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/props"):
+            return httpx.Response(200, json={})
+        started.set()
+        await asyncio.Event().wait()
+        return httpx.Response(200, content=b"data: [DONE]\n\n")
 
-        async def chunks(self):
-            started.set()
-            await asyncio.Event().wait()
-            yield None
+    class TrackingTransport(httpx.MockTransport):
+        async def handle_async_request(self, request):
+            try:
+                return await super().handle_async_request(request)
+            finally:
+                if str(request.url.path).endswith("/chat/completions"):
+                    closed.set()
 
-        async def close(self):
-            closed.set()
-
-    async def create(**kwargs):
-        return Response()
-
-    brain = OpenAICompatibleBrain.__new__(OpenAICompatibleBrain)
-    brain.model = "fake"
-    brain.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    brain = LlamaCppBrain("http://127.0.0.1:8080", "test", "tok")
+    await brain._client.aclose()
+    brain._client = httpx.AsyncClient(transport=TrackingTransport(handler), timeout=5.0)
+    brain._supports_tool_role = False
 
     async def consume():
-        return [item async for item in brain.stream([], [])]
+        return [item async for item in brain.stream([{"role": "user", "content": "hi"}], [])]
 
     task = asyncio.create_task(consume())
     await started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    await brain.aclose()
     assert closed.is_set()
 
 
@@ -179,6 +196,6 @@ def test_invalid_server_config_is_rejected_before_resource_creation(make_agent, 
         pytest.fail("Invalid server settings must not open a DB or model client")
 
     monkeypatch.setattr(cli, "Memory", forbidden)
-    monkeypatch.setattr(cli, "OpenAICompatibleBrain", forbidden)
+    monkeypatch.setattr(cli, "make_brain", forbidden)
     with pytest.raises(SystemExit, match="FORWARDED_ALLOW_IPS"):
         cli.build(validate=True)

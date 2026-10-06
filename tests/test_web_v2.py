@@ -9,7 +9,7 @@ import pytest
 from conftest import HASH
 from fastapi import WebSocket
 from fastapi.testclient import TestClient
-from httpx2 import Headers
+from httpx import Headers
 from starlette.routing import Mount
 from starlette.websockets import WebSocketDisconnect
 
