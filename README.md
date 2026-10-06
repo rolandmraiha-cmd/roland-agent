@@ -33,7 +33,7 @@ make model-install FILE=/abs/path.gguf ID=qwen3-4b-q4km
 make secrets                    # create missing secrets/* (never prints values)
 make hash-password              # writes secrets/agent_password_hash
 make preflight                  # full read-only host checks
-# APPLY=1 make firewall         # install iptables/nft rules + systemd unit
+# APPLY=1 make firewall-install # install iptables/nft rules + systemd unit
 # APPLY=1 make deploy           # preflight → build → up → smoke
 # APPLY=1 make ship HOST=deploy@host REF=v2
 make verify                     # PASS/FAIL checklist (skips what is unavailable)

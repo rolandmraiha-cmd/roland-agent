@@ -7,7 +7,10 @@
 
 # Pass file paths and catalogue ids as environment values, never shell source.
 export MODEL FILE ID MODEL_PROJECT MODEL_INSTALL_TEST_ONLY
-export HOST REF APPLY FORCE PULL S WORKSPACE_HOST_DIR WORKSPACE_SIZE_GB
+export HOST REF APPLY FORCE PULL S
+# Do not export WORKSPACE_HOST_DIR / WORKSPACE_SIZE_GB: an empty export
+# overrides Compose .env and breaks edge CI bind mounts (missing /srv/...).
+# Pass them explicitly when set: WORKSPACE_HOST_DIR=/path make …
 
 lint:
 	ruff check agent tests deploy

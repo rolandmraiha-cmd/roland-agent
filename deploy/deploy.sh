@@ -42,7 +42,7 @@ fw=/usr/local/sbin/roland-agent-firewall
 if [[ -x $fw ]]; then
     sudo "$fw"
 else
-    warn_fw="firewall helper not installed at $fw; run: sudo make firewall APPLY=1"
+    warn_fw="firewall helper not installed at $fw; run: sudo APPLY=1 make firewall-install"
     if is_truthy "${REQUIRE_FIREWALL:-1}"; then
         die "$warn_fw"
     else

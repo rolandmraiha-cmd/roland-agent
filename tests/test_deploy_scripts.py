@@ -215,6 +215,14 @@ def test_secrets_creates_missing_files_without_printing(tmp_path):
     assert len((secrets / "vnc_password").read_text()) == 8
 
 
+def test_makefile_does_not_export_empty_workspace_host_dir():
+    """Empty exported WORKSPACE_HOST_DIR overrides Compose .env and breaks edge CI."""
+    text = (ROOT / "Makefile").read_text()
+    for line in text.splitlines():
+        if line.startswith("export ") and "WORKSPACE_HOST_DIR" in line.split():
+            raise AssertionError(f"Makefile must not export WORKSPACE_HOST_DIR: {line}")
+
+
 def test_makefile_has_section_14_3_targets():
     text = (ROOT / "Makefile").read_text()
     for target in [
