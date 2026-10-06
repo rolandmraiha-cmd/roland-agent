@@ -78,6 +78,7 @@ The current patterns are:
 | Audit redaction in `agent/audit.py` | An alternation of `re.escape`d loaded secret literals, sorted longest first. No quantified subexpressions or interpretation of secret text as a regex. |
 | Backup filename patterns and HH:MM check in `agent/backup.py` | Fixed-length digit groups and escaped extensions; only generated filename shapes are accepted for retention. |
 | Docker/Compose version check in `deploy/preflight_edge.py` | Digit groups separated by literal dots, followed by an optional suffix. No nested quantifiers or overlapping repeated subexpressions. |
+| Model catalogue/version ids, hash/revision, repository/file and token checks | Anchored character classes and bounded or non-overlapping repetitions. No nested quantifiers; token content is never printed. |
 
 No nested or adjacent overlapping unbounded quantifiers were found. No regex rewrite was
 needed. The new timing regression processes the specified whitespace input in under 0.5 s.
@@ -178,7 +179,7 @@ it. API/account/health responses use no-store. AGENT_HOST is validated as a DNS 
 or IPv4 address without scheme, port or path before use in CSP.
 
 This core prerequisite does not complete M2. The Caddy/core slice below implements the
-edge, while model containers/providers and full Linux installation scripts remain pending.
+edge, while model providers and full Linux installation scripts remain pending.
 The core controls add no secrets, telemetry, dependencies or outbound requests.
 
 ## M2 Caddy/core edge (M2.1–M2.2)
@@ -191,12 +192,11 @@ at the edge; the core's future file upload implementation still needs its indepe
 No access logging or telemetry is enabled. Real deployment will contact ACME certificate
 authorities and download the pinned image/hash-checked build dependencies as expected.
 
-Both current services run with uid/gid 1000, read-only roots, no-new-privileges and all
+All current services run with uid/gid 1000, read-only roots, no-new-privileges and all
 capabilities dropped. The official Caddy image is pinned by its verified multi-platform
 registry digest; its file capability is removed before the non-root build finishes.
 A per-container network sysctl allows its low listening ports without adding capabilities.
-No default seccomp/AppArmor profile is disabled. Only core reads the two current file
-secrets. No socket, privileged container, shared host PID/IPC namespace or model port is exposed.
+No default seccomp/AppArmor profile is disabled. Core reads both current file secrets; model receives only model_server_token. No socket, privileged container, shared host PID/IPC namespace or model port is exposed.
 
 Core's bind address, trusted peer, allowed Host, secure cookies and disabled shell/browser/
 screen/training flags are fixed in Compose. Private data/backup mounts are writable by uid
@@ -212,7 +212,39 @@ CI, refuse existing private config, use fresh synthetic credentials and never pr
 values. TLS verification is disabled only in the localhost internal-CA probe. CI teardown
 targets only a distinctly named disposable project, never the production project.
 
-Model services/providers, workspace hard quotas/migration, host firewall rules and full
+Model providers, workspace hard quotas/migration, host firewall rules and full
 Linux bootstrap/deployment are still pending. No real host firewall, data, account session
-or deployment is changed here. Browser/sandbox/model container isolation must be completed
-and accepted before those services or the final 24/7 installation are enabled.
+or deployment is changed here. Browser/sandbox isolation and actual-host acceptance remain
+before the final 24/7 installation.
+
+## M2 isolated model runtime and installer
+
+The llama.cpp CPU image is pinned by its registry-verified multi-platform digest and source
+commit in `docker/model/VERSION`. Runtime has a read-only root and weights volume, uid 1000,
+no capabilities, no-new-privileges, bounded CPU/memory/pids and an internal-only network.
+It has no published ports or default internet route. Its token is shared only with core;
+the web password hash is absent. Web UI, server agent/MCP tools and slots are disabled.
+Properties writes remain disabled. Application permissions stay independent of model output.
+
+The supervisor refuses missing, malformed or mismatched integrity records and model-file
+symlinks. `current` must resolve directly under `models/versions`. It verifies each load,
+terminates/reaps its child on version change or shutdown and exits on server failure so
+Docker can retry. It cannot promote or download. A single URL-safe token is required;
+whitespace-only and multi-key files are refused before the server starts.
+
+Only a host-initiated installer gets temporary download egress. It mounts only models and
+an optional explicitly supplied source file, never secrets or application data. Its pinned
+Python image uses only the standard library. Downloads are data, never executed code:
+HTTPS-only, revision-pinned, bounded by approved size and SHA-256 verified before atomic
+publication. A lock prevents concurrent writers. Unknown ids, symlink/FIFO input and
+symlinked storage are refused. Signed download URLs and exception values are not logged.
+Licence/NOTICE files are included. Later installs preserve current and add available versions;
+there is no automatic promotion or arbitrary-weight install option in this slice.
+
+Providers/actions/context, full firewall/quota/preflight and actual-host acceptance remain
+pending. Checksums are not protection against a compromised host or an authorized writer
+with full models-volume access. Isolation limits GGUF/Jinja parser bugs; runtime updates
+still need review. CI downloads only the 1.2 MB permissively licensed fixture and tests real
+authenticated JSON-schema inference, token refusal, disabled slots, read-only weights,
+restart health and public egress refusal. No production weights, real server/account or
+telemetry are involved.

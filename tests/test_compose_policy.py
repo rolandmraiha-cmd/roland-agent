@@ -56,13 +56,13 @@ def resolved(tmp_path_factory):
 
 
 def test_only_caddy_publishes_expected_ports():
-    assert set(COMPOSE["services"]) == {"core", "caddy"}
+    assert set(COMPOSE["services"]) == {"core", "caddy", "model"}
     assert COMPOSE["services"]["caddy"]["ports"] == ["80:80/tcp", "443:443/tcp", "443:443/udp"]
     assert "ports" not in COMPOSE["services"]["core"]
     assert COMPOSE["name"] == "roland-agent"
 
 
-@pytest.mark.parametrize("name", ["core", "caddy"])
+@pytest.mark.parametrize("name", ["core", "caddy", "model"])
 def test_every_service_has_security_and_resource_limits(name):
     service = COMPOSE["services"][name]
     assert service["user"] == "1000:1000"
@@ -72,7 +72,7 @@ def test_every_service_has_security_and_resource_limits(name):
     assert service["restart"] == "unless-stopped"
     assert service["healthcheck"]["test"][0] == "CMD"
     assert service["memswap_limit"] == service["mem_limit"]
-    assert service["mem_limit"] and service["cpus"] > 0 and service["pids_limit"] > 0
+    assert service["mem_limit"] and service["cpus"] and service["pids_limit"] > 0
     assert service["logging"] == {"driver": "json-file", "options": {"max-size": "10m", "max-file": "3"}}
     assert not set(service) & {"privileged", "network_mode", "pid", "ipc", "cap_add"}
     assert "unconfined" not in json.dumps(service)
@@ -140,7 +140,7 @@ def test_persistent_private_mounts_and_existing_data_volume():
     assert bind["target"] == "/workspace" and bind["type"] == "bind"
     assert bind["bind"]["create_host_path"] is False
     assert core["environment"]["BACKUP_DIR"] == "/backups"
-    assert set(COMPOSE["volumes"]) == {"agent-data", "backups", "caddy-data", "caddy-config"}
+    assert set(COMPOSE["volumes"]) == {"agent-data", "backups", "caddy-data", "caddy-config", "models"}
     assert COMPOSE["services"]["caddy"]["volumes"] == ["caddy-data:/data", "caddy-config:/config"]
 
 
@@ -158,12 +158,37 @@ def test_image_pins_and_nonroot_volume_ownership():
     assert "curl git jq" not in core
 
 
+def test_model_is_pinned_isolated_and_readonly():
+    model = COMPOSE["services"]["model"]
+    version = dict(line.split("=", 1) for line in (ROOT / "docker/model/VERSION").read_text().splitlines())
+    assert model["image"] == version["image"]
+    assert re.fullmatch(r"ghcr.io/ggml-org/llama.cpp:server-b\d+@sha256:[a-f0-9]{64}", model["image"])
+    assert model["networks"] == {"model": {"ipv4_address": "10.77.6.60"}}
+    assert "ports" not in model and "env_file" not in model
+    assert model["secrets"] == ["model_server_token"]
+    assert model["volumes"][0] == "models:/models:ro"
+    assert model["volumes"][1]["read_only"] is True
+    assert model["oom_score_adj"] == 300
+    assert model["pids_limit"] == 128
+    assert model["healthcheck"]["start_period"] == "120s"
+    script = (ROOT / "docker/model/run.sh").read_text()
+    for setting in (
+        "--flash-attn off",
+        "--load-mode none",
+        "--parallel 1",
+        "--no-webui",
+        "--no-agent",
+        "--no-slots",
+    ):
+        assert setting in script
+
+
 def test_resolved_default_hostname_and_resource_budget(resolved):
     services = resolved["services"]
     assert services["core"]["environment"]["AGENT_HOST"] == "37-60-226-214.sslip.io"
     assert services["caddy"]["environment"]["AGENT_HOST"] == "37-60-226-214.sslip.io"
     assert preflight.configuration_errors(resolved) == []
-    assert sum(int(service["mem_limit"]) for service in services.values()) == 736 * 1024 * 1024
+    assert sum(int(service["mem_limit"]) for service in services.values()) == 4576 * 1024 * 1024
 
 
 @pytest.mark.parametrize(
@@ -201,7 +226,21 @@ def test_hostname_selection_applies_to_both_services(tmp_path, domain, fallback,
     assert config["services"]["caddy"]["environment"]["AGENT_HOST"] == expected
 
 
-@pytest.mark.parametrize("change", ["port", "shell", "host", "tls", "privileged", "capability", "secret"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        "port",
+        "shell",
+        "host",
+        "tls",
+        "privileged",
+        "capability",
+        "secret",
+        "model_network",
+        "model_write",
+        "model_ctx",
+    ],
+)
 def test_preflight_refuses_modified_policy_without_printing_secret_values(resolved, change):
     config = copy.deepcopy(resolved)
     core = config["services"]["core"]
@@ -217,6 +256,12 @@ def test_preflight_refuses_modified_policy_without_printing_secret_values(resolv
         core["privileged"] = True
     elif change == "capability":
         core["cap_add"] = ["SYS_ADMIN"]
+    elif change == "model_network":
+        config["services"]["model"]["networks"]["public"] = {}
+    elif change == "model_write":
+        config["services"]["model"]["volumes"][0]["read_only"] = False
+    elif change == "model_ctx":
+        config["services"]["model"]["environment"]["MODEL_CTX"] = "8192"
     else:
         core["environment"]["MODEL_SERVER_TOKEN"] = "synthetic-value-must-not-be-printed"
     errors = preflight.configuration_errors(config)

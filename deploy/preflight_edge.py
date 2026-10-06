@@ -32,8 +32,8 @@ def configuration_errors(config: dict) -> list[str]:
     """Inspect resolved Compose JSON without printing environment values."""
     errors = []
     services = config.get("services", {})
-    if set(services) != {"caddy", "core"}:
-        return ["This edge slice must contain only caddy and core"]
+    if set(services) != {"caddy", "core", "model"}:
+        return ["This runtime slice must contain only caddy, core and model"]
     for name, service in services.items():
         if (
             service.get("user") != "1000:1000"
@@ -66,6 +66,23 @@ def configuration_errors(config: dict) -> list[str]:
         errors.append("Caddy must publish only 80/tcp, 443/tcp and 443/udp")
     if services["core"].get("ports"):
         errors.append("Core must not publish a port")
+    model = services["model"]
+    if model.get("ports") or set(model.get("networks", {})) != {"model"}:
+        errors.append("Model must have only its internal network and no published ports")
+    if config.get("networks", {}).get("model", {}).get("internal") is not True:
+        errors.append("Model network must be internal")
+    model_volumes = model.get("volumes", [])
+    if not any(mount.get("target") == "/models" and mount.get("read_only") for mount in model_volumes):
+        errors.append("Model weights must be mounted read-only")
+    try:
+        model_env = model.get("environment", {})
+        if (
+            not 1 <= int(model_env.get("MODEL_CTX", 0)) <= 6144
+            or not 1 <= int(model_env.get("MODEL_THREADS", 0)) <= 3
+        ):
+            errors.append("Model context or thread count is outside the current host limits")
+    except (ValueError, TypeError):
+        errors.append("Invalid model context or thread count")
     core = services["core"].get("environment", {})
     caddy = services["caddy"].get("environment", {})
     for key, value in {
@@ -194,7 +211,9 @@ def main() -> int:
         print(error, file=sys.stderr)
     if errors:
         return 1
-    print("Edge checks passed. Full model, firewall and workspace-quota preflight remains pending.")
+    print(
+        "Edge/runtime policy checks passed. Model-file, firewall and workspace-quota preflight remains pending."
+    )
     return 0
 
 

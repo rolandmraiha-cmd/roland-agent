@@ -30,9 +30,11 @@ sudo chmod 0700 secrets .ci-workspace/workspace
 sudo python3 deploy/preflight_edge.py
 "${edge_compose[@]}" config -q
 "${edge_compose[@]}" build --pull
+MODEL_PROJECT="$EDGE_PROJECT" MODEL=test-tiny MODEL_INSTALL_TEST_ONLY=true bash deploy/model.sh fetch
 for edge_tls in acme internal; do
     "${edge_compose[@]}" run --rm --no-deps -e AGENT_HOST=agent.example.test -e "CADDY_TLS=$edge_tls" caddy \
         caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile --validate >/dev/null
 done
 "${edge_compose[@]}" up -d --wait --wait-timeout 180
 python tests/integration/edge_probe.py "$EDGE_PROJECT"
+python tests/integration/model_probe.py "$EDGE_PROJECT"

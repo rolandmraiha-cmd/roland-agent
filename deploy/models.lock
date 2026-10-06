@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "models": {
+    "qwen3-4b-q4km": {
+      "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+      "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+      "file": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+      "size": 2497281120,
+      "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597",
+      "licence": "Apache-2.0",
+      "licence_url": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507/blob/cdbee75f17c01a7cc42f958dc650907174af0554/LICENSE",
+      "licence_file": "apache-2.0.txt",
+      "notice": "Qwen3-4B-Instruct-2507 by Qwen; GGUF conversion by Unsloth. Original weights: Qwen/Qwen3-4B-Instruct-2507 at cdbee75f17c01a7cc42f958dc650907174af0554. No project fine-tuning has been applied.",
+      "quant": "Q4_K_M",
+      "ctx": 6144,
+      "capabilities": ["text"],
+      "test_only": false
+    },
+    "test-tiny": {
+      "repo": "ggml-org/tiny-llamas",
+      "revision": "99dd1a73db5a37100bd4ae633f4cfce6560e1567",
+      "file": "stories260K.gguf",
+      "size": 1185376,
+      "sha256": "047bf46455a544931cff6fef14d7910154c56afbc23ab1c5e56a72e69912c04b",
+      "licence": "MIT",
+      "licence_url": "https://github.com/karpathy/llama2.c/blob/350e04fe35433e6d2941dce5a1f53308f87058eb/LICENSE",
+      "licence_file": "mit-tinyllamas.txt",
+      "notice": "TinyLlamas by Andrej Karpathy, converted to GGUF by ggml-org. This 260K TinyStories model is a CI fixture, not an assistant model.",
+      "quant": "F32",
+      "ctx": 512,
+      "capabilities": ["text"],
+      "test_only": true
+    }
+  }
+}

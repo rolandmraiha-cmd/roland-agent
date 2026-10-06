@@ -13,7 +13,7 @@ x-hardening: &hardening
 
 x-host: &agent_host ${AGENT_DOMAIN:-${AGENT_FALLBACK_HOST:-37-60-226-214.sslip.io}}
 
-# M2 edge slice: model/provider, firewall and workspace quota work follows.
+# M2 runtime slice: provider/actions, firewall and workspace quota work follows.
 # Only implemented services are enabled. Do not treat this as the final deployment.
 services:
   caddy:
@@ -100,6 +100,41 @@ services:
     memswap_limit: 640m
     cpus: 1.0
     pids_limit: 256
+    depends_on: { model: { condition: service_started } }
+
+  model:
+    <<: *hardening
+    # Verified multi-platform CPU image; keep in sync with docker/model/VERSION.
+    image: ghcr.io/ggml-org/llama.cpp:server-b11434@sha256:af8c29600d1de84945de13fa7f126d06fdae16c4b19dc7db1c69c74287eae257
+    user: "1000:1000"
+    entrypoint: ["bash", "/opt/run/run.sh"]
+    environment:
+      MODEL_CTX: ${MODEL_CTX:-6144}
+      MODEL_THREADS: ${MODEL_THREADS:-3}
+      MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
+    secrets: [model_server_token]
+    volumes:
+      - models:/models:ro
+      - type: bind
+        source: ./docker/model/run.sh
+        target: /opt/run/run.sh
+        read_only: true
+        bind: { create_host_path: false }
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    networks:
+      model: { ipv4_address: 10.77.6.60 }
+    healthcheck:
+      test: ["CMD", "bash", "/opt/run/run.sh", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+    oom_score_adj: 300
+    mem_limit: ${MODEL_MEM_LIMIT:-3840m}
+    memswap_limit: ${MODEL_MEM_LIMIT:-3840m}
+    cpus: ${MODEL_CPUS:-3.0}
+    pids_limit: 128
 
 # Reserved bridges are declared now; later services attach when implemented.
 networks:
@@ -121,6 +156,7 @@ volumes:
   backups:
   caddy-data:
   caddy-config:
+  models:
 
 secrets:
   model_server_token: { file: ./secrets/model_server_token }
