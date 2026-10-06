@@ -1,5 +1,7 @@
 .env
-secrets/
+secrets/*
+!secrets/.gitkeep
+.ci-workspace/
 data/
 __pycache__/
 *.pyc

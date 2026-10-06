@@ -17,7 +17,8 @@ refused even when explicitly named in `MODEL_ALLOWED_HOSTS`.
 
 Secret settings accept `NAME_FILE`; the file wins over `NAME`, with a value-free warning.
 Unreadable files fail closed. Secret fields are excluded from the configuration repr.
-`MODEL_API_KEY` is ignored, with a warning. Git and Docker build contexts exclude `secrets/`.
+`MODEL_API_KEY` is ignored, with a warning. Git and Docker build contexts exclude secret
+contents; only the empty `secrets/.gitkeep` placeholder is included.
 No secret files, credentials, telemetry or new dependencies are added.
 
 This is M1.2, not completion of v2: the old model SDK and native completions protocol remain
@@ -125,3 +126,56 @@ SQLite or archive contents. They stay local, unencrypted, mode 0600. Retention a
 the generated regular snapshot filenames, preserving migration backups and symlinks. The
 read-only audit chain check, local HTTP healthcheck and token generator require no model
 request. No network request is added except healthcheck to the configured local bind address.
+
+## M2 core web controls (M2.3)
+
+The HTTP-only guard is replaced by pure ASGI controls. Access checks run in this order:
+original peer allowlist, trusted proxy headers, allowed Host, session authentication,
+then CSRF/Origin validation. A passive outer wrapper adds security headers to HTTP
+responses, including refusals; the uncaught-error handler returns a generic 500 with
+the same headers. This placement extends the header coverage in spec §6.2.6 without
+changing the order of access decisions.
+
+`CORE_ALLOWED_PEERS` accepts explicit IPs/CIDRs, rejects wildcards and /0 networks,
+and always permits loopback. An empty list disables filtering in development. Production
+defaults an empty list to the planned Caddy address `10.77.1.2`. The original connection
+address is retained separately, so X-Forwarded-For cannot bypass peer or internal-route
+restrictions. Internal HTTP routes require that address to be explicitly listed in both
+`CORE_ALLOWED_PEERS` and `FORWARDED_ALLOW_IPS`; automatic loopback access is insufficient.
+The current stubs return 404, or 403 for `/internal/screen-auth`. Internal websockets
+remain refused. The future edge must block these paths from public visitors.
+
+The core binds to a specific edge IP in the planned deployment. A healthcheck connecting
+to that IP originates from the core's own address. That exact address may therefore make
+only GET/HEAD requests to `/healthz`, even when it is outside the peer allowlist. It gains
+no access to login, API or internal routes. Wildcard bind addresses grant no exception.
+`/healthz` returns only `{"ok":true}`; external blocking belongs to the upcoming Caddy work.
+
+Secure login uses `__Host-agent_session`, HttpOnly, Secure, SameSite=Strict, Path=/ and
+no Domain. Logout deletes it with those attributes. Secure mode ignores the old cookie,
+so existing users must log in again once after upgrading. Development with insecure cookies
+retains `agent_session`. Existing password checks, session expiry/idle limits, login
+throttling and audit behavior remain in effect.
+
+Every websocket handshake, including a path public over HTTP, needs the selected valid
+session cookie and one exact matching Origin. Secure mode permits only
+`https://{AGENT_HOST}`. Development without AGENT_HOST uses the request Host, and insecure
+mode permits HTTP or HTTPS. Missing/expired/invalid sessions close before accept with ASGI
+code 4401; invalid Origins or peers use 4403. Servers translate a close before acceptance
+to a refused HTTP handshake, so a browser may report 403 or an abnormal close instead of
+the application close code. These controls do not continuously revalidate an accepted
+connection. No production websocket, browser or live screen route is added here; M7 must
+implement connection revocation and screen cleanup.
+
+CSRF checks use the selected cookie, accept only a same-host Origin (or Referer if Origin
+is absent), and require the session-derived token on private state changes. Secure mode
+requires HTTPS. Duplicate, malformed and non-ASCII attack headers fail closed. CSP permits
+only local scripts/styles and the configured secure websocket origin, with no unsafe-inline
+or unsafe-eval. Core HTML has no inline script/style/event attributes. DENY, nosniff,
+same-origin referrer/opener/resource policies and restricted browser permissions accompany
+it. API/account/health responses use no-store. AGENT_HOST is validated as a DNS hostname
+or IPv4 address without scheme, port or path before use in CSP.
+
+This is the core prerequisite for M2 deployment, not the complete milestone. Caddy, final
+compose isolation, model containers/providers and Linux installation scripts remain to be
+implemented. No secrets, telemetry, new dependencies or outbound requests are introduced.

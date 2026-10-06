@@ -8,15 +8,24 @@ import ipaddress
 import secrets
 import time
 from collections import defaultdict, deque
+from typing import TYPE_CHECKING
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 
 from ..memory import Memory
 
+if TYPE_CHECKING:
+    from ..config import Config
+
 _hasher = PasswordHasher()  # argon2id with the library's recommended settings
 
 COOKIE = "agent_session"
+
+
+def cookie_name(config: Config) -> str:
+    return "__Host-agent_session" if config.cookie_secure else COOKIE
+
 
 PER_IP_FAILS = 5          # 5 wrong passwords from one address within WINDOW lock that address
 WINDOW = 15 * 60          # for LOCKOUT. Other addresses (Roland) are not affected.
