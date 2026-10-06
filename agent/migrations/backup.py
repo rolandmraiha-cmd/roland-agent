@@ -11,11 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 
-def pre_migration_backup(db: sqlite3.Connection, directory: Path, source: int, target: int) -> Path:
-    folder = directory / "db"
+def database_snapshot(db: sqlite3.Connection, output: Path) -> Path:
+    """Use SQLite online backup and publish one compressed, private, durable snapshot."""
+    folder = output.parent
     folder.mkdir(mode=0o700, parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
-    output = folder / f"pre-migrate-v{source}-to-v{target}-{timestamp}.db.gz"
     raw_fd, raw_name = tempfile.mkstemp(dir=folder, suffix=".db")
     os.close(raw_fd)
     packed_name = None
@@ -50,3 +49,9 @@ def pre_migration_backup(db: sqlite3.Connection, directory: Path, source: int, t
             Path(raw_name + suffix).unlink(missing_ok=True)
         if packed_name:
             Path(packed_name).unlink(missing_ok=True)
+
+
+def pre_migration_backup(db: sqlite3.Connection, directory: Path, source: int, target: int) -> Path:
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
+    output = directory / "db" / f"pre-migrate-v{source}-to-v{target}-{timestamp}.db.gz"
+    return database_snapshot(db, output)

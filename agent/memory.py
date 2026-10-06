@@ -65,6 +65,7 @@ class Job:
 
 class Memory:
     def __init__(self, path: Path | str, *, backup_dir: Path | None = None):
+        existing_database = str(path) != ":memory:" and Path(path).is_file() and Path(path).stat().st_size > 0
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).touch(mode=0o600, exist_ok=True)
@@ -83,7 +84,12 @@ class Memory:
                     self._db.execute("PRAGMA journal_mode = WAL")
                 self._db.execute("PRAGMA synchronous = NORMAL")
                 version = current_version(self._db)
-                if 1 <= version < latest_version() and backup_dir is not None and backup_dir.is_dir():
+                if (
+                    (version >= 1 or existing_database)
+                    and version < latest_version()
+                    and backup_dir is not None
+                    and backup_dir.is_dir()
+                ):
                     pre_migration_backup(self._db, backup_dir, version, latest_version())
                 migrate(self._db)
         except BaseException:

@@ -35,7 +35,9 @@ def _digest(previous: str, row: dict) -> str:
 def _verify(db: sqlite3.Connection) -> dict:
     previous = FIRST_HASH
     count = 0
-    for values in db.execute("SELECT * FROM audit_log ORDER BY id"):
+    for values in db.execute(
+        "SELECT id,ts,actor,event,run_id,chat_id,tool,decision,detail,prev_hash,hash FROM audit_log ORDER BY id"
+    ):
         row = dict(zip(("id", *HASH_FIELDS, "prev_hash", "hash"), values, strict=True))
         count += 1
         try:

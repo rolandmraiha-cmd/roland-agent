@@ -143,7 +143,7 @@ Then set these in `.env`:
   checked address is pinned. Environment proxies, redirects and public destinations are refused.
 - Browser, screen and sandbox integrations remain unavailable; enabling them stops startup.
 - New settings for later milestones are parsed foundations. They do not activate those features.
-- Versioned database upgrades are described below. Audit writing and nightly backups remain upcoming work.
+- Versioned upgrades, redacted audit records and optional nightly backups are described below.
 
 ## v2 M1 database migrations
 
@@ -162,9 +162,9 @@ The target schema is version 2. New tables and storage helpers prepare approvals
 history, file metadata, sign-in requests and screen sessions. They do not activate those
 features or add new web routes. Text-only chat history keeps its existing format.
 
-When `serve` upgrades an already versioned database and `BACKUP_DIR` points to an existing
-directory, it first writes a private compressed snapshot under `BACKUP_DIR/db`. Nightly
-backups, retention, restore commands and the audit writer arrive in separate M1 work.
+When `serve` upgrades an existing database (including unversioned v1) and `BACKUP_DIR` points
+to an existing directory, it first writes a private compressed snapshot under `BACKUP_DIR/db`.
+Fresh empty databases do not need a pre-upgrade snapshot.
 
 ## v2 M0 fixes
 
@@ -187,3 +187,16 @@ The M1.4 audit foundation records existing login/logout, job and fact-deletion e
 loaded-secret redaction and an append-only SHA-256 chain. Use `python -m agent audit-verify`
 to inspect it read-only without making a model request. Related state changes roll back if
 logging fails. See [the runbook](docs/RUNBOOK.md#audit-log-m14) for limits and verification.
+
+Optional local nightly backups run at `BACKUP_TIME` in `TIMEZONE` once `BACKUP_DIR` is set.
+They retain daily/weekly SQLite snapshots and bounded workspace archives. Use
+`python -m agent backup-now` for a manual backup and `python -m agent restore <file.db.gz>`
+after stopping the server and database-writing commands. Restore verifies and upgrades a
+temporary copy before replacing the database, preserves its previous files, and clears old
+login sessions. See [backup and restore steps](docs/RUNBOOK.md#backups-and-restore-m15).
+
+`python -m agent healthcheck` checks the minimal local `/healthz` endpoint without a model
+request. `python -m agent gen-token` prints a newly generated 32-byte service token; keep it
+in a private secret file. No token or other credential is supplied in the repository.
+CI runs separate lint, Python unit and frontend jobs. The isolated Linux deployment,
+terminal, browser and screen are still later milestones.

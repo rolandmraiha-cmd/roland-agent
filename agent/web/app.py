@@ -185,7 +185,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
                 sent = request.headers.get("x-csrf-token", "")
                 if not hmac.compare_digest(sent, csrf_token(token)):
                     return JSONResponse({"error": "bad csrf token"}, status_code=403)
-        public = path in {"/login", "/favicon.ico"} or path.startswith("/static/")
+        public = path in {"/login", "/favicon.ico", "/healthz"} or path.startswith("/static/")
         if not public and not logged_in(request):
             if path.startswith("/api/"):
                 return JSONResponse({"error": "not logged in"}, status_code=401)
@@ -204,6 +204,10 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     # --- login ---
+    @app.get("/healthz")
+    async def healthz():
+        return {"ok": True}
+
     def login_page(message: str = "", status: int = 200) -> HTMLResponse:
         page = (STATIC / "login.html").read_text()
         page = page.replace("{{name}}", html.escape(config.agent_name))
@@ -294,7 +298,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         return {"name": config.agent_name, "model": config.model_name,
                 "csrf": csrf_token(request.cookies.get(COOKIE, "")),
                 "calls_left": agent.calls_left(), "daily_limit": config.daily_call_limit,
-                "shell": agent.allow_shell}
+                "shell": agent.allow_shell,
+                "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
+                "last_backup_error": agent.memory.get_meta("last_backup_error")}
 
     @app.get("/api/chats")
     async def chats():
