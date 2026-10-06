@@ -42,17 +42,17 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. Small loc
 
 ## 4. Not done (do not document as available)
 
-- **M2.10–13:** provider factory; remove `openai` / `OpenAICompatibleBrain`; grammar/GBNF actions; context budget; `tests/test_no_hosted_llm.py`  
+- ~~**M2.10–13:**~~ provider factory, local brains, grammar actions, context budget, no-hosted-LLM CI — in PR on `v2-m2-provider`  
 - **M2.5–6:** full `preflight.sh`, secrets helper, workspace quota FS, firewall, deploy/ship/verify  
 - Contabo acceptance checklist (§6) numbers  
 - M3 approval gate · M4 sandbox · M5 files UI · M6 browser · M7 screen/sign-in · M8 persona/training · M9 release  
 
 **Known gaps to fix in coding (not docs):**
 
-- Core still uses legacy OpenAI-compatible client **restricted to local URLs only** (endpoint guard + pin). Not cloud inference — but must be replaced in M2.10.  
+- ~~Core legacy OpenAI-compatible client~~ replaced by `agent/models` (llama.cpp / Ollama over httpx).  
 - `deploy/model_store.py`: writing `registry.json` before `current` can leave a stuck incomplete registry (fix before Contabo model-fetch). Prefer `--network none` for install-only.  
 - `SECRET_ENV` in `tools.py` omits `MODEL_SERVER_TOKEN` — fix before M4 enables shell.  
-- Compose sets `MODEL_MAX_CONCURRENCY=1`; core still has a hardcoded stream semaphore until M2.12 wires config.
+- ~~Compose `MODEL_MAX_CONCURRENCY` / core semaphore~~ wired via `config.model_max_concurrency`.
 
 ## 5. Commands that exist (complete)
 
@@ -134,7 +134,7 @@ Auth (argon2 hash, secure/`__Host-` cookie, CSRF/Origin, login rate limits), pee
 
 ### Pending
 
-M2.10–13 provider/grammar/no-hosted CI · full host preflight/firewall/secrets/deploy · Contabo measurements · M3 gate · M4 sandbox · M5 files · M6 browser · M7 screen/sign-in · M8 training · M9 release review.
+full host preflight/firewall/secrets/deploy · Contabo measurements · M3 gate · M4 sandbox · M5 files · M6 browser · M7 screen/sign-in · M8 training · M9 release review.
 
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model; agent-created jobs need Approve.
 

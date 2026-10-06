@@ -80,6 +80,7 @@ services:
     volumes:
       - agent-data:/data
       - backups:/backups
+      - models:/models:ro
       - type: bind
         source: ${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}
         target: /workspace

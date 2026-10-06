@@ -1,0 +1,19 @@
+# Generic action grammar: exactly one reply or tool object. Full shape validated in parse.py.
+root ::= ws action ws
+action ::= reply | tool
+reply ::= "{" ws "\"action\"" ws ":" ws "\"reply\"" ws "," ws "\"text\"" ws ":" ws string ws "}"
+tool  ::= "{" ws "\"action\"" ws ":" ws "\"tool\"" ws "," ws "\"tool\"" ws ":" ws string ws "," ws "\"args\"" ws ":" ws object ws "}"
+object ::= "{" ws (pair (ws "," ws pair)*)? ws "}"
+pair ::= string ws ":" ws value
+array ::= "[" ws (value (ws "," ws value)*)? ws "]"
+value ::= object | array | string | number | "true" | "false" | "null"
+string ::= "\"" chars "\""
+chars ::= char*
+char ::= [^"\\] | "\\" escape
+escape ::= ["\\/bfnrt] | "u" hex hex hex hex
+hex ::= [0-9a-fA-F]
+number ::= "-"? integ frac? exp?
+integ ::= "0" | [1-9] [0-9]*
+frac ::= "." [0-9]+
+exp ::= [eE] [+-]? [0-9]+
+ws ::= [ \t\n\r]*

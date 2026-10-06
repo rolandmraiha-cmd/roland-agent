@@ -1,4 +1,4 @@
-"""Local model endpoint validation, DNS pinning and actual SDK transport coverage."""
+"""Local model endpoint validation, DNS pinning and httpx transport coverage."""
 
 import asyncio
 import json
@@ -7,8 +7,9 @@ import socket
 import httpx
 import pytest
 
-from agent.brain import OpenAICompatibleBrain, Step
+from agent.brain import Step
 from agent.models.endpoint_guard import LocalModelTransport, ModelEndpointRefused, validate_endpoint
+from agent.models.llamacpp import LlamaCppBrain
 
 
 @pytest.mark.parametrize(
@@ -164,11 +165,12 @@ async def test_sdk_stream_uses_local_guard_and_ignores_proxies(monkeypatch):
 
     server = await asyncio.start_server(serve, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    brain = OpenAICompatibleBrain(f"http://127.0.0.1:{port}", "test", "local-test-token")
+    brain = LlamaCppBrain(f"http://127.0.0.1:{port}", "test", "local-test-token", tool_mode="native")
+    brain._supports_tool_role = False
     try:
         result = [event async for event in brain.stream([{"role": "user", "content": "test"}], [])]
     finally:
-        await brain.client.close()
+        await brain.aclose()
         server.close()
         await server.wait_closed()
     assert result[0] == "hello"

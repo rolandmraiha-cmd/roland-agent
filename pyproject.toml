@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Roland's own always-on AI agent: web chat, memory, tools and background jobs with a local model."
 requires-python = ">=3.11"
 dependencies = [
-    "openai>=1.40",
     "fastapi>=0.110",
     "pydantic>=2,<3",
     "uvicorn[standard]>=0.29",
@@ -28,6 +27,7 @@ packages = ["agent", "agent.web", "agent.models", "agent.migrations"]
 
 [tool.setuptools.package-data]
 "agent.web" = ["static/*"]
+"agent.models" = ["*.gbnf"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

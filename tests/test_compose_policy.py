@@ -136,6 +136,7 @@ def test_persistent_private_mounts_and_existing_data_volume():
     core = COMPOSE["services"]["core"]
     assert "agent-data:/data" in core["volumes"]
     assert "backups:/backups" in core["volumes"]
+    assert "models:/models:ro" in core["volumes"]
     bind = next(value for value in core["volumes"] if isinstance(value, dict))
     assert bind["target"] == "/workspace" and bind["type"] == "bind"
     assert bind["bind"]["create_host_path"] is False

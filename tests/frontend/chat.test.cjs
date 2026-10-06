@@ -31,10 +31,17 @@ function fixture() {
     if (!elements.has(id)) elements.set(id, new Element());
     return elements.get(id);
   };
+  const timers = new Map();
+  let nextTimer = 1;
   const context = vm.createContext({
     document: { getElementById: get, createElement: () => new Element() },
     TextDecoder, matchMedia: () => ({ matches: false }),
     location: {}, alert() {}, confirm: () => true,
+    Date,
+    setInterval: (fn) => { const id = nextTimer++; timers.set(id, fn); return id; },
+    clearInterval: (id) => { timers.delete(id); },
+    setTimeout: (fn) => { const id = nextTimer++; queueMicrotask(() => { if (timers.has(id)) { timers.delete(id); fn(); } }); return id; },
+    clearTimeout: (id) => { timers.delete(id); },
     fetch: () => { throw new Error('Unexpected fetch'); },
   });
   const source = fs.readFileSync(path.join(__dirname, '../../agent/web/static/app.js'), 'utf8');

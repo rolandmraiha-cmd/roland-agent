@@ -200,7 +200,7 @@ def test_model_refusal_precedes_resource_creation(make_agent, monkeypatch, valid
         pytest.fail("Refused configuration must not open the DB or model client")
 
     monkeypatch.setattr(cli, "Memory", forbidden)
-    monkeypatch.setattr(cli, "OpenAICompatibleBrain", forbidden)
+    monkeypatch.setattr(cli, "make_brain", forbidden)
     with pytest.raises(SystemExit, match="MODEL_BASE_URL"):
         cli.build(validate=validate)
 

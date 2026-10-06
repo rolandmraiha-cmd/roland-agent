@@ -156,10 +156,19 @@ async function send(text) {
     reply = addMessage("assistant", "");
     const bubble = reply.querySelector(".bubble");
     reply.classList.add("typing");
+    const thinkStarted = Date.now();
+    let gotText = false;
+    const thinkTimer = setInterval(() => {
+      if (gotText) return;
+      const secs = Math.floor((Date.now() - thinkStarted) / 1000);
+      bubble.textContent = `thinking… (local model, this can take a minute) ${secs}s`;
+    }, 1000);
+    bubble.textContent = "thinking… (local model, this can take a minute) 0s";
     const res = await api(`/api/chats/${currentChat}/send`, { method: "POST", body: JSON.stringify({ text }) });
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
+    try {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
@@ -170,12 +179,17 @@ async function send(text) {
         buf = buf.slice(i + 2);
         if (!chunk.startsWith("data: ")) continue;
         const ev = JSON.parse(chunk.slice(6));
-        if (ev.type === "text") bubble.textContent += ev.text;
+        if (ev.type === "text") {
+          if (!gotText) { gotText = true; bubble.textContent = ""; clearInterval(thinkTimer); }
+          bubble.textContent += ev.text;
+        }
         else if (ev.type === "tool") reply.before(el("div", "msg tool", `⚙ ${ev.text}`));
+        else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
         else if (ev.type === "error") reply.after(el("div", "msg error", ev.message));
         scrollDown();
       }
     }
+    } finally { clearInterval(thinkTimer); }
   } catch (e) {
     if (reply) reply.after(el("div", "msg error", e.message));
     else {

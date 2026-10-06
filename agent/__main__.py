@@ -28,7 +28,7 @@ from pathlib import Path
 
 import httpx
 
-from .brain import OpenAICompatibleBrain
+from .brain import make_brain
 from .config import Config
 from .core import Agent
 from .memory import Memory
@@ -64,13 +64,7 @@ def build(*, validate: bool = False, config: Config | None = None) -> Agent:
 
         validate_backup_config(config)
     memory = Memory(config.db_path, backup_dir=config.backup_dir if validate else None)
-    brain = OpenAICompatibleBrain(
-        config.model_base_url,
-        config.model_name,
-        config.model_server_token,
-        allowed_hosts=config.model_allowed_hosts,
-        timeout=config.model_timeout_s,
-    )
+    brain = make_brain(config)
     return Agent(config, memory, brain)
 
 
