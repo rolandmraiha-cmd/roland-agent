@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-07. Last verified `v2` tip **`adc492e`** (#35). M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
+> Snapshot: 2026-10-07. Status snapshot **`e872ddb`** (#36). M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
 >
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -208,4 +208,4 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 
 ## 12. Last verified
 
-Remote `v2` tip **`adc492e`** (#35 docs rule; M5 code `98971cc`), deployed on Contabo with caddy/core/model/sandbox healthy and M5 A5.4 green. Re-run `make test` before claiming anything newer. CI's tiny model does not prove Qwen RAM or Contabo speed.
+Remote `v2` status snapshot **`e872ddb`** (#36; M5 code `98971cc`), deployed on Contabo with caddy/core/model/sandbox healthy and M5 A5.4 green. Re-run `make test` before claiming anything newer. CI's tiny model does not prove Qwen RAM or Contabo speed.
