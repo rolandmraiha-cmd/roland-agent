@@ -184,6 +184,7 @@ Expected locations per `docs/v2-spec.md`; verify in tree (none exist yet):
 5. **Compose:** `browser` service on `browser_ctl` (10.77.4.40) and `browser_egress`; core joins `browser_ctl` at 10.77.4.10. Planned limits: `mem_limit`/`memswap_limit` 1280m (includes shm), `shm_size: 320m`, tmpfs `/tmp` 256m, cpus 2.0, pids 512, `oom_score_adj: 500`. Named volumes for `/profile` (browser-only) and a downloads location that core can expose as workspace files. New secret `browser_api_token` (add to `deploy/secrets.sh`). `agent/config.py` already refuses `BROWSER_ENABLED=true` without `BROWSER_API_TOKEN`; keep that.
 6. **Firewall** (`deploy/firewall.sh`): browser egress allowed to public internet only; no route from `browser` to core (10.77.1.10:8080, 10.77.4.10:8080), model, sandbox or host. Extend `tests/integration/isolation.sh`.
 7. **Fixture site** `tests/fixtures/site/` and `fixture-web` service in `docker-compose.test.yml` (§13.2–13.3): order form, injection page, SPA div-POST, prefilled password, login + `/whoami`, download.
+   The fixture site exists with unit tests and the internal `fixture-web` service; browser integration remains pending.
 8. **Chromium sandbox experiment** (`BROWSER_CHROMIUM_SANDBOX`, default `false`): try `true` with a pinned seccomp profile; report the result in the PR. Do not weaken host AppArmor to make it work.
 9. **UI:** Browser tab showing status, current URL/title and a thumbnail. Vanilla JS, `textContent` only; keep function names used by `tests/frontend/chat.test.cjs`.
 

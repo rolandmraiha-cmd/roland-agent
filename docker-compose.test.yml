@@ -26,6 +26,46 @@ services:
     environment:
       SANDBOXD_ALLOWED_PEERS: "10.77.3.10,127.0.0.1"
 
+  fixture-web:
+    build: { context: ., dockerfile: Dockerfile }
+    image: roland-agent/core:local
+    user: "1000:1000"
+    working_dir: /app
+    environment:
+      HOST: 10.77.20.20
+      PORT: "8080"
+    volumes:
+      - type: bind
+        source: ./tests/fixtures/site
+        target: /app/tests/fixtures/site
+        read_only: true
+        bind: { create_host_path: false }
+    command: ["python", "tests/fixtures/site/server.py"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    networks:
+      fixtures: { ipv4_address: 10.77.20.20 }
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import http.client; c = http.client.HTTPConnection('10.77.20.20', 8080, timeout=2); c.request('GET', '/_log'); r = c.getresponse(); raise SystemExit(0 if r.status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    mem_limit: 64m
+    memswap_limit: 64m
+    cpus: 0.25
+    pids_limit: 64
+
   tester:
     build: { context: ., dockerfile: Dockerfile }
     image: roland-agent/tester:local
@@ -60,8 +100,10 @@ services:
     tmpfs: ["/tmp:size=256m,mode=1777", "/tmp/data:size=64m,mode=1777"]
     networks:
       sandbox_ctl: { ipv4_address: 10.77.3.10 }
+      fixtures: { ipv4_address: 10.77.20.10 }
     depends_on:
       sandbox: { condition: service_healthy }
+      fixture-web: { condition: service_healthy }
     # Install soft-linked package + dev deps then run integration tests.
     entrypoint: ["bash", "-lc"]
     command:
@@ -76,3 +118,10 @@ services:
     memswap_limit: 512m
     cpus: 1.0
     pids_limit: 128
+
+networks:
+  fixtures:
+    internal: true
+    enable_ipv6: false
+    ipam:
+      config: [{ subnet: 10.77.20.0/24 }]
