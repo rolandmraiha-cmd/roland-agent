@@ -334,10 +334,81 @@ async def test_fingerprint_mismatch_fails_approved_action(tmp_path, fake):
 
     await chat_and_decide(agent, swap_then_approve)
     assert fake.posts == []  # nothing was submitted
-    sent = fake.last("/v1/click")
-    assert sent["mode"] == "approved" and sent["fingerprint"] == shown
+    assert fake.paths("/v1/click") == []  # core looked again first and never sent the click
+    assert shown != fingerprint(fake.elements["e5"])
     assert any("the page changed after Roland approved this" in text for text in tool_outputs(agent))
     assert [row["status"] for row in agent.memory.approvals(status="all")] == ["failed"]
+
+
+@pytest.mark.asyncio
+async def test_browserd_409_after_approval_fails_the_action(tmp_path, fake):
+    """The element changes in the instant between core's second look and the click itself."""
+    original = fake.handle
+    shown = fingerprint(fake.elements["e5"])
+
+    def handle(request):
+        if request.url.path == "/v1/click":
+            fake.calls.append(("POST", "/v1/click", json.loads(request.content)))
+            return httpx.Response(409, json={"error": "element_changed"})
+        return original(request)
+
+    agent = browser_agent(tmp_path, fake, [("", [click("e5")]), "It didn't go through."])
+    agent.ctx.browser.transport = httpx.MockTransport(handle)
+    await chat_and_decide(agent, approve(agent))
+    sent = fake.last("/v1/click")
+    assert sent["mode"] == "approved" and sent["fingerprint"] == shown
+    assert fake.posts == []
+    assert any("the page changed after Roland approved this" in text for text in tool_outputs(agent))
+    assert [row["status"] for row in agent.memory.approvals(status="all")] == ["failed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field,value", [
+    ("value", "Buy now"), ("aria_label", "Pay"), ("title_attr", "Delete everything"),
+    ("form_submit_name", "Place order"), ("submits", True), ("inside_dialog_title", "Confirm payment"),
+    ("aria_expanded", True), ("disabled", True), ("site", "https://evil.example/cart"),
+])
+async def test_change_in_any_classified_field_fails_the_approved_action(tmp_path, fake, field, value):
+    """browserd's fingerprint covers only part of what the classifier reads (spec §6.5). Core
+    pins a digest of all of it and looks again before an approved action runs."""
+    agent = browser_agent(tmp_path, fake, [("", [click("e5")]), "It didn't go through."])
+    before = fingerprint(fake.elements["e5"])
+
+    async def change_then_approve(row):
+        if field == "site":
+            fake.url = value
+        else:
+            fake.elements["e5"][field] = value
+        await agent.gate.approve(row["id"], row["args_hash"], confirm=True)
+
+    await chat_and_decide(agent, change_then_approve)
+    assert fingerprint(fake.elements["e5"]) == before  # browserd alone would not have noticed
+    assert fake.paths("/v1/click") == [] and fake.posts == []
+    assert any("the page changed after Roland approved this" in text for text in tool_outputs(agent))
+    assert [row["status"] for row in agent.memory.approvals(status="all")] == ["failed"]
+
+
+@pytest.mark.asyncio
+async def test_enter_approval_fails_when_the_focus_moved(tmp_path, fake):
+    fake.focused = "e4"  # a text field in a POST form: Enter needs approval
+    fake.submits["e4"] = f"{SITE}/cart"
+    agent = browser_agent(tmp_path, fake, [("", [call("browser_press", json.dumps({"key": "Enter"}))]), "ok"])
+
+    async def move_focus_then_approve(row):
+        assert "Press Enter on “Coupon code”" in row["summary"]
+        fake.focused = "e5"  # the page moved the focus to the order button
+        await agent.gate.approve(row["id"], row["args_hash"], confirm=True)
+
+    await chat_and_decide(agent, move_focus_then_approve)
+    assert fake.paths("/v1/press") == [] and fake.posts == []
+    assert any("the page changed after Roland approved this" in text for text in tool_outputs(agent))
+
+    # Unchanged focus: the approved key press goes through, once, in approved mode.
+    fake.focused = "e4"
+    again = browser_agent(tmp_path / "again", fake, [("", [call("browser_press", json.dumps({"key": "Enter"}))]), "ok"])
+    await chat_and_decide(again, approve(again))
+    assert fake.last("/v1/press")["mode"] == "approved"
+    assert fake.posts == [f"{SITE}/cart"]
 
 
 @pytest.mark.asyncio
@@ -475,7 +546,8 @@ async def test_gated_click_card_has_screenshot_and_code_made_summary(tmp_path, f
     assert (agent.config.workspace / card["screenshot_path"]).read_bytes() == PNG
     assert approval_public(card)["screenshot_url"].endswith(card["screenshot_path"])
     stored = json.loads(card["args_json"])
-    assert stored[PIN_KEY] == {"fingerprint": fingerprint(fake.elements["e5"])}
+    assert stored[PIN_KEY]["fingerprint"] == fingerprint(fake.elements["e5"])
+    assert set(stored[PIN_KEY]) == {"fingerprint", "seen"} and len(stored[PIN_KEY]["seen"]) == 64
     assert fake.paths("/v1/click") == [] and fake.posts == []
     assert any("Not done: Roland rejected this." in text for text in tool_outputs(agent))
 
@@ -733,8 +805,25 @@ async def test_upload_always_needs_approval_and_only_then_copies_the_file(tmp_pa
 
     approved = agent_for("yes")
     await chat_and_decide(approved, approve(approved))
-    assert fake.last("/v1/upload")["path"] == "report.csv"
+    sent = fake.last("/v1/upload")
+    assert sent["path"] == "report.csv"
+    assert sent["sha256"] == hashlib.sha256(b"a,b\n1,2\n").hexdigest()  # browserd can re-check the copy
     assert (approved.config.workspace / "browser" / "uploads" / "report.csv").read_text() == "a,b\n1,2\n"
+
+    # The file is rewritten (same name, same size) while the card is waiting: nothing is sent.
+    swapped = agent_for("swapped")
+    uploads_before = len(fake.paths("/v1/upload"))
+
+    async def swap_file_then_approve(row):
+        assert row["details"]["sha256"] == hashlib.sha256(b"a,b\n1,2\n").hexdigest()[:16]
+        (swapped.config.workspace / "report.csv").write_text("x,y\n9,9\n")
+        await swapped.gate.approve(row["id"], row["args_hash"], confirm=True)
+
+    await chat_and_decide(swapped, swap_file_then_approve)
+    assert len(fake.paths("/v1/upload")) == uploads_before
+    assert not (swapped.config.workspace / "browser" / "uploads" / "report.csv").exists()
+    assert any("the file changed after Roland approved the upload" in text for text in tool_outputs(swapped))
+    assert [row["status"] for row in swapped.memory.approvals(status="all")] == ["failed"]
 
     ctx = tool_ctx(tmp_path / "direct", fake)
     out = await call_tool(ctx, "browser_upload", {"ref": "e8", "path": "../../etc/passwd"})
@@ -894,3 +983,14 @@ async def test_an_action_browserd_says_failed_is_not_reported_as_done(tmp_path, 
     ctx.browser = BrowserClient("http://10.77.4.40:7100", TOKEN, transport=httpx.MockTransport(handle))
     out = await call_tool(ctx, "browser_click", {"ref": "e3"})
     assert out.startswith("Error: the browser couldn't do that")
+
+
+@pytest.mark.asyncio
+async def test_page_title_does_not_decide_what_a_click_is(tmp_path, fake):
+    """`title` in browserd's answer is the page title. A page called "Checkout" must not turn
+    every plain link on it into a payment approval."""
+    fake.title = "Checkout – pay and place your order"
+    ctx = tool_ctx(tmp_path, fake)
+    out = await call_tool(ctx, "browser_click", {"ref": "e3"})
+    assert out.startswith("Clicked."), out
+    assert fake.last("/v1/click")["mode"] == "safe"

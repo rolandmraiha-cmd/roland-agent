@@ -61,7 +61,10 @@ CASES: list[tuple[str, dict, str, str]] = [
      "gated", "payment"),
     ("value-field", el("input", "", type="button", value="Purchase"), "gated", "payment"),
     ("aria-label", el("div", "", aria_label="Reserve a table"), "gated", "payment"),
-    ("title-attr", el("span", "", title="Withdraw funds"), "gated", "payment"),
+    ("title-attr", el("span", "", title_attr="Withdraw funds"), "gated", "payment"),
+    # `title` in a describe answer is the page title; it never decides what a click is.
+    ("page-title-not-scanned", el("a", "Blue mug", href=f"{SITE}/p/blue-mug", title="Checkout – pay now"),
+     "safe", "other"),
     ("send-money", link("Send money"), "gated", "payment"),
     # --- rule 2: keywords, Finnish, payment ---
     ("fi-tilaa-ja-maksa", el(name="Tilaa ja maksa"), "gated", "payment"),
@@ -235,7 +238,7 @@ def test_padding_one_field_cannot_hide_a_keyword_in_another():
 
 
 def test_classifier_is_linear_on_hostile_input():
-    hostile = el("div", "pay" + " pa" * 300_000, value="<" * 300_000, title="order " * 100_000)
+    hostile = el("div", "pay" + " pa" * 300_000, value="<" * 300_000, title_attr="order " * 100_000)
     started = time.perf_counter()
     for _ in range(20):
         classify_click(hostile)

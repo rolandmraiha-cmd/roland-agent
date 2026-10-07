@@ -160,7 +160,9 @@ def element_texts(element: dict) -> list[str]:
         _text(element, "name"),
         _text(element, "value"),
         _text(element, "aria_label"),
-        _text(element, "title"),
+        # The element's own title attribute. Plain `title` in a browserd answer is the page
+        # title, which must not count: a page called "Checkout" would gate every click on it.
+        _text(element, "title_attr"),
         _url_words(_text(element, "href")),
         _url_words(_text(element, "form_action"), query=False),
         _text(element, "form_submit_name"),

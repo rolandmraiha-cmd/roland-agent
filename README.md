@@ -3,7 +3,7 @@
 Roland's private, always-on AI agent: password-protected web chat, a self-hosted open-weight model only (no hosted LLM), tools with a code-enforced approval gate, a sandboxed terminal, workspace files, and approved background jobs.
 
 **Live:** https://37-60-226-214.sslip.io/ (Contabo VPS, Ubuntu 24.04).
-**Branch:** `v2` is the integration branch (docs base `a27b5ff`, #37, plus M6 part 1). M5 code is `98971cc` (#32). Confirm the tip with `git log origin/v2 -1` before coding. `main` is untouched until the M9 release.
+**Branch:** `v2` is the integration branch (docs base `a27b5ff`, #37, plus the M6 fixture site #38 and M6 part 1 #39). M5 code is `98971cc` (#32). Confirm the tip with `git log origin/v2 -1` before coding. `main` is untouched until the M9 release.
 
 **Not the same as Grok:** this app is Contabo-hosted **roland-agent**. Roland also has **Grok Bot** teammates (Crew Chief, Code Builder, Code Shipper, …) in a separate chat; they are not this runtime. If those Grok bots are parked, an outside AI Roland gave this repo to may still work — see [docs/NEXT.md](docs/NEXT.md) §0.
 

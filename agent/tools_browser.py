@@ -9,6 +9,8 @@ Page text, titles and element names are untrusted and are only ever returned as 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import secrets
 import struct
 import time
@@ -17,7 +19,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from . import policy_browser
-from .browser_client import BrowserClient, BrowserError, ElementChanged
+from .browser_client import BrowserClient, BrowserError, BrowserLocked, ElementChanged
 from .gate import PIN_KEY, Decision, Risk
 from .tools_files import workspace_from_ctx
 from .workspace import WorkspaceError
@@ -37,6 +39,18 @@ NOT_CHECKED = "Error: this action wasn't checked by the approval gate, so it was
 CHANGED_AFTER_APPROVAL = (
     "Error: the page changed after Roland approved this, so nothing was done. "
     "Take a new snapshot and ask again."
+)
+FILE_CHANGED_AFTER_APPROVAL = (
+    "Error: the file changed after Roland approved the upload, so nothing was sent. Ask again."
+)
+
+# Every element fact the classifier or the approval card reads. browserd's own fingerprint
+# covers only part of this (spec §6.5), so core keeps a digest of all of it with the approval
+# and looks again just before an approved action runs.
+_SEEN_KEYS = (
+    "tag", "role", "name", "type", "href", "value", "aria_label", "title_attr", "in_form",
+    "form_method", "form_action", "form_submit_name", "submits", "disabled", "sensitive",
+    "aria_expanded", "aria_haspopup", "contenteditable", "inside_dialog_title",
 )
 
 
@@ -83,6 +97,42 @@ def _where(url: object, *, path: bool = False) -> str:
     if not host:
         return "this page"
     return _one_line(f"{host}{parts.path}" if path else host, 200)
+
+
+def _seen(element: dict | None) -> str:
+    """A digest of what was classified and shown: the element's facts and the site it is on.
+    `None` (nothing has the focus) has its own fixed digest."""
+    if element is None:
+        return hashlib.sha256(b"no element").hexdigest()
+    try:
+        parts = urlsplit(str(element.get("url") or "")[: policy_browser.MAX_URL_CHARS])
+        site = f"{parts.scheme}://{parts.netloc}"
+    except ValueError:
+        site = ""
+    facts = [site] + [element.get(key) for key in _SEEN_KEYS]
+    return hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _pins(element: dict) -> dict:
+    """What every element classifier pins to the action."""
+    return {"fingerprint": element["fingerprint"], "seen": _seen(element)}
+
+
+async def _changed_since_approval(client: BrowserClient, pin: dict, ref: str | None) -> str | None:
+    """Look at the element once more before an approved action. Returns the error to give
+    back when it is no longer what Roland was shown, or None when it still is.
+    `ref=None` means the focused element (key presses)."""
+    try:
+        fresh = await (client.describe(ref) if ref is not None else client.describe_focused())
+    except BrowserLocked as error:
+        return _fail(error)
+    except BrowserError:
+        return CHANGED_AFTER_APPROVAL
+    if not isinstance(pin.get("seen"), str) or _seen(fresh) != pin["seen"]:
+        return CHANGED_AFTER_APPROVAL
+    if fresh is not None and fresh.get("fingerprint") != pin.get("fingerprint"):
+        return CHANGED_AFTER_APPROVAL
+    return None
 
 
 def _pin(args: dict) -> dict:
@@ -214,7 +264,7 @@ async def classify_click(ctx, args: dict) -> Decision:
     if element is None:
         return refusal  # type: ignore[return-value]
     fingerprint = element["fingerprint"]
-    pinned: dict = {"fingerprint": fingerprint}
+    pinned = _pins(element)
     verdict = policy_browser.classify_click(element)
     if element.get("disabled"):
         pinned["disabled"] = True
@@ -243,7 +293,7 @@ async def classify_type(ctx, args: dict) -> Decision:
     verdict = policy_browser.classify_type(element, submit=bool(args.get("submit")))
     if verdict.risk == "forbidden":
         return _forbid(verdict.why)
-    pinned = {"fingerprint": element["fingerprint"]}
+    pinned = _pins(element)
     if verdict.risk == "safe":
         return Decision(Risk.SAFE, pinned=pinned)
     summary, details = _element_card(element, "Type into", f"then submit · {verdict.why}")
@@ -271,7 +321,7 @@ async def classify_press(ctx, args: dict) -> Decision:
         if focused is not None and not _valid_fingerprint(focused.get("fingerprint")):
             focused = None
     verdict = policy_browser.classify_press(key, focused)
-    pinned: dict = {"key": key}
+    pinned: dict = {"key": key, "seen": _seen(focused)}
     if focused is not None:
         pinned["fingerprint"] = focused["fingerprint"]
         if verdict.risk == "safe" and _blocked_before(ctx, focused["fingerprint"]):
@@ -296,7 +346,7 @@ async def classify_select(ctx, args: dict) -> Decision:
     element, refusal = await _describe(ctx, args)
     if element is None:
         return refusal  # type: ignore[return-value]
-    pinned = {"fingerprint": element["fingerprint"]}
+    pinned = _pins(element)
     if not _blocked_before(ctx, element["fingerprint"]):
         return Decision(Risk.SAFE, pinned=pinned)
     why = "choosing an option here tried to submit a form before"
@@ -307,27 +357,33 @@ async def classify_select(ctx, args: dict) -> Decision:
     )
 
 
-def _upload_file(ctx, path: object) -> tuple[dict | None, str]:
-    """The workspace file to upload, or why it can't be used."""
+def _upload_file(ctx, path: object) -> tuple[dict | None, bytes, str]:
+    """The workspace file to upload and its bytes, or why it can't be used. The returned
+    info carries `sha256` of exactly those bytes."""
     if not isinstance(path, str) or not path.strip():
-        return None, "give the workspace path of the file to upload"
+        return None, b"", "give the workspace path of the file to upload"
+    too_big = f"the file is larger than {UPLOAD_MAX_BYTES // (1024 * 1024)} MB"
     try:
-        info = workspace_from_ctx(ctx).info(path)
+        workspace = workspace_from_ctx(ctx)
+        info = workspace.info(path)
+        if info["type"] != "file":
+            return None, b"", "only regular files can be uploaded"
+        if info["size"] > UPLOAD_MAX_BYTES:
+            return None, b"", too_big
+        data = workspace.read_bytes(info["path"], max_bytes=UPLOAD_MAX_BYTES + 1)
     except FileNotFoundError:
-        return None, f"file not found: {_one_line(path, 100)}"
+        return None, b"", f"file not found: {_one_line(path, 100)}"
     except (WorkspaceError, ValueError, OSError) as error:
-        return None, str(error)
-    if info["type"] != "file":
-        return None, "only regular files can be uploaded"
-    if info["size"] > UPLOAD_MAX_BYTES:
-        return None, f"the file is larger than {UPLOAD_MAX_BYTES // (1024 * 1024)} MB"
-    return info, ""
+        return None, b"", str(error)
+    if len(data) > UPLOAD_MAX_BYTES:
+        return None, b"", too_big
+    return {**info, "size": len(data), "sha256": hashlib.sha256(data).hexdigest()}, data, ""
 
 
 async def classify_upload(ctx, args: dict) -> Decision:
     if _browser(ctx) is None:
         return _forbid("the browser is turned off")
-    info, problem = _upload_file(ctx, args.get("path"))
+    info, _data, problem = _upload_file(ctx, args.get("path"))
     if info is None:
         return _forbid(problem)
     element, refusal = await _describe(ctx, args)
@@ -339,9 +395,12 @@ async def classify_upload(ctx, args: dict) -> Decision:
     summary, details = _element_card(element, f"Upload {_one_line(info['path'], 80)} to", why)
     details["file"] = info["path"]
     details["size"] = info["size"]
+    details["sha256"] = info["sha256"][:16]
+    # The file's digest is pinned too: the bytes sent must be the bytes that were there when
+    # Roland was asked, even if something rewrites the file while the card is waiting.
     return Decision(
         Risk.GATED, "upload", reason="uploading a file to a website", summary=summary,
-        details=details, pinned={"fingerprint": element["fingerprint"]},
+        details=details, pinned={**_pins(element), "sha256": info["sha256"]},
         card_screenshot=_card_screenshot(ctx),
     )
 
@@ -612,6 +671,8 @@ async def browser_click(ctx, args: dict) -> str:
     if pin.get("disabled"):
         return "That element is disabled, so nothing was clicked."
     mode = _mode(ctx, "browser_click")
+    if mode == "approved" and (changed := await _changed_since_approval(client, pin, ref)):
+        return changed
     try:
         answer = await client.click(ref, fingerprint, mode)
     except ElementChanged as error:
@@ -627,7 +688,8 @@ async def browser_type(ctx, args: dict) -> str:
         return OFF
     ref = args.get("ref")
     text = args.get("text")
-    fingerprint = _pin(args).get("fingerprint")
+    pin = _pin(args)
+    fingerprint = pin.get("fingerprint")
     if not valid_ref(ref) or not _valid_fingerprint(fingerprint):
         return NOT_CHECKED
     if not isinstance(text, str) or len(text) > TEXT_MAX:
@@ -636,6 +698,8 @@ async def browser_type(ctx, args: dict) -> str:
     mode = _mode(ctx, "browser_type")
     if submit and mode != "approved":
         return NOT_CHECKED  # submitting is only ever done with Roland's approval
+    if mode == "approved" and (changed := await _changed_since_approval(client, pin, ref)):
+        return changed
     try:
         answer = await client.type(
             ref, fingerprint, text, clear=args.get("clear") is not False, submit=submit, mode=mode,
@@ -660,6 +724,8 @@ async def browser_press(ctx, args: dict) -> str:
     mode = _mode(ctx, "browser_press")
     if key in policy_browser.SUBMIT_COMBOS and mode != "approved":
         return NOT_CHECKED
+    if mode == "approved" and (changed := await _changed_since_approval(client, pin, None)):
+        return changed
     try:
         answer = await client.press(key, mode, fingerprint)
     except ElementChanged as error:
@@ -677,7 +743,8 @@ async def browser_select(ctx, args: dict) -> str:
     values = args.get("values")
     if isinstance(values, str):
         values = [values]
-    fingerprint = _pin(args).get("fingerprint")
+    pin = _pin(args)
+    fingerprint = pin.get("fingerprint")
     if not valid_ref(ref) or not _valid_fingerprint(fingerprint):
         return NOT_CHECKED
     if (
@@ -687,6 +754,8 @@ async def browser_select(ctx, args: dict) -> str:
     ):
         return f"Error: give 1 to {SELECT_MAX_VALUES} option names as text."
     mode = _mode(ctx, "browser_select")
+    if mode == "approved" and (changed := await _changed_since_approval(client, pin, ref)):
+        return changed
     try:
         answer = await client.select(ref, fingerprint, values, mode)
     except ElementChanged as error:
@@ -808,21 +877,23 @@ async def browser_upload(ctx, args: dict) -> str:
     if client is None:
         return OFF
     ref = args.get("ref")
-    fingerprint = _pin(args).get("fingerprint")
+    pin = _pin(args)
+    fingerprint = pin.get("fingerprint")
     if not valid_ref(ref) or not _valid_fingerprint(fingerprint) or not _approved(ctx, "browser_upload"):
         return NOT_CHECKED  # uploads only ever run with Roland's approval
-    info, problem = _upload_file(ctx, args.get("path"))
+    info, data, problem = _upload_file(ctx, args.get("path"))
     if info is None:
         return f"Error: {problem}."
+    if not isinstance(pin.get("sha256"), str) or info["sha256"] != pin["sha256"]:
+        return FILE_CHANGED_AFTER_APPROVAL
+    if changed := await _changed_since_approval(client, pin, ref):
+        return changed
     name = PurePosixPath(info["path"]).name
     try:
-        workspace = workspace_from_ctx(ctx)
-        data = workspace.read_bytes(info["path"], max_bytes=UPLOAD_MAX_BYTES + 1)
-        if len(data) > UPLOAD_MAX_BYTES:
-            return f"Error: the file is larger than {UPLOAD_MAX_BYTES // (1024 * 1024)} MB."
         # browserd can only read files under its own /files/uploads (workspace browser/uploads).
-        workspace.write_bytes(f"browser/uploads/{name}", data, overwrite=True, origin="agent")
-        answer = await client.upload(ref, fingerprint, name)
+        # It gets the digest as well, so it can refuse a staged copy that was swapped.
+        workspace_from_ctx(ctx).write_bytes(f"browser/uploads/{name}", data, overwrite=True, origin="agent")
+        answer = await client.upload(ref, fingerprint, name, info["sha256"])
     except ElementChanged:
         return CHANGED_AFTER_APPROVAL
     except BrowserError as error:

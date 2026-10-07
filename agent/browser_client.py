@@ -30,6 +30,7 @@ ERROR_TEXT = {
     "not_a_file_input": "that element isn't a file upload field.",
     "not_a_select": "that element isn't a drop-down list.",
     "no_such_file": "that file isn't in the browser's upload folder.",
+    "file_changed": "the file to upload changed, so nothing was sent.",
     "bad_key": "that key isn't allowed.",
     "blocked_url": "the browser refused that address.",
     "timeout": "the page took too long to respond.",
@@ -225,10 +226,11 @@ class BrowserClient:
             raise BrowserError("the browser sent a screenshot that isn't a PNG image.", "bad_answer")
         return data
 
-    async def upload(self, ref: str, fingerprint: str, path: str) -> dict:
-        return await self._dict(
-            "POST", "/v1/upload", {"ref": ref, "fingerprint": fingerprint, "path": path},
-        )
+    async def upload(self, ref: str, fingerprint: str, path: str, sha256: str = "") -> dict:
+        body = {"ref": ref, "fingerprint": fingerprint, "path": path}
+        if sha256:
+            body["sha256"] = sha256  # browserd must refuse a staged file with another digest
+        return await self._dict("POST", "/v1/upload", body)
 
     async def downloads(self) -> list:
         answer = await self._call("GET", "/v1/downloads")

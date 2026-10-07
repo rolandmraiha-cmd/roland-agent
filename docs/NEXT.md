@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 7 Oct 2026. Integration branch `v2`, docs base **`a27b5ff`** (#37; M5 code `98971cc`) plus **M6 part 1** (core-side browser code, dormant). Confirm the tip with `git log origin/v2 -1` before coding.
+> Snapshot: 7 Oct 2026. Integration branch `v2`, docs base **`a27b5ff`** (#37; M5 code `98971cc`) plus the M6 fixture site (#38) and **M6 part 1** (#39: core-side browser code, dormant). Confirm the tip with `git log origin/v2 -1` before coding.
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -38,7 +38,7 @@ If the documents disagree, follow this order: Roland's latest explicit decision 
 
 Before writing any code:
 
-1. Run `git fetch origin && git switch v2 && git pull --ff-only` and confirm the tip. If it is newer than the M6 part 1 merge, read the new commits and update your assumptions.
+1. Run `git fetch origin && git switch v2 && git pull --ff-only` and confirm the tip. If it is newer than the M6 part 1 merge (#39), read the new commits and update your assumptions.
 2. Read `docs/AGENT.md`, then the spec sections listed for your milestone.
 3. Verify every file path mentioned here in the tree. Paths marked "expected" come from `docs/v2-spec.md` and do not exist yet.
 
@@ -157,9 +157,9 @@ Work strictly in order: M6 → M7 → M8 → M9. M7 depends on M6's browser proc
 
 M6 is split into two PRs to `v2`.
 
-- **Part 1, core side (branch `v2-m6-browser`): done, dormant.** `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py`, the browser policies in `agent/gate.py`, the screenshot on approval cards, and the tests for A6.1 and A6.2. Nothing is switched on: without `browserd` there is nothing to talk to, `BROWSER_ENABLED` stays `false`, and `agent/__main__.py` still refuses it.
-- **Part 2, the browser service: not started.** Deliverables 1–3 and 5–9 below, A6.3–A6.5, the Contabo pre-step and smoke. Part 2 removes the "not implemented yet" refusal in `agent/__main__.py` for the browser (keep it for the screen until M7).
-- The fixture site (deliverable 7) may arrive as its own small PR (`v2-m6-fixture-site`); it touches no `agent/` code.
+- **Part 1, core side (#39): done, dormant.** `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py`, the browser policies in `agent/gate.py`, the screenshot on approval cards, and the tests for A6.1 and A6.2. Nothing is switched on: without `browserd` there is nothing to talk to, `BROWSER_ENABLED` stays `false`, and `agent/__main__.py` still refuses it.
+- **Part 2, the browser service: not started.** Deliverables 1–3, 5, 6, 8 and 9 below, the browser part of `docker-compose.test.yml`, A6.3–A6.5, the Contabo pre-step and smoke. Part 2 removes the "not implemented yet" refusal in `agent/__main__.py` for the browser (keep it for the screen until M7).
+- **Fixture site (deliverable 7): done in #38.** `tests/fixtures/site/server.py`, its loopback tests, and the `fixture-web` service on the internal `fixtures` test network. Part 2 attaches the `browser` service to that network and sets `BROWSER_ALLOW_PRIVATE_HOSTS=fixture-web` there.
 
 #### Goal
 
@@ -172,7 +172,7 @@ The agent can drive one persistent, headed Chromium through a private `browserd`
 
 #### Deliverables
 
-Expected locations per `docs/v2-spec.md`; verify in tree (none exist yet):
+Expected locations per `docs/v2-spec.md`; verify in tree (deliverables 4 and 7 exist; the rest do not yet):
 
 1. **Image** `docker/browser/Dockerfile`: FROM a digest-pinned `mcr.microsoft.com/playwright/python` image whose Chromium matches the pinned Playwright version; `xvfb`, `x11vnc`, `tini`, fonts; `requirements-browser.lock` (hash-checked); `USER 1000:1000`; `/profile` and `/files` owned by 1000.
 2. **Chromium policy** `docker/browser/chromium-policy.json`: password manager, autofill, sync, sign-in, metrics off; downloads to `/files/downloads`; devtools disabled; `file://`, `chrome://`, `devtools://`, `view-source:`, `chrome-extension://` blocked. If managed policies are not honoured by the bundled Chromium, apply the same settings via launch args and profile preferences and document which worked.
@@ -201,7 +201,7 @@ Expected locations per `docs/v2-spec.md`; verify in tree (none exist yet):
 
 Core calls exactly the §8.4 routes. Part 1 relies on these details and small additions:
 
-1. **`POST /v1/describe`** takes `{"ref": "e5"}` or `{"focused": true}`. It answers one flat object: `ref, tag, role, name, type, href, value, in_form, form_method, form_action, disabled, sensitive, fingerprint, focused, inside_dialog_title`, plus `url`, `title`, `mode` for the page. Optional extras the classifier uses when present: `aria_label`, `title`, `form_submit_name` (name of the form's submit control), `submits` (true when the DOM says a click submits a form), `aria_expanded`, `aria_haspopup`, `contenteditable`. `type` is the attribute in lower case, `""` when absent. `href` and `form_action` are absolute URLs. Nothing focused → `404 {"error":"no_focused_element"}`.
+1. **`POST /v1/describe`** takes `{"ref": "e5"}` or `{"focused": true}`. It answers one flat object: `ref, tag, role, name, type, href, value, in_form, form_method, form_action, disabled, sensitive, fingerprint, focused, inside_dialog_title`, plus `url`, `title`, `mode` for the page. Optional extras the classifier uses when present: `aria_label`, `title_attr` (the element's own `title` attribute; plain `title` is always the page title), `form_submit_name` (name of the form's submit control), `submits` (true when the DOM says a click submits a form), `aria_expanded`, `aria_haspopup`, `contenteditable`. `type` is the attribute in lower case, `""` when absent. `href` and `form_action` are absolute URLs. Nothing focused → `404 {"error":"no_focused_element"}`.
 2. **`fingerprint`** is 16–128 ASCII letters and digits (a SHA-256 hex digest fits). Core refuses anything else.
 3. **`/v1/press`** accepts an optional `fingerprint` of the focused element and answers `409 element_changed` if the focus moved. **`/v1/select`** accepts `mode` like click. Keys arrive in canonical form: `Enter`, `Space`, `Tab`, `Shift+Tab`, `Escape`, `ArrowUp/Down/Left/Right`, `PageUp`, `PageDown`, `Home`, `End`, `Backspace`, `Delete`, `Control+Enter`, `Meta+Enter`.
 4. **`/v1/snapshot`** `elements` may also list structure with no `ref` (headings, landmarks, lists): give those `role`, `name`, optional `level` (1–6) and `depth` (nesting). Core renders every line itself and drops the value of any sensitive or `type=password` element, whatever was sent.
@@ -209,7 +209,8 @@ Core calls exactly the §8.4 routes. Part 1 relies on these details and small ad
 6. **Errors** are `{"error": "<code>"}` with these codes: `user_mode` (423), `element_changed` (409), `sensitive_field` (403), `no_such_element`, `no_focused_element`, `no_such_tab` (404), `too_many_tabs`, `disabled`, `not_typeable`, `not_a_file_input`, `not_a_select`, `no_such_file`, `bad_key`, `blocked_url`, `timeout`. `/v1/navigate` reports a refused address as `200 {"blocked": "<why>"}`.
 7. **Limits core enforces on answers:** JSON ≤ 1 MB, screenshot ≤ 5 MB and it must start with the PNG signature.
 8. **`browser_wait`** has no route: core sleeps, or polls `/v1/snapshot` once a second for up to 10 s.
-9. **`browser_upload`** copies the approved workspace file to `browser/uploads/<name>` (≤ 25 MB) and sends `path: "<name>"`.
+9. **`browser_upload`** copies the approved workspace file to `browser/uploads/<name>` (≤ 25 MB) and sends `path: "<name>"` and `sha256` of the bytes. browserd must hash the staged file and answer `{"error": "file_changed"}` if it differs, because the sandbox can write to that folder too.
+10. **Second look before approved actions.** browserd's fingerprint covers eight fields (spec §6.5), but the classifier also reads `value`, `aria_label`, `title_attr`, `form_submit_name`, `submits`, `disabled`, `sensitive`, `aria_expanded`, `aria_haspopup`, `contenteditable`, `inside_dialog_title` and the page's site. Core pins a SHA-256 of all of these (`_pin.seen`) and calls `/v1/describe` again just before every approved action; any difference fails the action. So `/v1/describe` must give the same answer for an unchanged element every time (stable key set, stable values).
 
 #### Where part 1 differs from the spec (for the reviewer)
 
@@ -223,6 +224,7 @@ Each one is stricter than, or an addition to, `docs/v2-spec.md`; none loosens a 
 6. **Tool schemas** carry no `maxLength`/`minimum`/`maximum`, like the existing tools; the limits are enforced in the handlers. Large length bounds make the llama.cpp grammar big.
 7. **Approval cards** name the element by what it is ("button", "textbox", "link") and replace quote marks in the page's own text, so a page cannot imitate the card's wording.
 8. **No sign-in tool yet** (`request_signin` is M7): a page with a sign-in form tells the agent to stop and tell Roland.
+9. **Approvals are bound to more than the fingerprint.** Core re-reads the element before an approved action and compares every fact the classifier used (contract item 10), and an approved upload is bound to the file's SHA-256, so a file rewritten while the card waits is not sent. Both came from the automated review of #39.
 
 #### Security requirements
 
