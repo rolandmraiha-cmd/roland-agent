@@ -86,6 +86,16 @@ async def scheduler_loop(agent: Agent, every: float = 20.0) -> None:
                 if now - last_expire >= 60:
                     agent.gate.expire_due(now)
                     agent.memory.delete_expired_sessions(now)
+                    try:
+                        from .workspace import Workspace
+
+                        Workspace(
+                            agent.config.workspace,
+                            trash_keep_days=agent.config.trash_keep_days,
+                            memory=agent.memory,
+                        ).purge_trash()
+                    except Exception:
+                        log.exception("trash purge failed")
                     last_expire = now
             except Exception:
                 log.exception("scheduler error")

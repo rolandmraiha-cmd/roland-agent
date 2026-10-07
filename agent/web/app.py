@@ -49,6 +49,7 @@ from .middleware import (
     _strip_port as _strip_port,
 )
 from .routes_approvals import build_router as build_approvals_router
+from .routes_files import build_router as build_files_router
 
 STATIC = Path(__file__).parent / "static"
 
@@ -135,6 +136,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
     # Flatten included routes so app.routes entries expose .path (v1 auth scan test).
     for _route in build_approvals_router(agent).routes:
+        app.routes.append(_route)
+    for _route in build_files_router(agent).routes:
         app.routes.append(_route)
 
 

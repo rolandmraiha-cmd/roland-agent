@@ -237,9 +237,15 @@ class SecurityHeaders:
             if message["type"] == "http.response.start":
                 message = dict(message, headers=list(message.get("headers", ())))
                 headers = MutableHeaders(scope=message)
-                for name, value in self.headers.items():
-                    headers[name] = value
                 path = scope["path"]
+                for name, value in self.headers.items():
+                    # File download/preview use a stricter CSP (§6.4); keep the route's value.
+                    if name == "Content-Security-Policy" and path in {
+                        "/api/files/download",
+                        "/api/files/preview",
+                    }:
+                        continue
+                    headers[name] = value
                 if path.startswith("/api/") or internal_path(path) or path in {"/", "/login", "/healthz"}:
                     headers["Cache-Control"] = "no-store"
             await send(message)
