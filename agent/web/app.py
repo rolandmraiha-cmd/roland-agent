@@ -48,6 +48,7 @@ from .middleware import (
 from .middleware import (
     _strip_port as _strip_port,
 )
+from .routes_approvals import build_router as build_approvals_router
 
 STATIC = Path(__file__).parent / "static"
 
@@ -91,6 +92,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if n := agent.gate.expire_on_startup():
+            log.info("expired %s pending approval(s) on startup", n)
         if run_scheduler and (n := agent.memory.fail_unfinished_runs()):
             log.info("marked %s unfinished job run(s) as failed", n)
         agent.audit.write("system", "startup", detail={"scheduler": run_scheduler})
@@ -130,6 +133,10 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         )
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
+    # Flatten included routes so app.routes entries expose .path (v1 auth scan test).
+    for _route in build_approvals_router(agent).routes:
+        app.routes.append(_route)
+
 
     @app.api_route("/internal", methods=["GET", "POST", "HEAD", "OPTIONS"])
     @app.api_route("/internal/{rest:path}", methods=["GET", "POST", "HEAD", "OPTIONS"])
@@ -248,6 +255,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             "calls_left": agent.calls_left(),
             "daily_limit": config.daily_call_limit,
             "shell": agent.allow_shell,
+            "pending_approvals": agent.memory.count_pending_approvals(),
             "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
             "last_backup_error": agent.memory.get_meta("last_backup_error"),
         }
@@ -267,7 +275,14 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     @app.get("/api/chats/{chat_id}/messages")
     async def messages(chat_id: int):
         need_chat(chat_id)
-        return {"messages": agent.memory.messages(chat_id), "busy": chat_id in busy}
+        timeline = agent.memory.timeline(chat_id)
+        events = [row for row in timeline if row["kind"] != "text"]
+        return {
+            "messages": agent.memory.messages(chat_id),
+            "events": events,
+            "busy": chat_id in busy,
+            "pending_approvals": agent.memory.approvals(status="pending", chat_id=chat_id),
+        }
 
     @app.delete("/api/chats/{chat_id}")
     async def delete_chat(chat_id: int):
@@ -276,6 +291,12 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         need_chat(chat_id)
         agent.memory.delete_chat(chat_id)
         return {"ok": True}
+
+    @app.post("/api/chats/{chat_id}/stop")
+    async def stop_chat(chat_id: int):
+        need_chat(chat_id)
+        ok = await agent.stop_chat(chat_id)
+        return {"ok": True, "stopped": ok}
 
     @app.post("/api/chats/{chat_id}/send")
     async def send(chat_id: int, body: SendBody):
@@ -291,14 +312,18 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             try:
                 async for event in agent.chat(chat_id, body.text):
                     await queue.put(event)
+            except asyncio.CancelledError:
+                await queue.put({"type": "done", "reply": "[stopped by Roland]"})
             except Exception as e:
                 await queue.put({"type": "error", "message": f"{type(e).__name__}: {e}"})
             finally:
                 busy.discard(chat_id)
+                agent._chat_tasks.pop(chat_id, None)
                 await queue.put(None)
 
         task = asyncio.create_task(produce())
         tasks.add(task)
+        agent._chat_tasks[chat_id] = task
         task.add_done_callback(tasks.discard)
 
         async def stream():
@@ -308,10 +333,13 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=5.0)
                 except TimeoutError:
-                    yield ": keepalive\n\n"
+                    yield ": ping\n\n"
                     continue
                 if event is None:
                     break
+                if event.get("type") == "ping":
+                    yield ": ping\n\n"
+                    continue
                 yield sse(event)
             yield sse({"type": "end"})
 

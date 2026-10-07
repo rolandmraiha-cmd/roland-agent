@@ -6,11 +6,34 @@ let currentChat = null;
 let sending = false;
 let csrf = "";
 let chatLoad = 0;
+let pendingApprovalCount = 0;
+let composerLocked = false;
 
 function setSending(value) {
   sending = value;
-  $("send").disabled = value;
+  $("send").disabled = value || composerLocked;
   $("new-chat").disabled = value;
+  const stop = $("stop");
+  if (stop) stop.hidden = !value;
+}
+
+function setComposerLocked(locked) {
+  composerLocked = locked;
+  const form = $("composer");
+  if (form) {
+    if (locked) form.classList.add("locked");
+    else form.classList.remove("locked");
+  }
+  $("send").disabled = sending || locked;
+  if ($("input")) $("input").disabled = locked;
+}
+
+function setApprovalBadge(n) {
+  pendingApprovalCount = n;
+  const badge = $("approval-badge");
+  if (!badge) return;
+  badge.textContent = String(n);
+  badge.hidden = n <= 0;
 }
 
 async function api(path, options = {}) {
@@ -51,6 +74,7 @@ async function loadStatus() {
     csrf = s.csrf;
     document.title = s.name;
     $("status").textContent = `${s.model} · ${s.calls_left}/${s.daily_limit} calls left today`;
+    if (typeof s.pending_approvals === "number") setApprovalBadge(s.pending_approvals);
   } catch (_) {}
 }
 
@@ -111,6 +135,16 @@ async function openChat(id) {
   const box = $("messages");
   box.replaceChildren();
   for (const m of data.messages) addMessage(m.role, m.content);
+  let hasPending = false;
+  if (Array.isArray(data.pending_approvals)) {
+    for (const a of data.pending_approvals) {
+      if (a.status === "pending") {
+        hasPending = true;
+        $("messages").append(renderApprovalCard(a));
+      }
+    }
+  }
+  setComposerLocked(hasPending);
   if (data.busy) addMessage("note", "The agent is still answering here… reopen the chat in a moment.");
   const chats = await loadChats();
   if (load !== chatLoad || sending) return;
@@ -189,8 +223,18 @@ async function send(text) {
         } else if (!gotText) {
           bubble.textContent = "";
         }
-      } else if (ev.type === "tool") reply.before(el("div", "msg tool", `⚙ ${ev.text}`));
-      else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
+      } else if (ev.type === "tool") {
+        const badge = ev.decision && ev.decision !== "safe" ? ` [${ev.decision}]` : "";
+        reply.before(el("div", "msg tool", `⚙ ${ev.text}${badge}`));
+      } else if (ev.type === "approval_required") {
+        setComposerLocked(true);
+        const card = renderApprovalCard(ev.approval);
+        reply.before(card);
+        loadStatus();
+      } else if (ev.type === "approval_resolved") {
+        setComposerLocked(false);
+        loadStatus();
+      } else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
       else if (ev.type === "error") {
         sawError = true;
         clearInterval(thinkTimer);
@@ -286,22 +330,169 @@ input.addEventListener("keydown", (e) => {
 $("composer").onsubmit = (e) => {
   e.preventDefault();
   const text = input.value.trim();
-  if (!text || sending) return;
+  if (!text || sending || composerLocked) return;
   input.value = "";
   autosize();
   send(text);
 };
 
+
+// ---------- approvals ----------
+function renderApprovalCard(approval, { compact } = {}) {
+  const card = el("div", "card approval-card");
+  card.setAttribute("data-approval-id", approval.id);
+  card.append(el("div", "badge", approval.category || "other"));
+  card.append(el("div", "summary", approval.summary || ""));
+  if (approval.tainted) {
+    card.append(el("p", "taint", "This run has read web pages, files or command output. Check this carefully."));
+  }
+  if (approval.model_reason) {
+    card.append(el("p", "agent-says", "The agent says: " + approval.model_reason));
+  }
+  const details = approval.details || {};
+  const dl = el("dl", "");
+  for (const [key, value] of Object.entries(details)) {
+    dl.append(el("dt", "", key));
+    dl.append(el("dd", "", typeof value === "string" ? value : JSON.stringify(value)));
+  }
+  card.append(dl);
+  if (approval.args) {
+    const exact = el("details", "exact");
+    exact.append(el("summary", "", "Exact action"));
+    exact.append(el("pre", "", JSON.stringify(approval.args, null, 2)));
+    card.append(exact);
+  }
+  const expires = approval.expires ? new Date(approval.expires * 1000) : null;
+  if (expires) card.append(el("p", "hint", "Expires: " + expires.toLocaleString()));
+  if (approval.status && approval.status !== "pending") {
+    card.append(el("p", "hint", "Status: " + approval.status));
+    return card;
+  }
+  const actions = el("div", "actions");
+  const note = el("input", "note");
+  note.placeholder = "Reject note (optional)";
+  const approveBtn = el("button", "primary", "Approve");
+  const rejectBtn = el("button", "ghost danger", "Reject");
+  let confirmArmed = false;
+  let confirmTimer = null;
+  approveBtn.onclick = async () => {
+    if (approval.needs_confirm && !confirmArmed) {
+      confirmArmed = true;
+      approveBtn.textContent = "Tap again to confirm";
+      confirmTimer = setTimeout(() => {
+        confirmArmed = false;
+        approveBtn.textContent = "Approve";
+      }, 5000);
+      return;
+    }
+    if (confirmTimer) clearTimeout(confirmTimer);
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    try {
+      await api(`/api/approvals/${approval.id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ args_hash: approval.args_hash, confirm: !!approval.needs_confirm }),
+      });
+      card.append(el("p", "hint", "Approved."));
+      setComposerLocked(false);
+      loadStatus();
+      if ($("approvals-view") && !$("approvals-view").hidden) loadApprovals();
+    } catch (e) {
+      approveBtn.disabled = false;
+      rejectBtn.disabled = false;
+      card.append(el("p", "error", e.message));
+    }
+  };
+  rejectBtn.onclick = async () => {
+    approveBtn.disabled = true;
+    rejectBtn.disabled = true;
+    try {
+      await api(`/api/approvals/${approval.id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ note: note.value || undefined, args_hash: approval.args_hash }),
+      });
+      card.append(el("p", "hint", "Rejected."));
+      setComposerLocked(false);
+      loadStatus();
+      if ($("approvals-view") && !$("approvals-view").hidden) loadApprovals();
+    } catch (e) {
+      approveBtn.disabled = false;
+      rejectBtn.disabled = false;
+      card.append(el("p", "error", e.message));
+    }
+  };
+  actions.append(approveBtn, rejectBtn, note);
+  card.append(actions);
+  return card;
+}
+
+async function loadApprovals() {
+  const pendingRaw = await (await api("/api/approvals?status=pending&limit=50")).json();
+  const allRaw = await (await api("/api/approvals?status=all&limit=50")).json();
+  const pending = Array.isArray(pendingRaw) ? pendingRaw : [];
+  const all = Array.isArray(allRaw) ? allRaw : [];
+  setApprovalBadge(pending.length);
+  const list = $("approval-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (!pending.length) list.append(el("p", "hint", "Nothing waiting."));
+  for (const a of pending) list.append(renderApprovalCard(a));
+  const hist = $("approval-history");
+  if (!hist) return;
+  hist.replaceChildren();
+  const done = all.filter((a) => a.status !== "pending");
+  if (!done.length) hist.append(el("p", "hint", "No history yet."));
+  for (const a of done) hist.append(renderApprovalCard(a));
+}
+
+async function loadAudit() {
+  const rows = await (await api("/api/audit?limit=100")).json();
+  const list = $("audit-list");
+  list.replaceChildren();
+  if (!rows.length) list.append(el("p", "hint", "No audit rows yet."));
+  for (const r of rows) {
+    const row = el("div", "audit-row");
+    row.append(
+      el("span", "", new Date(r.ts * 1000).toLocaleString()),
+      el("span", "", r.actor || ""),
+      el("span", "", r.event || ""),
+      el("span", "", `${r.tool || ""} ${r.decision || ""}`),
+    );
+    list.append(row);
+  }
+}
+
 // ---------- jobs ----------
 function showView(name) {
   $("chat-view").hidden = name !== "chat";
   $("jobs-view").hidden = name !== "jobs";
+  if ($("approvals-view")) $("approvals-view").hidden = name !== "approvals";
+  if ($("audit-view")) $("audit-view").hidden = name !== "audit";
   $("tab-chat").classList.toggle("active", name === "chat");
   $("tab-jobs").classList.toggle("active", name === "jobs");
+  if ($("tab-approvals")) $("tab-approvals").classList.toggle("active", name === "approvals");
+  if ($("tab-audit")) $("tab-audit").classList.toggle("active", name === "audit");
   if (name === "jobs") loadJobs();
+  if (name === "approvals") loadApprovals();
+  if (name === "audit") loadAudit();
 }
 $("tab-chat").onclick = () => showView("chat");
 $("tab-jobs").onclick = () => showView("jobs");
+if ($("tab-approvals")) $("tab-approvals").onclick = () => showView("approvals");
+if ($("tab-audit")) $("tab-audit").onclick = () => showView("audit");
+if ($("audit-refresh")) $("audit-refresh").onclick = () => loadAudit();
+if ($("audit-export")) $("audit-export").onclick = async () => {
+  const res = await api("/api/audit/export.csv");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "audit.csv"; a.click();
+  URL.revokeObjectURL(url);
+};
+if ($("stop")) $("stop").onclick = async () => {
+  if (currentChat == null) return;
+  try { await api(`/api/chats/${currentChat}/stop`, { method: "POST" }); } catch (e) { addMessage("error", e.message); }
+};
 
 async function loadJobs() {
   const data = await (await api("/api/jobs")).json();

@@ -472,12 +472,48 @@ class Memory:
         rows = self._all("SELECT * FROM approvals WHERE id = ?", (approval_id,))
         return self._approval_record(rows[0]) if rows else None
 
-    def approvals(self, status: str = "pending", *, chat_id: int | None = None) -> list[dict]:
+    def approvals(self, status: str = "pending", *, chat_id: int | None = None,
+                   limit: int | None = None, before: float | None = None) -> list[dict]:
+        if status == "all":
+            sql = ("SELECT * FROM approvals WHERE (? IS NULL OR chat_id = ?) "
+                   "AND (? IS NULL OR created < ?) ORDER BY created DESC, id DESC")
+            params: list = [chat_id, chat_id, before, before]
+        else:
+            sql = ("SELECT * FROM approvals WHERE status = ? AND (? IS NULL OR chat_id = ?) "
+                   "AND (? IS NULL OR created < ?) ORDER BY created DESC, id DESC")
+            params = [status, chat_id, chat_id, before, before]
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        rows = self._all(sql, tuple(params))
+        return [self._approval_record(row) for row in rows]
+
+    def count_pending_approvals(self) -> int:
+        rows = self._all("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'")
+        return int(rows[0]["n"])
+
+    def approvals_for_run(self, run_id: str, status: str = "pending") -> list[dict]:
         rows = self._all(
-            "SELECT * FROM approvals WHERE status = ? AND (? IS NULL OR chat_id = ?) ORDER BY created, id",
-            (status, chat_id, chat_id),
+            "SELECT * FROM approvals WHERE run_id = ? AND status = ? ORDER BY created, id",
+            (run_id, status),
         )
         return [self._approval_record(row) for row in rows]
+
+    def expire_all_pending_approvals(self, now: float) -> int:
+        return self._exec(
+            "UPDATE approvals SET status = 'expired', decided = ? WHERE status = 'pending'",
+            (now,),
+        ).rowcount
+
+    def expire_approvals_returning_ids(self, now: float) -> list[str]:
+        rows = self._all(
+            "SELECT id FROM approvals WHERE status = 'pending' AND expires <= ?",
+            (now,),
+        )
+        ids = [row["id"] for row in rows]
+        if ids:
+            self.expire_approvals(now)
+        return ids
 
     def decide_approval(
         self,
@@ -547,6 +583,48 @@ class Memory:
             ).rowcount
             > 0
         )
+
+
+    def audit_rows(
+        self,
+        *,
+        event: str | None = None,
+        tool: str | None = None,
+        decision: str | None = None,
+        since: float | None = None,
+        until: float | None = None,
+        limit: int = 100,
+        before: int | None = None,
+    ) -> list[dict]:
+        sql = (
+            "SELECT id, ts, actor, event, run_id, chat_id, tool, decision, detail FROM audit_log WHERE 1=1"
+        )
+        params: list = []
+        if event:
+            sql += " AND event = ?"
+            params.append(event)
+        if tool:
+            sql += " AND tool = ?"
+            params.append(tool)
+        if decision:
+            sql += " AND decision = ?"
+            params.append(decision)
+        if since is not None:
+            sql += " AND ts >= ?"
+            params.append(since)
+        if until is not None:
+            sql += " AND ts <= ?"
+            params.append(until)
+        if before is not None:
+            sql += " AND id < ?"
+            params.append(before)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(max(1, min(limit, 500)))
+        rows = self._all(sql, tuple(params))
+        return [
+            dict(row, detail=json.loads(row["detail"]) if isinstance(row["detail"], str) else row["detail"])
+            for row in rows
+        ]
 
     # --- workspace metadata only; these methods never perform filesystem actions ---
     def record_file(

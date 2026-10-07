@@ -26,7 +26,9 @@
       <h1 id="title">Chat</h1>
       <div class="tabs" role="tablist">
         <button id="tab-chat" class="tab active" role="tab">Chat</button>
+        <button id="tab-approvals" class="tab" role="tab">Approvals <span id="approval-badge" class="tab-badge" hidden>0</span></button>
         <button id="tab-jobs" class="tab" role="tab">Jobs</button>
+        <button id="tab-audit" class="tab" role="tab">Audit</button>
       </div>
     </header>
 
@@ -36,8 +38,19 @@
         <textarea id="input" rows="1" placeholder="Message your agent…" maxlength="20000"
                   aria-label="Message your agent"
                   title="Enter sends on desktop. Shift+Enter adds a line. Ctrl/Cmd+Enter sends on any device."></textarea>
+        <button id="stop" class="ghost danger" type="button" hidden>Stop</button>
         <button id="send" class="primary" type="submit">Send</button>
       </form>
+    </section>
+
+    <section id="approvals-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Pending approvals</h2>
+        <p class="hint">Risky actions wait here until you approve or reject them. Plain chat “yes” does not count.</p>
+        <div id="approval-list"></div>
+        <h2>History</h2>
+        <div id="approval-history"></div>
+      </div>
     </section>
 
     <section id="jobs-view" class="view jobs" hidden>
@@ -60,6 +73,18 @@
         <h2>Saved facts</h2>
         <p class="hint">What the agent remembers about you. It sees these in every chat and job, so delete anything wrong or that you didn't ask it to save.</p>
         <div id="fact-list"></div>
+      </div>
+    </section>
+
+    <section id="audit-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Audit log</h2>
+        <p class="hint">Append-only record of gate decisions and actions.</p>
+        <div class="job-actions audit-actions">
+          <button id="audit-export" class="ghost" type="button">Export CSV</button>
+          <button id="audit-refresh" class="ghost" type="button">Refresh</button>
+        </div>
+        <div id="audit-list"></div>
       </div>
     </section>
   </main>
