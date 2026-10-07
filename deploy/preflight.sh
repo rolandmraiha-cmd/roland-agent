@@ -77,7 +77,31 @@ fi
 
 # --- secrets mode/uid ---
 secrets_dir=$deploy_repo/secrets
+env_file=$deploy_repo/.env
 required_secrets=(model_server_token agent_password_hash)
+browser_enabled=$(python3 - "$env_file" <<'PY'
+import pathlib, shlex, sys
+
+value = ""
+path = pathlib.Path(sys.argv[1])
+if path.is_file():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        key, separator, raw = line.partition("=")
+        if separator and key.strip() == "BROWSER_ENABLED":
+            try:
+                parts = shlex.split(raw, comments=True)
+            except ValueError:
+                parts = []
+            value = parts[0] if len(parts) == 1 else ""
+print("true" if value.lower() in {"true", "1", "yes", "on"} else "false")
+PY
+)
+if [[ $browser_enabled == true ]]; then
+    required_secrets+=(browser_api_token)
+fi
 if [[ ! -d $secrets_dir ]]; then
     fail "secrets/ directory missing (run make secrets && make hash-password)"
 else
@@ -103,8 +127,9 @@ else
         if [[ $fmode != 400 ]]; then
             fail "secret $name mode must be 0400 (got $fmode)"
         elif [[ $fuid != 1000 ]]; then
-            # On developer machines uid 1000 may not match; warn unless AGENT_ENV=production hint.
-            if [[ ${AGENT_ENV:-} == production ]] || [[ ${STRICT_SECRETS:-0} == 1 ]]; then
+            # Browser enabling always requires its production owner. Keep the
+            # existing development warning for the other secrets.
+            if [[ $name == browser_api_token || ${AGENT_ENV:-} == production || ${STRICT_SECRETS:-0} == 1 ]]; then
                 fail "secret $name uid must be 1000 (got $fuid); run make secrets APPLY=1"
             else
                 warn "secret $name uid is $fuid (production expects 1000); run make secrets APPLY=1 on the host"
@@ -119,7 +144,6 @@ else
 fi
 
 # --- .env keys ---
-env_file=$deploy_repo/.env
 if [[ ! -f $env_file ]]; then
     fail ".env missing (cp -n .env.example .env && chmod 600 .env)"
 else
