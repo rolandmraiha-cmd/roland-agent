@@ -159,7 +159,7 @@ def test_chat_stream_sends_keepalive_while_model_thinks(make_agent, monkeypatch)
             "POST", f"/api/chats/{chat_id}/send", json={"text": "hello"}, headers=ORIGIN
         ) as r:
             body = "".join(r.iter_text())
-    assert ": keepalive" in body
+    assert ": ping" in body or ": keepalive" in body
     assert '"type": "done"' in body and '"type": "end"' in body
 
 

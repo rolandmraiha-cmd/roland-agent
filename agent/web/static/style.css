@@ -88,3 +88,24 @@ code { font-size: .85em; color: var(--muted); }
   .bubble { max-width: 92%; }
   .messages { padding: .7rem; }
 }
+
+/* approvals / audit (M3) */
+.tab-badge { display: inline-block; min-width: 1.2em; padding: 0 .35em; margin-left: .25em; border-radius: 999px; background: var(--bad); color: #fff; font-size: .7rem; vertical-align: top; }
+.tab-badge[hidden] { display: none; }
+.approval-card { border-color: #8a5a2b; }
+.approval-card .summary { font-weight: 600; margin: .2rem 0; }
+.approval-card .taint { color: #e0a060; font-size: .85rem; }
+.approval-card .agent-says { font-style: italic; color: var(--muted); }
+.approval-card dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: .4rem 0; font-size: .9rem; }
+.approval-card dt { color: var(--muted); }
+.approval-card .exact pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; background: var(--bg); padding: .5rem; border-radius: 8px; }
+.approval-card .actions { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
+.approval-card .note { flex: 1; min-width: 140px; }
+.composer.locked #input, .composer.locked #send { opacity: .5; pointer-events: none; }
+.audit-row { font-size: .85rem; font-family: ui-monospace, monospace; display: grid; grid-template-columns: 9rem 5rem 7rem 1fr; gap: .4rem; padding: .35rem 0; border-bottom: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .tabs { flex-wrap: wrap; }
+  .audit-row { grid-template-columns: 1fr; }
+}
+
+.audit-actions { margin-bottom: .8rem; }

@@ -452,3 +452,71 @@ test('soft-recover still picks assistant that follows this turn\'s user message'
   await f.run('send("hi")');
   assert.equal(f.get('messages').children[1].children[0].textContent, "fresh reply for this turn");
 });
+
+// ---------- M3 approval gate UI ----------
+test('approval card renders summary via textContent and posts args_hash', async () => {
+  const f = fixture();
+  const posts = [];
+  f.context.api = async (url, options = {}) => {
+    posts.push({ url, body: options.body });
+    if (url.includes('/approve')) return { json: async () => ({ status: 'approved' }) };
+    if (url.startsWith('/api/approvals')) return { json: async () => [] };
+    if (url === '/api/status') return { json: async () => ({ csrf: 'x', name: 'T', model: 'm', calls_left: 1, daily_limit: 1, pending_approvals: 0 }) };
+    return { json: async () => ({}) };
+  };
+  f.context.loadApprovals = async () => {};
+  f.context.loadStatus = async () => {};
+  const approval = {
+    id: 'appr1', tool: 'forget', category: 'delete', summary: 'Forget fact 9',
+    details: { fact_id: 9 }, args_hash: 'a'.repeat(64), needs_confirm: false,
+    status: 'pending', args: { fact_id: 9 }, tainted: false, expires: Date.now() / 1000 + 60,
+  };
+  const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
+  const summary = card.children.find((c) => c.className === 'summary');
+  assert.ok(summary);
+  assert.equal(summary.textContent, 'Forget fact 9');
+  const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.ok(posts.some((p) => p.url.includes('/api/approvals/appr1/approve')));
+  const body = JSON.parse(posts.find((p) => p.url.includes('/approve')).body);
+  assert.equal(body.args_hash, 'a'.repeat(64));
+});
+
+test('needs_confirm requires a second tap', async () => {
+  const f = fixture();
+  let approveCalls = 0;
+  f.context.api = async (url) => {
+    if (url.includes('/approve')) { approveCalls++; return { json: async () => ({ status: 'approved' }) }; }
+    if (url.startsWith('/api/approvals')) return { json: async () => [] };
+    return { json: async () => ({}) };
+  };
+  f.context.loadApprovals = async () => {};
+  f.context.loadStatus = async () => {};
+  const approval = {
+    id: 'appr2', tool: 'forget', category: 'delete', summary: 'Forget fact 1',
+    details: {}, args_hash: 'b'.repeat(64), needs_confirm: true, status: 'pending',
+    args: { fact_id: 1 }, tainted: false,
+  };
+  const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
+  const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
+  await approveBtn.onclick();
+  assert.equal(approveCalls, 0);
+  assert.match(approveBtn.textContent, /Tap again/);
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 1);
+});
+
+test('composer is locked while an approval is pending', async () => {
+  const f = fixture();
+  f.run('setComposerLocked(true)');
+  assert.equal(f.get('composer').classes.has('locked'), true);
+  assert.equal(f.get('send').disabled, true);
+  assert.equal(f.get('input').disabled, true);
+  f.get('input').value = 'yes approve';
+  f.get('composer').onsubmit({ preventDefault() {} });
+  assert.equal(f.run('composerLocked'), true);
+  f.run('setComposerLocked(false)');
+  assert.equal(f.get('composer').classes.has('locked'), false);
+});

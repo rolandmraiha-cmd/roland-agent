@@ -77,10 +77,16 @@ async def execute(agent: Agent, job: Job) -> None:
 
 async def scheduler_loop(agent: Agent, every: float = 20.0) -> None:
     backup_task = asyncio.create_task(backup_loop(agent)) if agent.config.backup_dir is not None else None
+    last_expire = 0.0
     try:
         while True:
             try:
                 await run_due_jobs(agent)
+                now = time.time()
+                if now - last_expire >= 60:
+                    agent.gate.expire_due(now)
+                    agent.memory.delete_expired_sessions(now)
+                    last_expire = now
             except Exception:
                 log.exception("scheduler error")
             await asyncio.sleep(every)

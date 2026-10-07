@@ -48,6 +48,9 @@ class ToolContext:
     timezone: str
     allow_shell: bool
     audit: Audit | NullAudit = field(default_factory=NullAudit)
+    gate: object | None = None
+    run: object | None = None
+    config: object | None = None
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[str]]
@@ -228,7 +231,14 @@ async def write_file(ctx: ToolContext, args: dict) -> str:
                 f.write(content)
         else:
             target.write_text(content)
-        return f"Saved {target.relative_to(ctx.workspace.resolve())} ({len(content)} characters)."
+        rel = str(target.relative_to(ctx.workspace.resolve()))
+        run = ctx.run
+        chat_id = getattr(run, "chat_id", None) if run is not None else None
+        try:
+            ctx.memory.record_file(rel, target.stat().st_size, origin="agent", chat_id=chat_id)
+        except ValueError:
+            pass
+        return f"Saved {rel} ({len(content)} characters)."
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 
@@ -257,7 +267,12 @@ async def remember(ctx: ToolContext, args: dict) -> str:
         return "Error: the fact is empty."
     if len(fact) > MAX_FACT_CHARS:
         return f"Error: a fact can be at most {MAX_FACT_CHARS} characters. Save a shorter one."
-    fact_id = ctx.memory.remember(fact, limit=MAX_FACTS)
+    run = ctx.run
+    chat_id = getattr(run, "chat_id", None) if run is not None else None
+    tainted = bool(getattr(run, "tainted", False)) if run is not None else False
+    fact_id = ctx.memory.remember(
+        fact, limit=MAX_FACTS, origin="agent", chat_id=chat_id, tainted=tainted,
+    )
     if fact_id is None:
         return (f"Error: {MAX_FACTS} facts are saved already. Forget one first, or ask Roland "
                 "to delete some on the Jobs tab.")
@@ -398,15 +413,74 @@ def schemas(exclude: set[str] = frozenset()) -> list[dict]:
 
 
 async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
+    from .gate import POLICIES, Decision, NoApproverGate, Risk, mark_executed
+
     if name not in TOOLS:
         return f"Error: there is no tool called {name}."
+    policy = POLICIES.get(name)
+    if policy is None:
+        return f"Error: there is no tool called {name}."
     try:
-        return await TOOLS[name][1](ctx, args)
+        decision = await policy.classify(ctx, args)
+    except Exception:
+        decision = Decision(Risk.FORBIDDEN, "other", reason="classifier error")
+    run = ctx.run
+    run_id = getattr(run, "run_id", None) if run is not None else None
+    chat_id = getattr(run, "chat_id", None) if run is not None else None
+    ctx.audit.write(
+        "agent",
+        "gate_decision",
+        run_id=run_id,
+        chat_id=chat_id,
+        tool=name,
+        decision=decision.risk.value,
+        detail={"category": decision.category, "reason": decision.reason, "args_keys": sorted(args)},
+    )
+    if decision.risk is Risk.FORBIDDEN:
+        return f"Error: {name} isn't allowed: {decision.reason or 'forbidden'}"
+    approval_id = None
+    run_args = args
+    if decision.risk is Risk.GATED:
+        gate = ctx.gate or NoApproverGate()
+        outcome = await gate.request(ctx, name, args, decision)
+        if not outcome.approved:
+            return f"Not done: {outcome.message}"
+        run_args = outcome.args if outcome.args is not None else args
+        approval_id = outcome.approval_id
+    try:
+        result = await TOOLS[name][1](ctx, run_args)
     except Exception as e:  # a broken tool call should never crash the agent
-        return f"Error: {type(e).__name__}: {e}"
+        result = f"Error: {type(e).__name__}: {e}"
+    if approval_id is not None and ctx.gate is not None:
+        mark_executed(ctx.memory, ctx.audit, approval_id, result)
+    else:
+        digest_detail = {"preview": result[:500]}
+        ctx.audit.write(
+            "agent",
+            "tool_result",
+            run_id=run_id,
+            chat_id=chat_id,
+            tool=name,
+            decision=decision.risk.value,
+            detail=digest_detail,
+        )
+    if policy.taints and run is not None:
+        run.tainted = True
+        if run_id:
+            ctx.memory.set_run_tainted(run_id)
+    return result
 
 
 def describe(name: str, args: dict) -> str:
     """A short line for the chat page showing which tool ran."""
     text = json.dumps(args, ensure_ascii=False)
     return f"{name} {clip(text, 160)}"
+
+
+# Import-time assertion: every registered tool must have a policy (§6.2.4).
+from .gate import POLICIES as _POLICIES  # noqa: E402
+
+assert set(TOOLS) == set(_POLICIES), (
+    f"TOOLS/POLICIES mismatch: only in TOOLS={set(TOOLS)-set(_POLICIES)} "
+    f"only in POLICIES={set(_POLICIES)-set(TOOLS)}"
+)
