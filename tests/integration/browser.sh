@@ -68,6 +68,19 @@ printf '==> start the fixture site and the browser\n'
 printf '==> live tests\n'
 "${compose[@]}" run --rm --no-deps -e BROWSER_LIVE_REQUIRED=1 tester "${tests[@]}"
 
+# The most memory the container used so far, /dev/shm and /tmp included (the cap is 1280 MiB).
+"${compose[@]}" exec -T browser python -c '
+import pathlib
+for name in ("memory.peak", "memory/memory.max_usage_in_bytes"):  # cgroup v2, then v1
+    try:
+        peak = int(pathlib.Path("/sys/fs/cgroup", name).read_text())
+    except (OSError, ValueError):
+        continue
+    print(f"peak memory during the tests: {peak // 2**20} MiB of 1280 MiB")
+    break
+else:
+    print("peak memory: not reported by this kernel")'
+
 printf '==> restart the browser; the profile must keep the sign-in\n'
 "${compose[@]}" restart browser
 "${compose[@]}" up -d --wait --wait-timeout 180 browser
@@ -173,7 +186,7 @@ if [[ $ports == *"0.0.0.0"* || $ports == *":::"* ]]; then
 fi
 printf 'ok: profile volume only in the browser container, no published port\n'
 
-printf '==> memory after the run (the cap is 1280 MiB)\n'
+printf '==> memory now, after the restart\n'
 docker stats --no-stream --format '{{ .Name }}  {{ .MemUsage }}  {{ .MemPerc }}' \
     "$("${compose[@]}" ps --quiet browser)"
 

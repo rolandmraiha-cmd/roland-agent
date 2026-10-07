@@ -20,7 +20,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from . import policy_browser
-from .browser_client import BrowserClient, BrowserError, BrowserLocked, ElementChanged
+from .browser_client import ERROR_TEXT, BrowserClient, BrowserError, BrowserLocked, ElementChanged
 from .gate import PIN_KEY, Decision, Risk
 from .tools_files import workspace_from_ctx
 from .workspace import WorkspaceError
@@ -901,6 +901,10 @@ async def browser_tabs(ctx, args: dict) -> str:
         answer = await client.status()
     except BrowserError as error:
         return _fail(error)
+    if answer.get("mode") != "agent":
+        # The status route stays open while Roland has the browser (his own Browser tab uses
+        # it). The model is told nothing about what he is looking at: not even an address.
+        return f"Error: {ERROR_TEXT['user_mode']}"
     tabs = answer.get("tabs")
     lines = []
     for tab in tabs[:MAX_LISTED] if isinstance(tabs, list) else []:

@@ -84,8 +84,9 @@ class Settings:
     chromium_sandbox: bool = False
     # Test-only: host names the navigation guard lets through although they are private.
     allow_private_hosts: frozenset[str] = frozenset()
-    # "word" (default) or "substring" (the spec's literal rule); see snapshot.js.
-    sensitive_match: str = "word"
+    # Which field names mean "secret": "substring" is the spec's literal rule plus the word
+    # rule; "word" is the word rule alone, which leaves names like "shipping" alone. See snapshot.js.
+    sensitive_match: str = "substring"
     # Also block fetch/XHR POSTs from actions Roland hasn't approved (stricter; off by default).
     block_background_posts: bool = False
     locale: str = "en-GB"
@@ -108,7 +109,7 @@ class Settings:
         peers = _names("BROWSERD_ALLOWED_PEERS") or frozenset({"10.77.4.10"})
         if "*" in peers:
             raise SystemExit("BROWSERD_ALLOWED_PEERS='*' is not allowed; list core's address")
-        match = os.environ.get("BROWSER_SENSITIVE_MATCH", "").strip().lower() or "word"
+        match = os.environ.get("BROWSER_SENSITIVE_MATCH", "").strip().lower() or "substring"
         if match not in {"word", "substring"}:
             raise SystemExit("BROWSER_SENSITIVE_MATCH must be word or substring")
         return cls(

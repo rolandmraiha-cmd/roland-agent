@@ -1215,3 +1215,17 @@ def test_error_texts_cover_every_code_the_browser_service_can_send():
     # Reported as plain "the browser couldn't do that (code)": ours to fix, not the model's.
     internal = {"bad_request", "failed"}
     assert codes - internal <= set(ERROR_TEXT), sorted(codes - internal - set(ERROR_TEXT))
+
+
+@pytest.mark.asyncio
+async def test_tab_list_says_nothing_while_roland_has_the_browser(tmp_path, fake):
+    """The status route stays open in user mode. What Roland is looking at (a sign-in page,
+    his inbox) must still not reach the model, not even as an address or a title."""
+    fake.url, fake.title = "https://bank.example/reset?token=abc123", "Reset password - Roland"
+    ctx = tool_ctx(tmp_path, fake)
+    assert "bank.example" in await call_tool(ctx, "browser_tabs", {})
+    fake.user_mode = True
+    locked = await call_tool(ctx, "browser_tabs", {})
+    assert locked == "Error: Roland is using the browser right now."
+    for private in ("bank.example", "abc123", "Reset password", "example.org"):
+        assert private not in locked

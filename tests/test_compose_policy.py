@@ -436,6 +436,8 @@ def test_browser_service_is_off_by_default_and_hardened():
     assert env["BROWSERD_ALLOWED_PEERS"] == "10.77.4.10"
     assert env["BROWSER_API_TOKEN_FILE"] == "/run/secrets/browser_api_token"
     assert env["BROWSER_CHROMIUM_SANDBOX"] == "${BROWSER_CHROMIUM_SANDBOX:-false}"
+    assert env["BROWSER_SENSITIVE_MATCH"] == "${BROWSER_SENSITIVE_MATCH:-substring}"  # the spec's rule
+    assert env["BROWSER_BLOCK_BACKGROUND_POSTS"] == "${BROWSER_BLOCK_BACKGROUND_POSTS:-false}"
     assert env["DISPLAY"] == ":99" and env["HOME"] == "/tmp/home"
     assert "BROWSER_ALLOW_PRIVATE_HOSTS" not in env and not any(key.startswith("VNC") for key in env)
     assert browser["secrets"] == ["browser_api_token"]

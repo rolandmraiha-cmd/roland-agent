@@ -68,9 +68,10 @@ function field(attrs, value, more = {}) {
   input.labels = (more.label ? [new HTMLElement('label', {}, { text: more.label })] : []);
   return input;
 }
-const describe = (element, sensitive = 'word') => script(element, { op: 'describe', sensitive });
+// With no setting the script uses the spec's rule; 'word' is the looser one Roland can choose.
+const describe = (element, sensitive) => script(element, { op: 'describe', sensitive });
 
-test('helpers: which field names mean a secret (word mode, the default)', () => {
+test('helpers: which field names mean a secret by the word rule', () => {
   const { secretName } = script({ op: 'helpers' });
   const secret = ['password', 'Password', 'user_password', 'passwd', 'pwd', 'loginPwd', 'new-password', 'salasana',
     'Salasana', 'tunnusluku', 'pin', 'PIN', 'pin_code', 'pinCode', 'userPin', 'card-pin', 'otp', 'OTP', 'otp-code',
@@ -87,7 +88,7 @@ test('helpers: which field names mean a secret (word mode, the default)', () => 
   for (const name of plain) assert.equal(secretName(name, 'word'), false, name);
 });
 
-test('helpers: the spec\'s literal rule (substring mode) is stricter and catches more', () => {
+test('helpers: the spec\'s literal rule catches any name that contains one of its words', () => {
   const { secretName } = script({ op: 'helpers' });
   for (const name of ['password', 'pwd', 'pin', 'otp', '2fa', 'totp', 'cvc', 'cvv', 'cardnumber', 'card-number',
     'iban', 'passwd', 'shipping', 'passenger', 'compass', 'opinion', 'spinner', 'mapping']) {
@@ -133,29 +134,49 @@ test('the value of a field that is secret by its name, label or hint is never re
     field({ name: 'recovery' }, 'words', { tag: 'textarea', label: 'Passphrase' }),
   ];
   for (const input of cases) {
-    const out = describe(input);
-    assert.equal(out.sensitive, true, JSON.stringify(input._attrs));
-    assert.equal(out.value, '');
-    assert.equal(input.reads, 0, JSON.stringify(input._attrs));
+    for (const mode of [undefined, 'word']) {
+      const out = describe(input, mode);
+      assert.equal(out.sensitive, true, JSON.stringify(input._attrs));
+      assert.equal(out.value, '');
+      assert.equal(input.reads, 0, JSON.stringify(input._attrs));
+    }
   }
 });
 
-test('ordinary fields are read, cut to 200 characters, and similar names are left alone', () => {
-  const city = field({ type: 'text', name: 'shipping_city' }, 'Helsinki', { label: 'City' });
+test('ordinary fields are read and cut to 200 characters', () => {
+  const city = field({ type: 'text', name: 'city' }, 'Helsinki', { label: 'City' });
   const out = describe(city);
   assert.equal(out.sensitive, false);
   assert.equal(out.value, 'Helsinki');
   assert.equal(out.name, 'City');
   assert.equal(city.reads, 1);
   assert.equal(describe(field({ type: 'text', name: 'note' }, 'x'.repeat(900))).value.length, 200);
-  // The spec's literal rule calls "shipping" secret (it contains "pin"): the value stays unread.
-  const strict = field({ type: 'text', name: 'shipping_city' }, 'Helsinki');
-  assert.equal(describe(strict, 'substring').sensitive, true);
-  assert.equal(strict.reads, 0);
   // Tick boxes and file fields have no value worth showing.
   const box = field({ type: 'checkbox', name: 'news' }, 'on');
   assert.equal(describe(box).value, '');
   assert.equal(box.reads, 0);
+});
+
+test('by default the spec\'s rule applies: a name that merely contains pin or pass is secret', () => {
+  for (const name of ['shipping_city', 'passengerName', 'opinion', 'compass_heading']) {
+    for (const mode of [undefined, 'substring', 'anything-else']) {
+      const input = field({ type: 'text', name }, 'Helsinki');
+      assert.equal(describe(input, mode).sensitive, true, `${name} ${mode}`);
+      assert.equal(input.reads, 0);
+    }
+    // Roland can choose the word rule, which leaves these alone.
+    const relaxed = field({ type: 'text', name }, 'Helsinki');
+    assert.deepEqual([describe(relaxed, 'word').sensitive, describe(relaxed, 'word').value], [false, 'Helsinki']);
+  }
+  // The default is never looser than the word rule: it reads the label and placeholder too.
+  const labelled = field({ type: 'text', name: 'f2' }, '1234', { label: 'PIN' });
+  assert.equal(describe(labelled).sensitive, true);
+  assert.equal(labelled.reads, 0);
+  // Only fields can be secret: a link or button whose id happens to contain "pin" is not.
+  const link = new HTMLElement('a', { href: '/shipping', id: 'shipping-info' }, { text: 'Shipping' });
+  assert.equal(describe(link).sensitive, false);
+  const submit = new HTMLElement('input', { type: 'submit', name: 'pin_submit', value: 'Send' });
+  assert.equal(describe(submit).sensitive, false);
 });
 
 test('a field name cannot hide where its form really goes', () => {

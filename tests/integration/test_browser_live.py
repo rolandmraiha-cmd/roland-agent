@@ -353,13 +353,13 @@ async def test_private_ip_navigation_blocked(agent_for):
     targets = ["http://10.77.1.10:8080/", "http://10.77.4.10:8080/", "http://169.254.169.254/latest/",
                "http://localhost:8080/", "http://core:8080/", "http://[::1]/", "http://192.168.1.1/",
                "http://127.1/", "http://2130706433/", "http://0x7f.0.0.1/", "http://[::ffff:10.77.1.10]/"]
-    # Core refuses these before it asks the browser ...
+    # What the model is told ...
     agent = agent_for([call("browser_open", url=url) for url in targets] + ["refused"], max_tool_steps=20)
     await run(agent)
     answers = agent.brain.outputs()
     assert len(answers) == len(targets)
     assert all("Error: the browser refused that address" in text for text in answers), answers
-    # ... and the browser service refuses them by itself too.
+    # ... and what the browser service itself answers: nothing was requested.
     for url in targets:
         answer = raw("POST", "/v1/navigate", {"url": url}).json()
         assert answer.get("blocked") == "private_address" and answer["status"] == 0, url
@@ -502,17 +502,23 @@ async def test_field_names_cannot_hide_where_a_form_goes(agent_for):
     assert "children=1" in site_posts()[0]
 
 
-async def test_secret_fields_by_name_and_plain_fields_with_similar_names(agent_for):
+async def test_secret_fields_by_name_are_never_read_or_typed_into(agent_for):
     raw("POST", "/v1/navigate", {"url": f"{FIXTURE_URL}/extras/names"})
     answer = raw("POST", "/v1/snapshot", {"max_chars": 2000})
     fields = {item["name"]: item for item in answer.json()["elements"] if item.get("tag") == "input"}
-    assert {name: item["sensitive"] for name, item in fields.items()} == {
-        "Shipping address": False, "Passenger": False, "PIN": True, "Code from your phone": True,
-        "Card": True, "Security code": True, "Search": False,
-    }
-    assert fields["Shipping address"]["value"] == "Mannerheimintie 1"
+    assert set(fields) == {"Shipping address", "Passenger", "PIN", "Code from your phone", "Card",
+                           "Security code", "Search"}
+    for name in ("PIN", "Code from your phone", "Card", "Security code"):  # secret by either rule
+        assert fields[name]["sensitive"] is True and fields[name]["value"] == "", name
+    assert fields["Search"]["sensitive"] is False and fields["Search"]["value"] == "mugs"
     for secret in ("1234-fixture-pin", "987654-fixture-otp", "4111-fixture-card", "321-fixture-cvc"):
         assert secret not in answer.text
+    # "shipping" contains "pin" and "passenger" contains "pass". The spec's rule (the default)
+    # calls both secret; BROWSER_SENSITIVE_MATCH=word doesn't. Either way the two must agree.
+    by_spec_rule = fields["Shipping address"]["sensitive"]
+    assert fields["Passenger"]["sensitive"] is by_spec_rule
+    assert fields["Shipping address"]["value"] == ("" if by_spec_rule else "Mannerheimintie 1")
+    assert ("Mannerheimintie" in answer.text) is not by_spec_rule
     for name in ("PIN", "Card"):
         refused = raw("POST", "/v1/type", {"ref": fields[name]["ref"], "fingerprint": fields[name]["fingerprint"],
                                            "text": "0000", "mode": "approved"})
@@ -603,9 +609,15 @@ async def test_upload_sends_only_the_approved_file(agent_for):
 
 async def test_user_mode_locks_the_agent_out(agent_for):
     assert raw("POST", "/v1/user-mode", {"on": True}).json() == {"mode": "user"}
-    agent = agent_for([call("browser_snapshot"), call("browser_screenshot"), open_page("/shop"), "locked"])
+    agent = agent_for([
+        call("browser_snapshot"), call("browser_screenshot"), open_page("/shop"), call("browser_tabs"),
+        call("browser_back"), call("browser_downloads"), "locked",
+    ])
     await run(agent)
-    assert all("Roland is using the browser right now" in text for text in agent.brain.outputs())
+    outputs = agent.brain.outputs()
+    assert len(outputs) == 6
+    assert all("Roland is using the browser right now" in text for text in outputs)
+    assert all(FIXTURE_URL not in text for text in outputs)  # not even where the browser is
     assert raw("GET", "/v1/status").json()["mode"] == "user"
     assert raw("POST", "/v1/user-mode", {"on": False}).json() == {"mode": "agent"}
 

@@ -90,7 +90,8 @@
 
   // --- which fields hold secrets ---
   // Always: type=password and the autocomplete hints for passwords, one-time codes and cards.
-  // By name: two ways of matching, chosen by browserd (BROWSER_SENSITIVE_MATCH).
+  // By name: the spec's list matched anywhere in the name, and a list of whole words.
+  // By default both count; BROWSER_SENSITIVE_MATCH=word drops the first.
   const SECRET_AUTOCOMPLETE = ["current-password", "new-password", "one-time-code", "cc-number",
     "cc-csc", "cc-exp", "cc-exp-month", "cc-exp-year"];
   // "substring": the spec's literal list, matched anywhere in name, id or aria-label.
@@ -166,23 +167,30 @@
     } catch (error) { /* not a labelable element */ }
     return "";
   };
+  const NOT_FIELDS = ["submit", "button", "image", "reset", "hidden"];
+  const isField = (el) => {
+    const tag = tagOf(el);
+    if (tag === "INPUT") return !NOT_FIELDS.includes(lower(el, "type"));
+    return tag === "TEXTAREA" || tag === "SELECT" || takesText(el);
+  };
   const isSensitive = (el, mode) => {
     if (tagOf(el) === "INPUT" && lower(el, "type") === "password") return true;
     const hints = lower(el, "autocomplete").split(/\s+/);
     if (hints.some((hint) => SECRET_AUTOCOMPLETE.includes(hint))) return true;
+    if (!isField(el)) return false;
     const named = [attr(el, "name"), attr(el, "id"), attr(el, "aria-label")];
-    // The spec's rule looks at those three on any element. The word rule only looks at
-    // things you can type into, and also reads their placeholder and label.
-    if (mode === "substring") return named.some((text) => secretName(text, mode));
-    if (!takesText(el)) return false;
+    // The spec's rule, unless Roland chose the word rule alone (BROWSER_SENSITIVE_MATCH=word).
+    if (mode !== "word" && named.some((text) => secretName(text, "substring"))) return true;
+    // The word rule always applies. It also reads the placeholder and the label, which the
+    // spec's rule doesn't, so by default a field is secret if either rule says so.
     named.push(attr(el, "placeholder"), labelText(el));
-    return named.some((text) => secretName(text, mode));
+    return named.some((text) => secretName(text, "word"));
   };
 
   // Used by the tests under tests/frontend: nothing in a real page asks for this.
   if (args.op === "helpers") return { secretName, nameWords, tidy };
 
-  const mode = args.sensitive === "substring" ? "substring" : "word";
+  const mode = args.sensitive === "word" ? "word" : "substring";
 
   // --- what an element is ---
   const refOf = (el) => {

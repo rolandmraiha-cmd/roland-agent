@@ -428,7 +428,7 @@ def test_settings_defaults_match_the_spec(env):
     assert (config.action_timeout_s, config.nav_timeout_s) == (30, 45)
     assert config.chromium_sandbox is False and config.headless is False
     assert config.allow_private_hosts == frozenset() and config.block_background_posts is False
-    assert config.sensitive_match == "word" and config.timezone == "Europe/Helsinki"
+    assert config.sensitive_match == "substring" and config.timezone == "Europe/Helsinki"  # the spec's rule
     assert TOKEN not in repr(config)
 
 
@@ -461,14 +461,14 @@ def test_settings_that_make_no_sense_stop_the_service(env, name, value):
 def test_settings_read_the_switches(env):
     env.setenv("BROWSER_API_TOKEN", TOKEN)
     env.setenv("BROWSER_ALLOW_PRIVATE_HOSTS", " Fixture-Web , 127.0.0.1,")
-    env.setenv("BROWSER_SENSITIVE_MATCH", "Substring")
+    env.setenv("BROWSER_SENSITIVE_MATCH", "Word")
     env.setenv("BROWSER_BLOCK_BACKGROUND_POSTS", "true")
     env.setenv("BROWSER_CHROMIUM_SANDBOX", "1")
     env.setenv("BROWSER_VIEWPORT", "1024x768")
     env.setenv("BROWSER_MAX_TABS", "3")
     config = settings.Settings.from_env()
     assert config.allow_private_hosts == frozenset({"fixture-web", "127.0.0.1"})
-    assert (config.sensitive_match, config.block_background_posts, config.chromium_sandbox) == ("substring", True, True)
+    assert (config.sensitive_match, config.block_background_posts, config.chromium_sandbox) == ("word", True, True)
     assert (config.viewport, config.max_tabs) == ((1024, 768), 3)
 
 

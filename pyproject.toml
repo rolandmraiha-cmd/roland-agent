@@ -35,7 +35,7 @@ pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-m 'not integration'"
 markers = [
-    "integration: needs the compose test stack (sandbox/model)",
+    "integration: needs the compose test stack (sandbox, model or browser)",
 ]
 
 [tool.ruff]
