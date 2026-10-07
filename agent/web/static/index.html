@@ -27,6 +27,7 @@
       <div class="tabs" role="tablist">
         <button id="tab-chat" class="tab active" role="tab">Chat</button>
         <button id="tab-approvals" class="tab" role="tab">Approvals <span id="approval-badge" class="tab-badge" hidden>0</span></button>
+        <button id="tab-files" class="tab" role="tab">Files</button>
         <button id="tab-jobs" class="tab" role="tab">Jobs</button>
         <button id="tab-audit" class="tab" role="tab">Audit</button>
       </div>
@@ -35,6 +36,8 @@
     <section id="chat-view" class="view">
       <div id="messages" class="messages" aria-live="polite"></div>
       <form id="composer" class="composer">
+        <input id="attach-input" type="file" multiple hidden>
+        <button id="attach" class="ghost icon" type="button" title="Attach files" aria-label="Attach files">📎</button>
         <textarea id="input" rows="1" placeholder="Message your agent…" maxlength="20000"
                   aria-label="Message your agent"
                   title="Enter sends on desktop. Shift+Enter adds a line. Ctrl/Cmd+Enter sends on any device."></textarea>
@@ -76,6 +79,28 @@
       </div>
     </section>
 
+
+    <section id="files-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Files</h2>
+        <p class="hint">Workspace files. Uploads stay on this server. Deletes go to trash first.</p>
+        <div id="files-usage" class="hint"></div>
+        <div class="job-actions files-actions">
+          <nav id="files-crumb" class="files-crumb" aria-label="Path"></nav>
+          <button id="files-upload-btn" class="primary" type="button">Upload</button>
+          <input id="files-upload-input" type="file" multiple hidden>
+          <button id="files-mkdir-btn" class="ghost" type="button">New folder</button>
+          <button id="files-trash-btn" class="ghost" type="button">Trash</button>
+          <button id="files-refresh" class="ghost" type="button">Refresh</button>
+        </div>
+        <div id="files-progress" class="hint" hidden></div>
+        <div id="files-list"></div>
+        <div id="trash-panel" hidden>
+          <h2>Trash</h2>
+          <div id="trash-list"></div>
+        </div>
+      </div>
+    </section>
     <section id="audit-view" class="view jobs" hidden>
       <div class="jobs-inner">
         <h2>Audit log</h2>

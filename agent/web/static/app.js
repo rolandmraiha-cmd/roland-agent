@@ -234,6 +234,8 @@ async function send(text) {
       } else if (ev.type === "approval_resolved") {
         setComposerLocked(false);
         loadStatus();
+      } else if (ev.type === "file") {
+        reply.before(renderFileCard(ev));
       } else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
       else if (ev.type === "error") {
         sawError = true;
@@ -470,18 +472,22 @@ function showView(name) {
   $("jobs-view").hidden = name !== "jobs";
   if ($("approvals-view")) $("approvals-view").hidden = name !== "approvals";
   if ($("audit-view")) $("audit-view").hidden = name !== "audit";
+  if ($("files-view")) $("files-view").hidden = name !== "files";
   $("tab-chat").classList.toggle("active", name === "chat");
   $("tab-jobs").classList.toggle("active", name === "jobs");
   if ($("tab-approvals")) $("tab-approvals").classList.toggle("active", name === "approvals");
   if ($("tab-audit")) $("tab-audit").classList.toggle("active", name === "audit");
+  if ($("tab-files")) $("tab-files").classList.toggle("active", name === "files");
   if (name === "jobs") loadJobs();
   if (name === "approvals") loadApprovals();
   if (name === "audit") loadAudit();
+  if (name === "files") loadFiles();
 }
 $("tab-chat").onclick = () => showView("chat");
 $("tab-jobs").onclick = () => showView("jobs");
 if ($("tab-approvals")) $("tab-approvals").onclick = () => showView("approvals");
 if ($("tab-audit")) $("tab-audit").onclick = () => showView("audit");
+if ($("tab-files")) $("tab-files").onclick = () => showView("files");
 if ($("audit-refresh")) $("audit-refresh").onclick = () => loadAudit();
 if ($("audit-export")) $("audit-export").onclick = async () => {
   const res = await api("/api/audit/export.csv");
@@ -584,6 +590,206 @@ $("job-form").onsubmit = async (e) => {
 $("logout").onclick = async () => {
   try { await api("/logout", { method: "POST" }); } catch (_) {}
   location.href = "/login";
+};
+
+
+// ---------- files ----------
+function renderFileCard(ev) {
+  const card = el("div", "card file-card");
+  const title = ev.name || (ev.path || "").split("/").pop() || "file";
+  card.append(el("strong", "", title));
+  const meta = el("p", "meta", `${ev.path || ""} · ${fmtSize(ev.size || 0)}`);
+  card.append(meta);
+  if (ev.note) card.append(el("p", "hint", ev.note));
+  const actions = el("div", "job-actions");
+  const dl = el("a", "ghost", "Download");
+  dl.href = `/api/files/download?path=${encodeURIComponent(ev.path || "")}`;
+  dl.setAttribute("download", title);
+  actions.append(dl);
+  card.append(actions);
+  if (ev.preview && ev.path) {
+    const img = document.createElement("img");
+    img.alt = title;
+    img.src = `/api/files/preview?path=${encodeURIComponent(ev.path)}`;
+    card.append(img);
+  }
+  return card;
+}
+
+function fmtSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+let filesPath = "";
+
+function filesJoin(base, name) {
+  if (!base) return name;
+  return base.replace(/\/$/, "") + "/" + name;
+}
+
+async function loadFiles() {
+  if (!$("files-list")) return;
+  if ($("trash-panel")) $("trash-panel").hidden = true;
+  const data = await (await api(`/api/files?path=${encodeURIComponent(filesPath)}`)).json();
+  const usage = data.usage || {};
+  $("files-usage").textContent = `Using ${usage.used_mb ?? "?"} / ${usage.quota_mb ?? "?"} MB (free ${usage.free_mb ?? "?"} MB)`;
+  const crumb = $("files-crumb");
+  crumb.replaceChildren();
+  const rootBtn = el("button", "", "workspace");
+  rootBtn.type = "button";
+  rootBtn.onclick = () => { filesPath = ""; loadFiles(); };
+  crumb.append(rootBtn);
+  if (filesPath) {
+    const parts = filesPath.split("/");
+    let acc = "";
+    for (const part of parts) {
+      crumb.append(document.createTextNode(" / "));
+      acc = filesJoin(acc, part);
+      const btn = el("button", "", part);
+      btn.type = "button";
+      const target = acc;
+      btn.onclick = () => { filesPath = target; loadFiles(); };
+      crumb.append(btn);
+    }
+  }
+  const list = $("files-list");
+  list.replaceChildren();
+  if (!data.entries.length) list.append(el("p", "hint", "Empty folder."));
+  for (const entry of data.entries) {
+    const row = el("div", "card file-row");
+    const label = entry.name;
+    const open = el("button", "ghost", label);
+    open.type = "button";
+    const entryPath = filesJoin(filesPath, entry.name.replace(/@$/, ""));
+    if (entry.type === "dir") {
+      open.onclick = () => { filesPath = entryPath; loadFiles(); };
+    } else if (entry.type === "symlink") {
+      open.disabled = true;
+      open.title = "Symlink (not followed)";
+    } else {
+      open.onclick = () => {
+        location.href = `/api/files/download?path=${encodeURIComponent(entryPath)}`;
+      };
+    }
+    const meta = el("span", "meta", entry.type === "file" ? fmtSize(entry.size || 0) : entry.type);
+    const origin = el("span", "origin", entry.origin || "unknown");
+    const del = el("button", "ghost danger", "Delete");
+    del.type = "button";
+    del.onclick = async () => {
+      if (!confirm(`Move "${entryPath}" to trash?`)) return;
+      try {
+        await api(`/api/files?path=${encodeURIComponent(entryPath)}`, { method: "DELETE" });
+        loadFiles();
+      } catch (e) { alert(e.message); }
+    };
+    row.append(open, meta, origin);
+    if (entry.type !== "symlink") {
+      const actions = el("div", "job-actions");
+      actions.append(del);
+      row.append(actions);
+    }
+    list.append(row);
+  }
+}
+
+async function loadTrash() {
+  $("trash-panel").hidden = false;
+  const rows = await (await api("/api/trash")).json();
+  const list = $("trash-list");
+  list.replaceChildren();
+  if (!rows.length) list.append(el("p", "hint", "Trash is empty."));
+  for (const row of rows) {
+    const card = el("div", "card");
+    card.append(el("strong", "", row.original_path));
+    card.append(el("p", "meta", `${fmtSize(row.size)} · ${fmtTime(row.deleted)} · ${row.deleted_by}`));
+    const btn = el("button", "ghost", "Restore");
+    btn.type = "button";
+    btn.onclick = async () => {
+      try {
+        await api(`/api/trash/${row.id}/restore`, { method: "POST", body: "{}" });
+        loadTrash();
+        loadFiles();
+      } catch (e) { alert(e.message); }
+    };
+    card.append(btn);
+    list.append(card);
+  }
+}
+
+function uploadFiles(fileList, { destDir, intoComposer }) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const progress = $("files-progress");
+  (async () => {
+    for (const file of files) {
+      const day = new Date().toISOString().slice(0, 10);
+      const dest = intoComposer
+        ? `uploads/${day}/${file.name}`
+        : (destDir ? filesJoin(destDir, file.name) : file.name);
+      if (progress) {
+        progress.hidden = false;
+        progress.textContent = `Uploading ${file.name}…`;
+      }
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", `/api/files/content?path=${encodeURIComponent(dest)}`);
+        xhr.setRequestHeader("X-CSRF-Token", csrf);
+        xhr.setRequestHeader("X-Overwrite", "0");
+        xhr.upload.onprogress = (ev) => {
+          if (progress && ev.lengthComputable) {
+            progress.textContent = `Uploading ${file.name}… ${Math.round(100 * ev.loaded / ev.total)}%`;
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            if (intoComposer) {
+              const size = fmtSize(file.size);
+              const marker = `[Attached: ${dest} (${size})]`;
+              const cur = $("input").value;
+              $("input").value = cur ? (cur + "\n" + marker) : marker;
+              autosize();
+            }
+            resolve();
+          } else {
+            let msg = xhr.statusText;
+            try { msg = JSON.parse(xhr.responseText).detail || msg; } catch (_) {}
+            reject(new Error(typeof msg === "string" ? msg : JSON.stringify(msg)));
+          }
+        };
+        xhr.onerror = () => reject(new Error("upload failed"));
+        xhr.send(file);
+      });
+    }
+    if (progress) { progress.hidden = true; progress.textContent = ""; }
+    if (!intoComposer) loadFiles();
+  })().catch((e) => {
+    if (progress) { progress.hidden = false; progress.textContent = e.message; }
+    else alert(e.message);
+  });
+}
+
+if ($("files-refresh")) $("files-refresh").onclick = () => loadFiles();
+if ($("files-upload-btn")) $("files-upload-btn").onclick = () => $("files-upload-input").click();
+if ($("files-upload-input")) $("files-upload-input").onchange = (e) => {
+  uploadFiles(e.target.files, { destDir: filesPath, intoComposer: false });
+  e.target.value = "";
+};
+if ($("files-mkdir-btn")) $("files-mkdir-btn").onclick = async () => {
+  const name = prompt("Folder name");
+  if (!name) return;
+  const dest = filesJoin(filesPath, name);
+  try {
+    await api("/api/files/mkdir", { method: "POST", body: JSON.stringify({ path: dest }) });
+    loadFiles();
+  } catch (e) { alert(e.message); }
+};
+if ($("files-trash-btn")) $("files-trash-btn").onclick = () => loadTrash();
+if ($("attach")) $("attach").onclick = () => $("attach-input").click();
+if ($("attach-input")) $("attach-input").onchange = (e) => {
+  uploadFiles(e.target.files, { intoComposer: true });
+  e.target.value = "";
 };
 
 // ---------- start ----------

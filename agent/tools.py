@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 from .audit import Audit, NullAudit
 from .memory import Memory
 from .schedule import next_run_after, valid_cron
+from .tools_files import attach_file, delete_file, file_info, move_file
 
 MAX_OUTPUT = 8000          # characters of tool output the model sees
 MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
@@ -54,13 +55,10 @@ class ToolContext:
 Handler = Callable[[ToolContext, dict], Awaitable[str]]
 
 
-def _workspace_path(ctx: ToolContext, path: str) -> Path:
-    """Resolves a path inside the workspace and refuses anything that points outside it."""
-    root = ctx.workspace.resolve()
-    target = (root / (path or ".")).resolve()
-    if target != root and root not in target.parents:
-        raise ValueError("Path is outside the workspace.")
-    return target
+def _ws(ctx: ToolContext):
+    from .tools_files import workspace_from_ctx
+
+    return workspace_from_ctx(ctx)
 
 
 # --- web ---
@@ -199,13 +197,7 @@ async def run_shell(ctx: ToolContext, args: dict) -> str:
 async def read_file(ctx: ToolContext, args: dict) -> str:
     path = str(args.get("path", ""))
     try:
-        target = _workspace_path(ctx, path)
-        # Read one extra character to detect truncation without loading the whole file.
-        with target.open(errors="replace") as f:
-            text = f.read(MAX_OUTPUT + 1)
-        if len(text) > MAX_OUTPUT:
-            return text[:MAX_OUTPUT] + "\n... [cut, file continues]"
-        return text
+        return _ws(ctx).read_text(path, max_chars=MAX_OUTPUT)
     except FileNotFoundError:
         shown = path.strip() or "(empty path)"
         return (
@@ -218,35 +210,38 @@ async def read_file(ctx: ToolContext, args: dict) -> str:
 
 async def write_file(ctx: ToolContext, args: dict) -> str:
     try:
-        target = _workspace_path(ctx, str(args.get("path", "")))
-        if target == ctx.workspace.resolve():
-            return "Error: give a file name."
-        target.parent.mkdir(parents=True, exist_ok=True)
+        path = str(args.get("path", ""))
         content = str(args.get("content", ""))
-        if args.get("append"):
-            with target.open("a") as f:
-                f.write(content)
-        else:
-            target.write_text(content)
-        rel = str(target.relative_to(ctx.workspace.resolve()))
+        append = bool(args.get("append"))
         run = ctx.run
         chat_id = getattr(run, "chat_id", None) if run is not None else None
-        try:
-            ctx.memory.record_file(rel, target.stat().st_size, origin="agent", chat_id=chat_id)
-        except ValueError:
-            pass
-        return f"Saved {rel} ({len(content)} characters)."
+        approval_id = getattr(run, "pending_approval_id", None) if run is not None else None
+        result = _ws(ctx).write_text(
+            path,
+            content,
+            append=append,
+            origin="agent",
+            chat_id=chat_id,
+            deleted_by="agent",
+            approval_id=approval_id,
+        )
+        return f"Saved {result['path']} ({len(content)} characters)."
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 
 
 async def list_files(ctx: ToolContext, args: dict) -> str:
     try:
-        ctx.workspace.mkdir(parents=True, exist_ok=True)
-        target = _workspace_path(ctx, str(args.get("path", ".")))
-        root = ctx.workspace.resolve()
-        items = sorted(target.iterdir())
-        lines = [f"{p.relative_to(root)}{'/' if p.is_dir() else ''}" for p in items[:300]]
+        entries, _truncated = _ws(ctx).list_dir(str(args.get("path", ".") or "."))
+        lines = []
+        for entry in entries[:300]:
+            name = entry["path"]
+            if entry["type"] == "dir":
+                lines.append(f"{name}/")
+            elif entry["type"] == "symlink":
+                lines.append(entry["name"] if entry["name"].endswith("@") else f"{name}@")
+            else:
+                lines.append(name)
         return "\n".join(lines) or "(empty)"
     except (ValueError, OSError) as e:
         return f"Error: {e}"
@@ -390,6 +385,14 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
                        ["path", "content"]), write_file),
     "list_files": (_fn("list_files", "List files in a workspace folder (relative path, default the workspace itself).",
                        {"path": S}, []), list_files),
+    "delete_file": (_fn("delete_file", "Move a workspace file to trash. Requires Roland's approval.",
+                        {"path": S, "reason": S}, ["path"]), delete_file),
+    "move_file": (_fn("move_file", "Move or rename a workspace file. Replacing an existing file needs approval.",
+                      {"from": S, "to": S, "reason": S}, ["from", "to"]), move_file),
+    "file_info": (_fn("file_info", "Show size, modified time, sha256 and origin for a workspace file.",
+                      {"path": S}, ["path"]), file_info),
+    "attach_file": (_fn("attach_file", "Share a workspace file with Roland in the chat (download card). Nothing leaves the server.",
+                        {"path": S, "note": S}, ["path"]), attach_file),
     "remember": (_fn("remember", "Save a lasting fact about Roland or your work: one short line, "
                      f"at most {MAX_FACT_CHARS} characters.",
                      {"fact": S}, ["fact"]), remember),
@@ -448,10 +451,17 @@ async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
             return "Not done: approved action is missing stored args."
         run_args = outcome.args
         approval_id = outcome.approval_id
+    # Gate clears pending_approval_id in request()'s finally; restore for the tool
+    # so overwrite/trash paths can see that replace was already approved.
+    if approval_id is not None and run is not None:
+        run.pending_approval_id = approval_id
     try:
         result = await TOOLS[name][1](ctx, run_args)
     except Exception as e:  # a broken tool call should never crash the agent
         result = f"Error: {type(e).__name__}: {e}"
+    finally:
+        if approval_id is not None and run is not None:
+            run.pending_approval_id = None
     if approval_id is not None and ctx.gate is not None:
         mark_executed(ctx.memory, ctx.audit, approval_id, result)
     else:

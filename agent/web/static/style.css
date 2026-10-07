@@ -109,3 +109,14 @@ code { font-size: .85em; color: var(--muted); }
 }
 
 .audit-actions { margin-bottom: .8rem; }
+
+/* files (M5) */
+.files-actions { align-items: center; margin-bottom: .6rem; }
+.files-crumb { display: flex; flex-wrap: wrap; gap: .25rem; flex: 1; font-size: .9rem; }
+.files-crumb button { border: 0; background: none; color: var(--accent); padding: 0 .2em; }
+.file-row { display: grid; grid-template-columns: 1fr auto auto; gap: .5rem; align-items: center; }
+.file-row .meta { color: var(--muted); font-size: .8rem; }
+.file-row .origin { font-size: .7rem; padding: .1em .4em; border-radius: 6px; background: var(--line); }
+.file-card { max-width: 320px; }
+.file-card img { max-width: 100%; border-radius: 8px; margin-top: .4rem; }
+.composer .icon { padding: .35em .55em; font-size: 1.1rem; }

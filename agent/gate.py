@@ -74,16 +74,23 @@ def _safe_policy(*, taints: bool = False, in_jobs: bool = True) -> ToolPolicy:
 
 
 async def _classify_write_file(ctx: ToolContext, args: dict) -> Decision:
+    from .tools_files import workspace_from_ctx
+    from .workspace import WorkspaceError, normalize
+
     path = str(args.get("path", ""))
     append = bool(args.get("append"))
     try:
-        root = ctx.workspace.resolve()
-        target = (root / (path or ".")).resolve()
-        if target != root and root not in target.parents:
-            return Decision(Risk.FORBIDDEN, "other", reason="Path is outside the workspace.")
-    except (OSError, ValueError) as error:
+        normalize(path)
+    except (WorkspaceError, ValueError) as error:
         return Decision(Risk.FORBIDDEN, "other", reason=str(error))
-    if append or not target.exists() or not target.is_file():
+    ws = workspace_from_ctx(ctx)
+    exists = False
+    try:
+        info = ws.info(path)
+        exists = info["type"] == "file"
+    except (FileNotFoundError, WorkspaceError, OSError):
+        exists = False
+    if append or not exists:
         return Decision(Risk.SAFE, summary=f"Write {path}", details={"path": path, "append": append})
     # Overwrite of an existing file: SAFE only for the agent's own file in this chat, untainted.
     record = None
@@ -108,6 +115,61 @@ async def _classify_write_file(ctx: ToolContext, args: dict) -> Decision:
         "delete",
         reason="overwriting an existing file",
         summary=f"Overwrite {path}",
+        details=details,
+    )
+
+
+async def _classify_delete_file(ctx: ToolContext, args: dict) -> Decision:
+    from .tools_files import workspace_from_ctx
+    from .workspace import WorkspaceError, normalize
+
+    path = str(args.get("path", ""))
+    try:
+        normalize(path)
+        info = workspace_from_ctx(ctx).info(path)
+    except (WorkspaceError, ValueError) as error:
+        return Decision(Risk.FORBIDDEN, "other", reason=str(error))
+    except (FileNotFoundError, OSError) as error:
+        return Decision(Risk.FORBIDDEN, "other", reason=str(error))
+    return Decision(
+        Risk.GATED,
+        "delete",
+        reason="deleting a file",
+        summary=f"Delete {path}",
+        details={"path": path, "size": info["size"], "modified": info["modified"]},
+    )
+
+
+async def _classify_move_file(ctx: ToolContext, args: dict) -> Decision:
+    from .tools_files import workspace_from_ctx
+    from .workspace import WorkspaceError, normalize
+
+    src = str(args.get("from", args.get("src", "")))
+    dst = str(args.get("to", args.get("dst", "")))
+    try:
+        normalize(src)
+        normalize(dst)
+    except (WorkspaceError, ValueError) as error:
+        return Decision(Risk.FORBIDDEN, "other", reason=str(error))
+    ws = workspace_from_ctx(ctx)
+    try:
+        ws.info(src)
+    except (FileNotFoundError, WorkspaceError, OSError) as error:
+        return Decision(Risk.FORBIDDEN, "other", reason=str(error))
+    dest_exists = False
+    try:
+        ws.info(dst)
+        dest_exists = True
+    except (FileNotFoundError, WorkspaceError, OSError):
+        dest_exists = False
+    details = {"from": src, "to": dst, "replaces": dest_exists}
+    if not dest_exists:
+        return Decision(Risk.SAFE, summary=f"Move {src} → {dst}", details=details)
+    return Decision(
+        Risk.GATED,
+        "delete",
+        reason="replacing an existing file",
+        summary=f"Move {src} → {dst} (replace)",
         details=details,
     )
 
@@ -169,6 +231,10 @@ def _build_policies() -> dict[str, ToolPolicy]:
         "read_file": _safe_policy(taints=True),
         "write_file": ToolPolicy(classify=_classify_write_file, taints=False),
         "list_files": _safe_policy(taints=False),
+        "delete_file": ToolPolicy(classify=_classify_delete_file, taints=False),
+        "move_file": ToolPolicy(classify=_classify_move_file, taints=False),
+        "file_info": _safe_policy(taints=False),
+        "attach_file": _safe_policy(taints=False),
         "remember": ToolPolicy(classify=_classify_remember, taints=False),
         "forget": ToolPolicy(classify=_classify_forget, taints=False),
         "schedule_job": _safe_policy(taints=False, in_jobs=False),
