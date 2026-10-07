@@ -166,6 +166,11 @@ sample() {
         if ((limit == 0)); then
             failure "memory limit unavailable for $service"
         fi
+        # A low reading means nothing if the browser may grow past the cap later: an
+        # unlimited container (Docker then reports the host's memory) or a larger limit.
+        if [[ $service == browser ]] && ((limit > browser_cap * 1048576)); then
+            failure "browser memory limit $(mib "$limit") MiB is above the ${browser_cap} MiB cap"
+        fi
         printf 'service=%s state=running memory=%s MiB limit=%s MiB OOMKilled=%s\n' \
             "$service" "$(mib "$usage")" "$(mib "$limit")" "$oom"
         if ((usage > 1152921504606846976 - ${usage_by_service[$service]:-0})); then

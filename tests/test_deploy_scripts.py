@@ -335,6 +335,7 @@ if command == "docker":
     if args[0] == "stats":
         service = by_id[args[-1]]
         limits = {"caddy": 96, "core": 640, "model": 3840, "sandbox": 1024, "browser": 1280}
+        limits.update(state.get("limits", {}))
         answer(state.get("stats_raw", f"{sample['usage'][service]}MiB / {limits[service]}MiB"), state.get("stats_rc", 0))
     if args[0] == "inspect":
         service = by_id[args[-1]]
@@ -526,6 +527,31 @@ def test_memory_report_running_browser_enforces_cap_and_headroom(tmp_path, avail
     assert f"minimum host available={available} MiB" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("limit", "passed"),
+    [(1280, True), (1024, True), (1281, False), (2048, False), (7938, False)],
+)
+def test_memory_report_rejects_a_browser_limit_above_the_cap(tmp_path, limit, passed):
+    """A low usage sample must not certify a browser that is unlimited (Docker then reports
+    the host's memory as the limit) or has a larger limit than the cap being checked."""
+    repo, env, state = fake_deploy_host(tmp_path, browser=True, samples=[memory_sample(2400, 300)])
+    state["limits"] = {"browser": limit}
+    update_fake_state(env, state)
+    result = run_fake_script(repo, env, "memory-report.sh")
+    assert (result.returncode == 0) is passed, result.stdout + result.stderr
+    assert ("A6.5 PASS" in result.stdout) is passed
+    assert (f"browser memory limit {limit}.00 MiB is above the 1280 MiB cap" in result.stdout) is not passed
+
+
+def test_memory_report_cap_setting_also_applies_to_the_limit_check(tmp_path):
+    repo, env, _ = fake_deploy_host(tmp_path, browser=True, samples=[memory_sample(2400, 300)])
+    env["BROWSER_CAP_MIB"] = "1024"
+    result = run_fake_script(repo, env, "memory-report.sh")
+    assert result.returncode != 0
+    assert "browser memory limit 1280.00 MiB is above the 1024 MiB cap" in result.stdout
+    assert "A6.5 FAIL" in result.stdout
+
+
 @pytest.mark.parametrize("service", ["browser", "model"])
 def test_memory_report_fails_for_observed_oom_kills(tmp_path, service):
     repo, env, _ = fake_deploy_host(
@@ -689,6 +715,60 @@ def test_browser_isolation_probes_expected_targets_in_each_mode(tmp_path, mode):
         command for command in fake_commands(env) if "169.254.169.254" in " ".join(command["args"])
     ]
     assert bool(metadata_calls) is (mode == "--server")
+
+
+@pytest.mark.parametrize("stopped", ["core", "model"])
+def test_server_isolation_fails_when_a_probed_service_is_down(tmp_path, stopped):
+    """A blocked connection to a service that isn't running proves nothing. On the server
+    that must fail the run, not pass it."""
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["services"][stopped] = "exited"
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, "--server")
+    assert result.returncode != 0
+    assert f"FAIL isolation: {stopped} is not running" in result.stderr
+    assert "all checks passed" not in result.stdout
+
+
+def test_partial_stack_skips_probes_of_services_that_are_down(tmp_path):
+    """In a test stack without core or model, their probes are skipped and said to be."""
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["services"]["core"] = "exited"
+    del state["services"]["model"]
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, "--ci")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "SKIP probes of core: it is not running\n" in result.stdout
+    assert "SKIP probes of model: it is not running\n" in result.stdout
+    assert {tuple(args[-2:]) for args in browser_execs(env)} == {("10.77.3.20", "7000")}
+    sandbox_probes = " ".join(
+        " ".join(command["args"]) for command in fake_commands(env)
+        if command["command"] == "docker" and "exec" in command["args"] and "sandbox" in command["args"]
+    )
+    assert "10.77.4.40:7100" in sandbox_probes and "core:8080" not in sandbox_probes
+    assert "10.77.1.10" not in sandbox_probes and "10.77.3.10" not in sandbox_probes
+
+
+def test_sandbox_to_browserd_probe_is_skipped_without_the_browser(tmp_path):
+    repo, env, _ = fake_deploy_host(tmp_path)
+    result = run_fake_isolation(repo, env, "--server")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "SKIP sandbox to browserd: browser service is not running\n" in result.stdout
+    assert not any("10.77.4.40" in " ".join(command["args"]) for command in fake_commands(env))
+
+
+def test_isolation_can_probe_a_named_test_stack(tmp_path):
+    repo, env, _ = fake_deploy_host(tmp_path, browser=True)
+    env["ISOLATION_COMPOSE_FILES"] = "docker-compose.yml docker-compose.test.yml"
+    result = run_fake_isolation(repo, env, "--ci")
+    assert result.returncode == 0, result.stdout + result.stderr
+    compose_calls = [
+        command["args"] for command in fake_commands(env)
+        if command["command"] == "docker" and command["args"][0] == "compose"
+    ]
+    assert compose_calls
+    for args in compose_calls:
+        assert args[1:5] == ["-f", "docker-compose.yml", "-f", "docker-compose.test.yml"]
 
 
 @pytest.mark.parametrize("code", [0, 1, 124])
