@@ -53,7 +53,7 @@ def main(project: str):
         assert all(value in cookie for value in ("HttpOnly", "Secure", "SameSite=strict", "Path=/"))
         assert "Domain=" not in cookie
         status = client.get("/api/status")
-        assert status.status_code == 200 and status.json()["shell"] is False
+        assert status.status_code == 200 and status.json()["shell"] is True
         headers = {"Origin": "https://localhost", "X-CSRF-Token": status.json()["csrf"]}
         assert client.post("/api/chats", headers={"Origin": "https://localhost"}).status_code == 403
         response = client.post("/api/chats", headers=headers)

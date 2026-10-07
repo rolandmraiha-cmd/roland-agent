@@ -82,6 +82,24 @@ async def classify_run_shell(ctx: ToolContext, args: dict):
     if config is not None:
         mode = config.shell_approval
     risk_name, reason = classify_shell(command, tainted=tainted, mode=mode)
+    timeout_s = args.get("timeout_s")
+    if timeout_s is None and config is not None:
+        timeout_s = config.shell_timeout_default
+    details = {
+        "command": command,
+        "cwd": ".",
+        "timeout_s": timeout_s if timeout_s is not None else 60,
+        "internet": "yes (sandbox)",
+    }
+    if reason:
+        details["taint_reason"] = reason
+    summary = f"Shell: {command[:120]}"
     if risk_name == "safe":
         return Decision(Risk.SAFE)
-    return Decision(Risk.GATED, "shell", reason=reason or "shell command needs approval")
+    return Decision(
+        Risk.GATED,
+        "shell",
+        reason=reason or "shell command needs approval",
+        summary=summary,
+        details=details,
+    )

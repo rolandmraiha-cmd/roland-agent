@@ -58,7 +58,7 @@ async def test_large_file_read_is_bounded(make_agent, monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("during_cleanup", [False, True])
 async def test_shell_cancellation_kills_process_group(make_agent, monkeypatch, during_cleanup):
-    from agent import tools
+    from agent import local_shell
 
     started = asyncio.Event()
     killed = []
@@ -81,8 +81,8 @@ async def test_shell_cancellation_kills_process_group(make_agent, monkeypatch, d
         assert kwargs["start_new_session"] is True
         return proc
 
-    monkeypatch.setattr(tools.asyncio, "create_subprocess_shell", spawn)
-    monkeypatch.setattr(tools.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(local_shell.asyncio, "create_subprocess_shell", spawn)
+    monkeypatch.setattr(local_shell.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
     agent = make_agent()
     ctx = ToolContext(agent.memory, agent.config.workspace, agent.config.timezone, True)
     task = asyncio.create_task(call_tool(ctx, "run_shell", {"command": "sleep 60"}))

@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-integration build compose-config \
+.PHONY: lint fmt-check test test-integration test-sandbox build compose-config \
 	preflight-edge preflight \
 	up down ps logs deploy secrets hash-password firewall firewall-install \
 	workspace-fs backup restore restore-test verify \
@@ -24,6 +24,17 @@ test:
 
 test-integration:
 	bash tests/integration/edge.sh
+	@echo "Optional sandbox live stack (Docker + secrets): make test-sandbox"
+	@echo "On Contabo after deploy: make verify (runs isolation.sh --server)."
+
+# Live sandbox stack (not run by CI edge job). Needs Docker, secrets/, and workspace bind.
+test-sandbox:
+	mkdir -p .ci-workspace
+	test -f secrets/sandbox_api_token || { echo "missing secrets/sandbox_api_token; run make secrets" >&2; exit 2; }
+	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build sandbox
+	docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm tester
+	bash tests/integration/isolation.sh --ci
+	docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 
 build:
 	docker compose build

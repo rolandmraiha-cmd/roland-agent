@@ -2,7 +2,7 @@
 # python:3.12-slim as of 4 Oct 2026; bump the digest on purpose when updating.
 FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
-# The core does not run user commands; the isolated sandbox arrives in M4.
+# The core does not run user commands; those go to the isolated sandbox service.
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,7 +15,8 @@ COPY requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY pyproject.toml README.md ./
 COPY agent ./agent
-RUN pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
+# Repo pyproject also lists sandboxd for local/dev installs; core image ships agent only.
+RUN sed -i 's/, "sandboxd"//' pyproject.toml     && pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
 
 # Runs as a normal user, never root. Its data lives in the /data volume. HOME points at the
 # throwaway /tmp, and Python ignores per-user packages, so the shell can't plant code there
