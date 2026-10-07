@@ -459,6 +459,16 @@ class Memory:
         )
         return identifier
 
+    def set_approval_screenshot(self, approval_id: str, path: str) -> bool:
+        """Attach the picture Roland sees on a browser approval card. Pending approvals only."""
+        return (
+            self._exec(
+                "UPDATE approvals SET screenshot_path = ? WHERE id = ? AND status = 'pending'",
+                (relative_path(path), approval_id),
+            ).rowcount
+            > 0
+        )
+
     @staticmethod
     def _approval_record(row: sqlite3.Row) -> dict:
         return dict(

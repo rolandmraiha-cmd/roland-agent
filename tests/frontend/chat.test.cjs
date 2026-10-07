@@ -483,6 +483,26 @@ test('approval card renders summary via textContent and posts args_hash', async 
   assert.equal(body.args_hash, 'a'.repeat(64));
 });
 
+test('browser approval card shows its screenshot only from the preview route', () => {
+  const f = fixture();
+  const base = {
+    id: 'appr2', tool: 'browser_click', category: 'payment', summary: 'Click “Place order”',
+    details: {}, args_hash: 'b'.repeat(64), needs_confirm: true, status: 'pending',
+    args: { ref: 'e5' }, tainted: true, expires: Date.now() / 1000 + 60,
+  };
+  const shot = '/api/files/preview?path=screenshots/approval-appr2.png';
+  const card = f.run('renderApprovalCard(' + JSON.stringify({ ...base, screenshot_url: shot }) + ')');
+  const img = card.children.find((c) => c.className === 'shot');
+  assert.ok(img);
+  assert.equal(img.src, shot);
+  assert.ok(img.alt.length > 0);
+  for (const bad of [null, 'https://evil.example/x.png', '//evil.example/x.png', 'javascript:alert(1)',
+    '/api/files/preview?path=uploads/x.png', { path: 'x' }]) {
+    const other = f.run('renderApprovalCard(' + JSON.stringify({ ...base, screenshot_url: bad }) + ')');
+    assert.equal(other.children.find((c) => c.className === 'shot'), undefined);
+  }
+});
+
 test('needs_confirm requires a second tap', async () => {
   const f = fixture();
   let approveCalls = 0;
