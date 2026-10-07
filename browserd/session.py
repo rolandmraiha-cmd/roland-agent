@@ -302,7 +302,7 @@ class Session:
 
         self.prepare_profile()
         width, height = self.s.viewport
-        args = list(CHROMIUM_ARGS)
+        args = [*CHROMIUM_ARGS, f"--host-resolver-rules={guards.resolver_rules(self.s.allow_private_hosts)}"]
         options: dict = {}
         if self.s.headless:
             options["viewport"] = {"width": width, "height": height}
@@ -476,8 +476,17 @@ class Session:
 
     # --- guards on every request the browser makes ---
 
-    def _on_request(self, _request) -> None:
+    def _on_request(self, request) -> None:
         self._last_request = time.monotonic()
+        try:
+            # Playwright doesn't hand redirects to _on_route. Chromium's resolver rules stop a
+            # redirect to a private address; this is only so the answer says why.
+            if request.redirected_from is not None and request.is_navigation_request():
+                reason = guards.url_block_reason(request.url, self.s.allow_private_hosts)
+                if reason:
+                    self._refused = reason
+        except Exception:  # noqa: S110 -- the page went away
+            pass
 
     def _stops_post(self, request) -> bool:
         if self.mode != "agent" or time.monotonic() < self._posts_open_until:
@@ -555,6 +564,18 @@ class Session:
             if url.startswith("about:") or _origin(url) == origin:
                 kept.append(frame)
         return kept
+
+    async def _frame_name(self, frame) -> str:
+        """What the page calls a frame: its title, like a screen reader would say it."""
+        try:
+            holder = await asyncio.wait_for(frame.frame_element(), timeout=3)
+            for attribute in ("title", "aria-label", "name"):
+                value = await asyncio.wait_for(holder.get_attribute(attribute), timeout=3)
+                if value and value.strip():
+                    return _text(value.strip(), 80)
+        except Exception:  # noqa: S110 -- the frame went away; it just has no name then
+            pass
+        return ""
 
     async def _where(self, tab: Tab) -> tuple[str, str]:
         url = _text(tab.page.url, MAX_URL_CHARS)
@@ -739,7 +760,7 @@ class Session:
                     continue
                 shift = 0
                 if index:
-                    elements.append({"role": "frame", "name": _text(frame.name, 80), "depth": 0})
+                    elements.append({"role": "frame", "name": await self._frame_name(frame), "depth": 0})
                     shift = 1
                 raw_items = data.get("elements")
                 for raw in raw_items[: MAX_ELEMENTS * 2] if isinstance(raw_items, list) else []:

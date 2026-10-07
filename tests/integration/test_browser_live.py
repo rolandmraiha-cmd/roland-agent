@@ -9,6 +9,7 @@ tools, gate and client that production uses.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import re
@@ -95,8 +96,11 @@ def clean_start():
     raw("POST", "/v1/user-mode", {"on": False})
 
 
+_call_ids = itertools.count(1)
+
+
 def call(name: str, **args) -> ToolCall:
-    return ToolCall(id="c1", name=name, arguments=json.dumps(args))
+    return ToolCall(id=f"c{next(_call_ids)}", name=name, arguments=json.dumps(args))
 
 
 def last_output(messages: list[dict]) -> str:
@@ -138,12 +142,13 @@ class ScriptBrain:
             yield Step(text=str(item))
 
     def outputs(self) -> list[str]:
-        out: list[str] = []
+        """What each tool call answered, in order, as the model was shown it."""
+        out: dict[str, str] = {}
         for turn in self.seen:
             for message in turn:
-                if message.get("role") == "tool" and message["content"] not in out:
-                    out.append(message["content"])
-        return out
+                if message.get("role") == "tool":
+                    out.setdefault(message["tool_call_id"], message["content"])
+        return list(out.values())
 
 
 def click(name: str, **extra):
@@ -158,7 +163,8 @@ def open_page(path: str, **extra) -> ToolCall:
     return call("browser_open", url=f"{FIXTURE_URL}{path}", **extra)
 
 
-SNAPSHOT = call("browser_snapshot", max_chars=6000)
+def SNAPSHOT(_messages) -> ToolCall:  # noqa: N802 -- reads as a script step, like the others
+    return call("browser_snapshot", max_chars=6000)
 
 
 @pytest.fixture
@@ -179,28 +185,24 @@ def agent_for(tmp_path):
 
 
 async def run(agent: Agent, decide=None, text: str = "go") -> list[dict]:
-    """One chat turn. `decide(row)` is awaited once for every approval card that appears;
-    without it, a card makes the test fail (nothing should have asked)."""
+    """One chat turn. `decide(row)` is awaited for every approval card as it appears; without
+    it, a card makes the test fail (nothing should have asked)."""
     chat_id = agent.memory.new_chat()
-    seen: set[str] = set()
 
-    async def watch(task: asyncio.Task):
-        while not task.done():
-            for row in agent.memory.approvals(status="pending"):
-                if row["id"] not in seen:
-                    seen.add(row["id"])
-                    if decide is None:
-                        await agent.gate.reject(row["id"], args_hash=row["args_hash"])
-                        pytest.fail(f"unexpected approval card: {row['summary']}")
-                    await decide(row)
-            await asyncio.sleep(0.05)
+    async def turn() -> list[dict]:
+        events = []
+        async for event in agent.chat(chat_id, text):
+            events.append(event)
+            if event["type"] != "approval_required":
+                continue
+            row = agent.memory.approval(event["approval"]["id"])
+            if decide is None:
+                await agent.gate.reject(row["id"], args_hash=row["args_hash"])
+                pytest.fail(f"unexpected approval card: {row['summary']}")
+            await decide(row)
+        return events
 
-    async def turn():
-        return [event async for event in agent.chat(chat_id, text)]
-
-    task = asyncio.create_task(turn())
-    await asyncio.wait_for(asyncio.gather(task, watch(task)), timeout=180)
-    return task.result()
+    return await asyncio.wait_for(turn(), timeout=180)
 
 
 def approving(agent: Agent, cards: list | None = None, before=None):
@@ -349,15 +351,23 @@ def test_no_cookie_or_eval_endpoints():
 
 async def test_private_ip_navigation_blocked(agent_for):
     targets = ["http://10.77.1.10:8080/", "http://10.77.4.10:8080/", "http://169.254.169.254/latest/",
-               "http://localhost:8080/", "http://core:8080/", "http://[::1]/", "http://192.168.1.1/"]
+               "http://localhost:8080/", "http://core:8080/", "http://[::1]/", "http://192.168.1.1/",
+               "http://127.1/", "http://2130706433/", "http://0x7f.0.0.1/", "http://[::ffff:10.77.1.10]/"]
+    # Core refuses these before it asks the browser ...
     agent = agent_for([call("browser_open", url=url) for url in targets] + ["refused"], max_tool_steps=20)
     await run(agent)
-    outputs = agent.brain.outputs()
-    assert len(outputs) == len(targets)
-    assert all("Error: the browser refused that address" in text for text in outputs), outputs
+    answers = agent.brain.outputs()
+    assert len(answers) == len(targets)
+    assert all("Error: the browser refused that address" in text for text in answers), answers
+    # ... and the browser service refuses them by itself too.
+    for url in targets:
+        answer = raw("POST", "/v1/navigate", {"url": url}).json()
+        assert answer.get("blocked") == "private_address" and answer["status"] == 0, url
     # A public page that redirects to a private address is stopped on the way.
     answer = raw("POST", "/v1/navigate", {"url": f"{FIXTURE_URL}/extras/redirect-private"}).json()
     assert answer.get("blocked") == "private_address" and "10.77.1.10" not in answer["url"]
+    # So is a page that asks for one from a picture or a script.
+    assert all("10.77." not in path for path in site_gets())
 
 
 # --- more than the A6.3 list ---
@@ -378,7 +388,7 @@ async def test_finnish_shop_asks_as_a_payment(agent_for):
     agent = agent_for([open_page("/fi/kauppa"), SNAPSHOT, click("Tilaa ja maksa"), "ei tilattu"])
     cards: list[dict] = []
     await run(agent, rejecting(agent, cards))
-    assert cards[0]["category"] == "payment" and "matched “tilaa”" in cards[0]["summary"]
+    assert cards[0]["category"] == "payment" and cards[0]["summary"].startswith("Click “Tilaa ja maksa” (button)")
     assert site_posts() == []
 
 
@@ -529,9 +539,9 @@ async def test_screenshots_are_for_roland_only(agent_for):
 
 
 async def test_odd_characters_from_the_page_do_not_break_anything(agent_for):
-    agent = agent_for([open_page("/extras/title"), SNAPSHOT, call("browser_tabs"), click("Odd label"), "fine"])
+    agent = agent_for([open_page("/extras/title"), SNAPSHOT, call("browser_tabs"), click("Odd \ufffd label"), "fine"])
     events = await run(agent)
-    assert events[-1]["type"] == "done"
+    assert events[-1]["type"] == "done", events[-1]
     for text in agent.brain.outputs():
         text.encode("utf-8")  # no lone surrogates reach the model or the database
         assert "‮" not in text.split("--- page text ---")[0]
@@ -545,15 +555,15 @@ async def test_upload_sends_only_the_approved_file(agent_for):
     note = Path(workspace) / "upload-note.txt"
     note.write_text("for the website")
     upload = lambda messages: call("browser_upload", ref=ref_of(messages, "File"), path="upload-note.txt")  # noqa: E731
-    agent = agent_for([open_page("/extras/upload"), SNAPSHOT, upload, SNAPSHOT, click("Upload file"), "sent"])
+    agent = agent_for([open_page("/extras/attach"), SNAPSHOT, upload, SNAPSHOT, click("Upload file"), "sent"])
     cards: list[dict] = []
     await run(agent, approving(agent, cards))
-    assert [card["category"] for card in cards] == ["upload", "form_submit"]
+    assert [card["category"] for card in cards] == ["upload", "message"]  # the form goes to /send
     assert any("for the website" in post and "upload-note.txt" in post for post in site_posts())
     # A staged file that was swapped is refused by browserd itself.
     staged = Path(workspace) / "browser" / "uploads" / "upload-note.txt"
     staged.write_text("something else")
-    raw("POST", "/v1/navigate", {"url": f"{FIXTURE_URL}/extras/upload"})
+    raw("POST", "/v1/navigate", {"url": f"{FIXTURE_URL}/extras/attach"})
     field = next(item for item in raw("POST", "/v1/snapshot", {"max_chars": 0}).json()["elements"] if item.get("type") == "file")
     refused = raw("POST", "/v1/upload", {"ref": field["ref"], "fingerprint": field["fingerprint"],
                                          "path": "upload-note.txt", "sha256": "0" * 64})

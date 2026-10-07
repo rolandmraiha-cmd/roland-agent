@@ -170,7 +170,7 @@ _PAGES.update(
             '<a href="/blog" id="odd">Odd \u202e link</a>'
             "<script>document.getElementById('odd').setAttribute('aria-label', 'Odd \\udc00 label');</script>",
         ),
-        "/extras/upload": _page(
+        "/extras/attach": _page(
             "Send a file",
             '<form action="/send" method="post" enctype="multipart/form-data">'
             '<label>File <input type="file" name="attachment"></label>'

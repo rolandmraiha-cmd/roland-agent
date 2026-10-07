@@ -105,6 +105,30 @@ def host_block_reason(host: str | None, allowed: frozenset[str] = frozenset()) -
     return None
 
 
+def resolver_rules(allowed: frozenset[str] = frozenset()) -> str:
+    """The value for Chromium's --host-resolver-rules: local names and private addresses
+    written as numbers never resolve, for anything the browser asks for.
+
+    The request guard in session.py sees a request before it is sent, but not where a redirect
+    leads, and not WebSockets. This rule is inside Chromium's own network code, so it covers
+    those too. Like the guard it only knows names; the host firewall decides by address.
+    """
+    blocked = ["localhost", "0.0.0.0", "10.*.*.*", "127.*.*.*", "169.254.*.*", "192.168.*.*"]  # noqa: S104
+    blocked += [f"*{suffix}" for suffix in _PRIVATE_SUFFIXES]
+    blocked += [f"172.{second}.*.*" for second in range(16, 32)]
+    blocked += [f"100.{second}.*.*" for second in range(64, 128)]
+    # IPv6: loopback, unspecified, unique-local, link-local, and the ranges that wrap IPv4.
+    blocked += ["::1", "::", "fc*:*", "fd*:*", "fe8*:*", "fe9*:*", "fea*:*", "feb*:*",
+                "::ffff:*", "64:ff9b:*", "2002:*"]
+    rules = [f"MAP {pattern} ~NOTFOUND" for pattern in blocked]
+    # Test stacks name the fixture site here. Only plain names and addresses are accepted.
+    rules += [
+        f"EXCLUDE {name}" for name in sorted(allowed)
+        if name and all(char.isalnum() or char in ".-:" for char in name)
+    ]
+    return ", ".join(rules)
+
+
 def url_block_reason(url: object, allowed: frozenset[str] = frozenset()) -> str | None:
     """Why the browser may not request this address, or None when it may. http and https only."""
     if not isinstance(url, str) or not url:

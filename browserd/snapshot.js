@@ -102,10 +102,26 @@
     const role = lower(el, "role").split(" ")[0];
     return el.isContentEditable === true || role === "textbox" || role === "searchbox";
   };
+  // The words of a <label>, without the text of a field it wraps (the options of a
+  // <select>, the text inside a <textarea>): those are the field's contents, not its name.
+  const NOT_LABEL_TEXT = ["SELECT", "TEXTAREA", "INPUT", "BUTTON", "SCRIPT", "STYLE", "TEMPLATE"];
+  const wordsOf = (root) => {
+    const parts = [];
+    const stack = [root];
+    let visited = 0;
+    while (stack.length && visited < 300) {
+      const node = stack.pop();
+      visited += 1;
+      if (node.nodeType === 3) parts.push(node.nodeValue || "");
+      if (node.nodeType !== 1 || (node !== root && NOT_LABEL_TEXT.includes(node.tagName))) continue;
+      for (let child = node.lastChild; child; child = child.previousSibling) stack.push(child);
+    }
+    return parts.join(" ");
+  };
   const labelText = (el) => {
     try {
       if (el.labels && el.labels.length) {
-        return tidy(Array.from(el.labels, (label) => label.textContent || "").join(" "), MAX_NAME);
+        return tidy(Array.from(el.labels).slice(0, 3).map(wordsOf).join(" "), MAX_NAME);
       }
     } catch (error) { /* not a labelable element */ }
     return "";
