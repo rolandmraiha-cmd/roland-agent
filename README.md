@@ -3,7 +3,7 @@
 Roland's private, always-on AI agent: password-protected web chat, a self-hosted open-weight model only (no hosted LLM), tools with a code-enforced approval gate, a sandboxed terminal, workspace files, and approved background jobs.
 
 **Live:** https://37-60-226-214.sslip.io/ (Contabo VPS, Ubuntu 24.04).
-**Branch:** `v2` is the integration branch (last verified tip `5104fb6`, #33). `main` is untouched until the M9 release.
+**Branch:** `v2` is the integration branch (last verified tip `adc492e`, #35). M5 code is `98971cc` (#32). `main` is untouched until the M9 release.
 
 **Not the same as Grok:** this app is Contabo-hosted **roland-agent**. Roland also has **Grok Bot** teammates (Crew Chief, Code Builder, Code Shipper, …) in a separate chat; they are not this runtime. If those Grok bots are parked, an outside AI Roland gave this repo to may still work — see [docs/NEXT.md](docs/NEXT.md) §0.
 
@@ -42,4 +42,4 @@ Never set `ALLOW_SHELL=true` on a personal computer. Host-mutating `make` target
 - [docs/v2-spec.md](docs/v2-spec.md): detailed target design (not an inventory of shipped code).
 - [docs/SECURITY.md](docs/SECURITY.md): accepted security limits so far.
 
-**Keep them updated:** every PR, every edit on that branch, and every squash merge must update `docs/AGENT.md`, `docs/NEXT.md`, and this README in that same PR before merge, whenever code, deploy state, plans, or instructions change. Status, instructions, and plans stay in these files, not only in chat. Do not squash-merge a PR whose README or instruction docs are stale. `docs/SECURITY.md` updates in that same PR when an accepted limit changes.
+**Keep them updated:** every PR, every edit on that branch, and every squash merge must update `docs/AGENT.md`, `docs/NEXT.md`, and this README in that same PR before merge, whenever code, deploy state, plans, or instructions change. Status, instructions, and plans stay in these files, not only in chat. Do not squash-merge a PR whose README or instruction docs are stale. `docs/SECURITY.md` updates in that same PR when an accepted limit changes. After a squash merge, the tip line in this README and in `docs/AGENT.md` must name the new `v2` tip.
