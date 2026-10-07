@@ -445,3 +445,49 @@ def test_agent_wires_real_gate(make_agent):
     agent = make_agent()
     assert isinstance(agent.gate, Gate)
     assert agent.ctx.gate is agent.gate
+
+
+@pytest.mark.asyncio
+async def test_approved_without_stored_args_is_refused(tmp_path):
+    """Fail closed: never run with model args when the gate returns approved but args=None."""
+    memory = Memory(tmp_path / "agent.db")
+    memory.remember("tea")
+
+    class MissingArgsGate:
+        async def request(self, ctx, name, args, decision):
+            from agent.gate import Outcome
+
+            return Outcome(True, args=None, approval_id="ghost")
+
+    out = await call_tool(ctx(memory, tmp_path, gate=MissingArgsGate()), "forget", {"fact_id": 1})
+    assert out.startswith("Not done:")
+    assert "missing stored args" in out
+    assert memory.facts()  # fact must still be there
+
+
+def test_expire_on_startup_marks_pending_expired(tmp_path):
+    agent = _agent_with_script(tmp_path, [])
+    run_id = agent.memory.add_agent_run("chat")
+    aid = agent.memory.add_approval(
+        run_id, "forget", {"fact_id": 1}, "delete", "Forget", {}, time.time() + 3600,
+    )
+    assert agent.memory.approval(aid)["status"] == "pending"
+    assert agent.gate.expire_on_startup() == 1
+    assert agent.memory.approval(aid)["status"] == "expired"
+    assert agent.gate.expire_on_startup() == 0  # second call is a no-op
+    rows = agent.memory.audit_rows(event="approval_decided", limit=10)
+    assert any(
+        r["decision"] == "expired" and (r.get("detail") or {}).get("reason") == "startup"
+        for r in rows
+    )
+
+
+def test_app_startup_expires_pending_approvals(tmp_path):
+    agent = _agent_with_script(tmp_path, [])
+    run_id = agent.memory.add_agent_run("chat")
+    aid = agent.memory.add_approval(
+        run_id, "forget", {"fact_id": 1}, "delete", "Forget", {}, time.time() + 3600,
+    )
+    with TestClient(create_app(agent, run_scheduler=False)):
+        pass
+    assert agent.memory.approval(aid)["status"] == "expired"

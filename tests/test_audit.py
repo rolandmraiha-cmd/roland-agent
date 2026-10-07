@@ -281,3 +281,16 @@ def test_verify_cli_is_read_only_and_uses_no_model(tmp_path):
         db.execute("UPDATE audit_log SET detail='invalid json'")
     result = subprocess.run(command, cwd=tmp_path, env=environment, capture_output=True, text=True)
     assert result.returncode == 1 and json.loads(result.stdout)["first_bad_id"] == 1
+
+
+def test_audit_rows_cap_matches_csv_export_default(tmp_path):
+    """Memory hard-cap must allow the export route default of 5000 rows."""
+    memory = Memory(tmp_path / "agent.db")
+    audit = Audit(memory)
+    for i in range(510):
+        audit.write("system", "note", detail={"i": i})
+    # Cap used to be 500; export.csv defaults to 5000 — keep them aligned.
+    assert len(memory.audit_rows(limit=5000)) == 510
+    assert len(memory.audit_rows(limit=100)) == 100
+    # Still harden against absurd limits.
+    assert len(memory.audit_rows(limit=99_999)) == 510

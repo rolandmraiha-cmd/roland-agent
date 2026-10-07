@@ -619,7 +619,7 @@ class Memory:
             sql += " AND id < ?"
             params.append(before)
         sql += " ORDER BY id DESC LIMIT ?"
-        params.append(max(1, min(limit, 500)))
+        params.append(max(1, min(limit, 5000)))
         rows = self._all(sql, tuple(params))
         return [
             dict(row, detail=json.loads(row["detail"]) if isinstance(row["detail"], str) else row["detail"])
