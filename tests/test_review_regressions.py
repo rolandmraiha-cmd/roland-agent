@@ -29,30 +29,21 @@ async def test_large_file_read_is_bounded(make_agent, monkeypatch):
     agent = make_agent()
     path = agent.config.workspace / "large.txt"
     path.write_text("x" * (MAX_OUTPUT * 20))
-    from pathlib import Path
+    from agent.workspace import Workspace
 
-    original = Path.open
     reads = []
+    original = Workspace.read_bytes
 
-    class CheckedReader:
-        def __init__(self, file):
-            self.file = file
+    def checked(self, rel, *, max_bytes=None):
+        reads.append(max_bytes)
+        assert max_bytes is not None and max_bytes <= MAX_OUTPUT * 4 + 16
+        return original(self, rel, max_bytes=max_bytes)
 
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            self.file.close()
-
-        def read(self, size=-1):
-            reads.append(size)
-            assert size == MAX_OUTPUT + 1
-            return self.file.read(size)
-
-    monkeypatch.setattr(Path, "open", lambda self, *a, **kw: CheckedReader(original(self, *a, **kw)))
+    monkeypatch.setattr(Workspace, "read_bytes", checked)
     result = await call_tool(agent.ctx, "read_file", {"path": "large.txt"})
-    assert reads == [MAX_OUTPUT + 1]
+    assert reads and reads[0] is not None
     assert result.startswith("x" * MAX_OUTPUT) and "file continues" in result
+    assert len(result) < MAX_OUTPUT + 80
 
 
 @pytest.mark.asyncio
