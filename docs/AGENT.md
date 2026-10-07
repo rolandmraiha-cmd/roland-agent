@@ -121,7 +121,7 @@ Before any real `docker compose up`: uid **1000** / mode **0400** secret files u
 | Catalogue default | `qwen3-4b-q4km` (~2.5 GB); hashes in `deploy/models.lock` |
 | CI-only | `test-tiny` (not an assistant) |
 | Image pin | `docker/model/VERSION` → llama.cpp `server-b11434` digest |
-| Context | `MODEL_CTX` ≤ **6144** (hard-capped in `docker/model/run.sh`) |
+| Context | `MODEL_CTX` default **5120**, hard-capped at **6144** in `docker/model/run.sh` |
 | Mem limit | Compose default **3840m**; acceptance peak ≤ **3600 MiB** |
 | Isolation | No published port, no egress, digest-pinned, read-only weights |
 

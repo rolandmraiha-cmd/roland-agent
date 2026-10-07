@@ -310,3 +310,9 @@ def test_preflight_cli_hides_compose_error_output(monkeypatch, capsys):
     monkeypatch.setattr(preflight.subprocess, "check_output", fail)
     assert preflight.main() == 1
     assert "synthetic-private-value" not in capsys.readouterr().err
+
+
+def test_model_ctx_compose_default_is_5120():
+    raw = (ROOT / "docker-compose.yml").read_text()
+    assert "${MODEL_CTX:-5120}" in raw
+    assert "${MODEL_CTX:-6144}" not in raw

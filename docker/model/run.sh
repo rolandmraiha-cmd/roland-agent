@@ -12,7 +12,7 @@ fi
 MODEL_ROOT=${MODEL_ROOT:-/models}
 MODEL_SERVER_BIN=${MODEL_SERVER_BIN:-/app/llama-server}
 MODEL_SERVER_TOKEN_FILE=${MODEL_SERVER_TOKEN_FILE:-/run/secrets/model_server_token}
-MODEL_CTX=${MODEL_CTX:-6144}
+MODEL_CTX=${MODEL_CTX:-5120}
 MODEL_THREADS=${MODEL_THREADS:-3}
 if [[ ! $MODEL_CTX =~ ^[1-9][0-9]{0,3}$ || $MODEL_CTX -gt 6144 || ! $MODEL_THREADS =~ ^[1-3]$ ]]; then
     echo "Require MODEL_CTX between 1 and 6144 and MODEL_THREADS between 1 and 3." >&2

@@ -45,7 +45,7 @@ class LlamaCppBrain:
         max_new_tokens: int = 768,
         timeout: float = 600,
         tool_mode: str = "grammar",
-        ctx: int = 6144,
+        ctx: int = 5120,
     ):
         validate_endpoint(base_url, allowed_hosts)
         self.model = model

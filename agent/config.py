@@ -104,7 +104,7 @@ class Config:
     model_name: str = "current"
     model_server_token: str = field(default="", repr=False, metadata={"secret": True})
     model_tool_mode: str = "grammar"
-    model_ctx: int = 6144
+    model_ctx: int = 5120
     model_max_new_tokens: int = 768
     model_temperature: float = 0.2
     model_timeout_s: float = 600.0

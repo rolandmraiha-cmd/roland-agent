@@ -26,6 +26,11 @@ def tool_name(raw: str) -> str:
     return _NOT_NAME.sub("", str(raw or ""))[:80] or "unnamed"
 
 
+def tool_signature(name: str, args: dict) -> str:
+    """Stable key for detecting repeated identical tool calls in one run."""
+    return f"{name}:{json.dumps(args, sort_keys=True, ensure_ascii=False)}"
+
+
 def strip_markers(text: str) -> str:
     """Breaks anything that could be read as our <tool_output> markers by renaming the word to
     tool-output, in one linear pass. Nothing is removed, so pieces can't join up into a new
@@ -148,6 +153,8 @@ class Agent:
             tool_exclude = set(tool_exclude) | {"run_shell"}
         tools = schemas(tool_exclude)
         reply = ""
+        # Identical failing tool calls (e.g. read_file on a missing path) burn context and RAM.
+        failed_tool_sigs: dict[str, str] = {}
         for step_index in range(self.config.max_tool_steps + 1):
             parse_attempts = 0
             while True:
@@ -226,8 +233,19 @@ class Agent:
                 if call.name != name or name in tool_exclude:
                     result = f"Error: {name} isn't available here."
                 else:
+                    sig = tool_signature(name, args)
                     yield {"type": "tool", "text": describe(name, args)}
-                    result = await call_tool(self.ctx, name, args)
+                    if sig in failed_tool_sigs:
+                        # Refuse to re-run the same failing call; stops OOM-prone tool loops.
+                        result = failed_tool_sigs[sig]
+                    else:
+                        result = await call_tool(self.ctx, name, args)
+                        if result.startswith("Error:"):
+                            result = (
+                                f"{result}\n"
+                                "Do not retry this exact tool call with the same arguments."
+                            )
+                            failed_tool_sigs[sig] = result
                     result = f'<tool_output tool="{name}">\n{strip_markers(result)}\n</tool_output>'
                     # Extra model-facing cap after strip_markers (§6.2.3).
                     result = clip(result, self.config.model_tool_output_chars)
