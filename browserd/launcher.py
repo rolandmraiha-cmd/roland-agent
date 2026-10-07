@@ -94,7 +94,9 @@ def run() -> int:
                         stale.unlink()
                     except OSError:
                         pass
-            child.process = subprocess.Popen(child.argv)  # noqa: S603 -- fixed commands, no shell
+            # Only the service needs our settings (the token's file name among them).
+            env = None if child is service else {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": "/tmp"}  # noqa: S108
+            child.process = subprocess.Popen(child.argv, env=env)  # noqa: S603 -- fixed commands, no shell
             child.started = now
             log.info("started %s", child.name)
         time.sleep(0.25)

@@ -176,6 +176,13 @@ _PAGES.update(
             '<label>File <input type="file" name="attachment"></label>'
             '<button type="submit">Upload file</button></form>',
         ),
+        "/extras/unsaved": _page(
+            "Unsaved changes",
+            '<button type="button" onclick="document.getElementById(\'out\').textContent = \'edited\'">Edit</button>'
+            '<p id="out">untouched</p>'
+            "<script>window.addEventListener('beforeunload', function (event) "
+            "{ event.preventDefault(); event.returnValue = 'unsaved'; });</script>",
+        ),
         "/extras/editable": _page(
             "Notes",
             '<div contenteditable="true" title="Note text" style="min-height: 40px; border: 1px solid">old note</div>',

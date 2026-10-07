@@ -86,6 +86,7 @@ MAX_NOTES = 20
 TEXT_TYPES = frozenset({"", "text", "tel", "number", "email", "url", "search", "password"})
 
 SCROLL_JS = "(dy) => window.scrollBy({ top: dy, left: 0, behavior: 'instant' })"
+BLUR_JS = "() => { const el = document.activeElement; if (el && typeof el.blur === 'function') el.blur(); }"
 HEIGHT_JS = (
     "() => Math.max(document.documentElement ? document.documentElement.scrollHeight : 0,"
     " document.body ? document.body.scrollHeight : 0)"
@@ -244,7 +245,7 @@ class Session:
         self._popups_closed = 0
         self._incoming: dict[int, dict] = {}
         self._download_seq = 0
-        self._closing_tab = False
+        self._replacing = False
         self._tasks: set[asyncio.Task] = set()
 
     # --- lifecycle ---
@@ -372,7 +373,7 @@ class Session:
     def _on_page(self, page) -> None:
         if any(tab.page is page for tab in self._tabs.values()):
             return
-        if len(self._tabs) >= self.s.max_tabs:
+        if len(self._tabs) >= self.s.max_tabs and not self._replacing:
             self._popups_closed += 1
             self._spawn(self._close_quietly(page))
             return
@@ -384,7 +385,7 @@ class Session:
         page.on("download", self._on_download)
         page.on("framenavigated", lambda frame, tab=tab: self._on_navigated(tab, frame))
         page.on("close", lambda _page, tab=tab: self._on_tab_closed(tab))
-        page.on("crash", lambda _page, tab=tab: self._spawn(self._close_quietly(tab.page)))
+        page.on("crash", lambda _page, tab=tab: self._spawn(self._drop_crashed(tab)))
 
     async def _close_quietly(self, page) -> None:
         try:
@@ -392,20 +393,39 @@ class Session:
         except Exception:  # noqa: S110 -- already gone
             pass
 
+    async def _blank_tab(self) -> None:
+        """A new empty tab, even at the limit. Chromium quits when its last tab closes, so the
+        last one is always replaced before it goes."""
+        self._replacing = True
+        try:
+            self._on_page(await self._context.new_page())
+        finally:
+            self._replacing = False
+
+    async def _drop_crashed(self, tab: Tab) -> None:
+        try:
+            async with self._lock:
+                if tab.id in self._tabs and len(self._tabs) == 1:
+                    await self._blank_tab()
+        except Exception:  # noqa: S110 -- the whole browser is going; on_dead handles that
+            pass
+        await self._close_quietly(tab.page)
+
     def _on_tab_closed(self, tab: Tab) -> None:
         self._tabs.pop(tab.id, None)
         if self._active == tab.id:
             self._active = next(reversed(self._tabs), None)
-        if not self._tabs and not self._stopping and self.browser_ok and not self._closing_tab:
+        if not self._tabs and not self._stopping and self.browser_ok:
             self._spawn(self._open_blank())
 
     async def _open_blank(self) -> None:
-        """There is always one tab, so the next action has somewhere to happen."""
+        """A page closed itself and it was the last one. Try to give the next action
+        somewhere to happen; if Chromium is already quitting, on_dead restarts the service."""
         try:
             async with self._lock:
                 if not self._tabs:
-                    self._on_page(await self._context.new_page())
-        except Exception:  # noqa: S110 -- the browser is going away; on_dead handles that
+                    await self._blank_tab()
+        except Exception:  # noqa: S110
             pass
 
     def _on_navigated(self, tab: Tab, frame) -> None:
@@ -691,9 +711,35 @@ class Session:
         return {"mode": self.mode, "tabs": tabs, "url": active_url, "title": active_title}
 
     async def set_user_mode(self, on: bool) -> dict:
-        # M7 adds the screen and what happens on hand-back (blur, clearing selections).
-        self.mode = "user" if on else "agent"
+        """Roland takes the controls (the screen for that arrives in M7), or gives them back."""
+        async with self._lock:  # an action that is under way finishes first
+            was_user, self.mode = self.mode == "user", "user" if on else "agent"
+            if was_user and not on:
+                await self._hand_back()
         return {"mode": self.mode}
+
+    async def _hand_back(self) -> None:
+        """Take the focus off whatever Roland was typing in, and empty the screen's clipboard,
+        so nothing of his is left where the next action could meet it. Nothing is read."""
+        for tab in list(self._tabs.values()):
+            for frame in self._frames(tab.page):
+                try:
+                    await asyncio.wait_for(frame.evaluate(BLUR_JS), timeout=3)
+                except Exception:  # noqa: S110 -- a frame that is busy or gone
+                    pass
+        if self.s.headless:
+            return
+        for selection in ("--primary", "--clipboard"):
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    "xsel", "--clear", selection,
+                    env={"DISPLAY": self.s.display, "PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                    stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except (OSError, TimeoutError):
+                pass
 
     async def navigate(self, url: object, new_tab: bool) -> dict:
         reason = guards.url_block_reason(url, self.s.allow_private_hosts)
@@ -722,6 +768,9 @@ class Session:
             extra: dict = {"status": status}
             if failed and self._refused:
                 extra["blocked"] = self._refused
+            elif failed and any(note["type"] == "beforeunload" for note in self._dialogs):
+                # The page asked "leave without saving?" and the answer is always no.
+                extra["blocked"] = "leave_dialog"
             elif failed and self._download_seq != downloads:
                 extra["download"] = True
             elif failed:
@@ -918,14 +967,10 @@ class Session:
             tab = self._tabs.get(tab_id)
             if tab is None:
                 raise BrowserdError("no_such_tab", 404)
-            self._closing_tab = True
-            try:
-                await tab.page.close()
-                self._on_tab_closed(tab)
-                if not self._tabs:
-                    self._on_page(await self._context.new_page())
-            finally:
-                self._closing_tab = False
+            if len(self._tabs) == 1:
+                await self._blank_tab()
+            await tab.page.close()  # without asking the page: its "unsaved changes" box can't stop this
+            self._on_tab_closed(tab)
             return await self._answer()
 
     async def screenshot(self, full_page: bool) -> bytes:

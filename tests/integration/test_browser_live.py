@@ -438,6 +438,19 @@ async def test_dialogs_are_dismissed_and_reported(agent_for):
     assert "confirm said false" in outputs[3]
 
 
+async def test_page_with_unsaved_changes_is_not_left_by_accident(agent_for):
+    agent = agent_for([
+        open_page("/extras/unsaved"), SNAPSHOT, click("Edit"), open_page("/blog"), call("browser_tabs"),
+        lambda messages: call("browser_close_tab", tab_id=re.search(r"tab (t\d+)", last_output(messages)).group(1)),
+        open_page("/blog"), "left",
+    ])
+    await run(agent)
+    outputs = agent.brain.outputs()
+    assert "asked whether to leave it" in outputs[3], outputs[3]
+    assert "/extras/unsaved" in outputs[4]          # still there
+    assert outputs[6].startswith('<tool_output tool="browser_open">\nOpened ') and "/blog" in outputs[6]
+
+
 async def test_new_tabs_are_followed_and_limited(agent_for):
     agent = agent_for([
         open_page("/extras/popup"), SNAPSHOT, click("Blog in a new tab"), call("browser_tabs"),

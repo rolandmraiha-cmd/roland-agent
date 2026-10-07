@@ -677,6 +677,12 @@ async def browser_open(ctx, args: dict) -> str:
         return _fail(error)
     if answer.get("blocked"):
         _audit(ctx, "browser_open", ok=False, url=_one_line(url, 300), blocked=_one_line(answer["blocked"], 40))
+        if answer["blocked"] == "leave_dialog":
+            return (
+                "Error: the page in this tab asked whether to leave it (it may hold unsaved "
+                "changes), and that is never answered with yes. To leave it anyway, close the "
+                "tab with browser_close_tab, or open the address with new_tab=true."
+            )
         return "Error: the browser refused that address (private, local or not a web page)."
     if answer.get("download") is True:
         _audit(ctx, "browser_open", ok=True, url=_one_line(url, 300), download=True)
