@@ -475,6 +475,14 @@ def _action_result(ctx, tool: str, verb: str, answer: dict, target: object = "")
         if isinstance(blocked, dict):
             method = _one_line(blocked.get("method"), 10).upper() or "POST"
             where = _where(blocked.get("url"), path=True)
+        if isinstance(blocked, dict) and blocked.get("new_tab") is True:
+            # browserd can't tell which tab such a request belongs to, so it never sends
+            # one, approved or not. Asking Roland again would not help.
+            _audit(ctx, tool, ok=False, blocked_submission=f"{method} {where}", new_tab=True)
+            return (
+                f"Not done: that form sends its data into a new tab ({method} {where}), and the "
+                "browser can't do that for you. Tell Roland he has to do this step himself."
+            )
         run = getattr(ctx, "run", None)
         if target and run is not None and hasattr(run, "blocked_submissions"):
             run.blocked_submissions.add(target)

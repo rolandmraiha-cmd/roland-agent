@@ -428,6 +428,7 @@ def test_settings_defaults_match_the_spec(env):
     assert (config.action_timeout_s, config.nav_timeout_s) == (30, 45)
     assert config.chromium_sandbox is False and config.headless is False
     assert config.allow_private_hosts == frozenset() and config.block_background_posts is False
+    assert config.max_download_bytes == 200 * 1024 * 1024
     assert config.sensitive_match == "substring" and config.timezone == "Europe/Helsinki"  # the spec's rule
     assert TOKEN not in repr(config)
 
@@ -450,6 +451,7 @@ def test_token_comes_from_the_secret_file_first(env, tmp_path):
     ("BROWSER_MAX_TABS", "0"), ("BROWSER_MAX_TABS", "50"), ("BROWSER_MAX_TABS", "two"),
     ("BROWSER_SENSITIVE_MATCH", "regex"), ("BROWSER_CHROMIUM_SANDBOX", "maybe"),
     ("BROWSER_BLOCK_BACKGROUND_POSTS", "2"), ("BROWSERD_PORT", "0"), ("BROWSER_NAV_TIMEOUT_S", "-1"),
+    ("BROWSER_MAX_DOWNLOAD_MB", "0"), ("BROWSER_MAX_DOWNLOAD_MB", "100000"), ("BROWSER_MAX_DOWNLOAD_MB", "big"),
 ])
 def test_settings_that_make_no_sense_stop_the_service(env, name, value):
     env.setenv("BROWSER_API_TOKEN", TOKEN)
@@ -466,7 +468,9 @@ def test_settings_read_the_switches(env):
     env.setenv("BROWSER_CHROMIUM_SANDBOX", "1")
     env.setenv("BROWSER_VIEWPORT", "1024x768")
     env.setenv("BROWSER_MAX_TABS", "3")
+    env.setenv("BROWSER_MAX_DOWNLOAD_MB", "4")
     config = settings.Settings.from_env()
+    assert config.max_download_bytes == 4 * 1024 * 1024
     assert config.allow_private_hosts == frozenset({"fixture-web", "127.0.0.1"})
     assert (config.sensitive_match, config.block_background_posts, config.chromium_sandbox) == ("word", True, True)
     assert (config.viewport, config.max_tabs) == ((1024, 768), 3)
@@ -613,41 +617,146 @@ def test_staged_uploads_have_a_size_limit(tmp_path, monkeypatch):
 
 # --- the POST guard's decision ---
 
+class Page:
+    def __init__(self, opener=None):
+        self._opener = opener
+
+    async def opener(self):
+        return self._opener
+
+
+class Frame:
+    def __init__(self, page):
+        self.page = page
+
+
 class Request:
-    def __init__(self, method="POST", resource_type="document"):
+    def __init__(self, method="POST", resource_type="document", page=None):
         self.method, self.resource_type = method, resource_type
+        self._page = page
+
+    @property
+    def frame(self):
+        if self._page is None:
+            raise RuntimeError("Frame for this navigation request is not available")
+        return Frame(self._page)
 
 
-def guard(tmp_path, **changes) -> session.Session:
+def guard(**changes) -> session.Session:
     return session.Session(settings.Settings(token=TOKEN, headless=True, **changes))
 
 
-def test_form_submissions_are_stopped_unless_roland_approved_or_is_driving(tmp_path):
-    browser = guard(tmp_path)
+def test_form_submissions_need_approval_unless_roland_is_driving():
+    browser = guard()
     for method in ("POST", "post", "PUT", "DELETE", "PATCH"):
-        assert browser._stops_post(Request(method)) is True
+        assert browser._guarded(Request(method)) is True
     for method in ("GET", "HEAD", "get", "OPTIONS"):
-        assert browser._stops_post(Request(method)) is False
-    # Background requests are let through by default (the classifier in core gates what starts them) ...
+        assert browser._guarded(Request(method)) is False
+    # Background requests are let through by default (the classifier in core gates what starts them).
     for kind in ("fetch", "xhr", "ping", "image", "script", "other"):
-        assert browser._stops_post(Request("POST", kind)) is False
-    # ... and an approved action opens the door only while it runs.
+        assert browser._guarded(Request("POST", kind)) is False
+    browser.mode = "user"
+    assert browser._guarded(Request("POST")) is False
+
+
+def test_the_stricter_switch_also_guards_background_posts():
+    browser = guard(block_background_posts=True)
+    for kind in ("fetch", "xhr", "ping", "other"):
+        assert browser._guarded(Request("POST", kind)) is True
+        assert browser._guarded(Request("GET", kind)) is False
+    assert browser._guarded(Request("POST", "image")) is False
+
+
+class Route:
+    def __init__(self, request):
+        self.request = request
+        self.request.url = "https://shop.example/order"
+        self.request.is_navigation_request = lambda: True
+        self.outcome = None
+
+    async def abort(self, reason):
+        self.outcome = f"abort:{reason}"
+
+    async def continue_(self):
+        self.outcome = "continue"
+
+
+async def decide(browser: session.Session, request: Request) -> str:
+    route = Route(request)
+    await browser._on_route(route)
+    return route.outcome
+
+
+async def test_an_approval_only_opens_the_door_for_its_own_tab():
+    """Found in review of #42: with two tabs, approving an action in one must not let a page
+    in the other get its own form through."""
     import time
 
+    browser = guard()
+    ours, other = Page(), Page()
+    tab = session.Tab("t1", ours, number=1)
+    background = session.Tab("t2", other, number=2)
+    browser._tabs = {"t1": tab, "t2": background}
+    browser._seq = 2
+
+    # Nothing under way: every form submission is stopped and noted as the page's own doing.
+    assert await decide(browser, Request(page=ours)) == "abort:aborted"
+    assert len(browser._background) == 1
+
+    # A safe action in our tab: stopped, and the action's answer will say it tried.
+    act = session._Action(tab, "https://shop.example/", 0, approved=False, tabs_before=2)
+    browser._action = act
+    assert await decide(browser, Request(page=ours)) == "abort:aborted"
+    assert len(act.blocked) == 1 and len(browser._background) == 1
+
+    # The approved action: its own tab may submit, the other tab still may not.
+    act = session._Action(tab, "https://shop.example/", 0, approved=True, tabs_before=2)
+    browser._action = act
     browser._posts_open_until = time.monotonic() + 5
-    assert browser._stops_post(Request("POST")) is False
+    assert await decide(browser, Request(page=ours)) == "continue"
+    assert await decide(browser, Request(page=other)) == "abort:aborted"
+    assert act.blocked == [] and len(browser._background) == 2  # noted as the other page's doing
+    assert await decide(browser, Request("GET", page=other)) == "continue"
+    # The first request of a tab that is only just opening can't be placed (Playwright has
+    # no tab for it yet), so it never goes out, and the action's answer says why.
+    assert await decide(browser, Request()) == "abort:aborted"
+    assert act.blocked == [{"method": "POST", "url": "https://shop.example/order", "new_tab": True}]
+
+    # A tab the approved one opened during the action counts once it exists (a sign-in
+    # window that posts back, say) ...
+    popup = Page(opener=ours)
+    browser._tabs["t3"] = session.Tab("t3", popup, number=3)
+    assert await decide(browser, Request(page=popup)) == "continue"
+    # ... one that it opened earlier does not, nor one that another tab opened.
+    act.tabs_before = 3
+    assert await decide(browser, Request(page=popup)) == "abort:aborted"
+    stranger = Page(opener=other)
+    browser._tabs["t4"] = session.Tab("t4", stranger, number=4)
+    assert await decide(browser, Request(page=stranger)) == "abort:aborted"
+
+    # When the time is up the door is shut again, for our own tab as well.
     browser._posts_open_until = time.monotonic() - 0.01
-    assert browser._stops_post(Request("POST")) is True
+    assert await decide(browser, Request(page=ours)) == "abort:aborted"
+    # While Roland drives, nothing is stopped.
     browser.mode = "user"
-    assert browser._stops_post(Request("POST")) is False
+    assert await decide(browser, Request(page=other)) == "continue"
 
 
-def test_the_stricter_switch_also_stops_background_posts(tmp_path):
-    browser = guard(tmp_path, block_background_posts=True)
-    for kind in ("fetch", "xhr", "ping", "other"):
-        assert browser._stops_post(Request("POST", kind)) is True
-        assert browser._stops_post(Request("GET", kind)) is False
-    assert browser._stops_post(Request("POST", "image")) is False
+async def test_a_request_to_a_private_address_is_stopped_whoever_asks():
+    import time
+
+    browser = guard()
+    ours = Page()
+    tab = session.Tab("t1", ours, number=1)
+    browser._tabs = {"t1": tab}
+    browser._action = session._Action(tab, "https://shop.example/", 0, approved=True, tabs_before=1)
+    browser._posts_open_until = time.monotonic() + 5
+    for url in ("http://10.77.4.10:8080/", "http://localhost/", "file:///etc/passwd", "http://169.254.169.254/"):
+        route = Route(Request("GET", page=ours))
+        route.request.url = url
+        await browser._on_route(route)
+        assert route.outcome == "abort:aborted", url
+    assert browser._refused in {"private_address", "scheme"}
 
 
 # --- the launcher ---

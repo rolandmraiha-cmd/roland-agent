@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import threading
+import time
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -195,6 +196,18 @@ _PAGES.update(
             '<input type="hidden" name="target" value="x"><input type="hidden" name="elements" value="x">'
             '<button type="submit">Book now</button></form>',
         ),
+        # Keeps trying to submit a form, as a page in a background tab might.
+        "/extras/keeps-trying": _page(
+            "Keeps trying",
+            '<form id="again" action="/order" method="post"><input type="hidden" name="item" value="retry"></form>'
+            "<script>setInterval(function () { document.getElementById('again').submit(); }, 300);</script>",
+        ),
+        "/extras/newtab-form": _page(
+            "Order in a new tab",
+            '<form action="/order" method="post" target="_blank">'
+            '<input type="hidden" name="item" value="newtab">'
+            '<button type="submit">Open the receipt</button></form>',
+        ),
         "/extras/editable": _page(
             "Notes",
             '<div contenteditable="true" title="Note text" style="min-height: 40px; border: 1px solid">old note</div>',
@@ -295,6 +308,22 @@ class FixtureHandler(BaseHTTPRequestHandler):
             self.server.reset()
             self._respond(HTTPStatus.OK, '{"requests":[]}', "application/json; charset=utf-8")
             return
+        if self.command in {"GET", "HEAD"} and path == "/extras/big-download":
+            # 16 MB sent slowly and without a length, like a file that might never end.
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="big.bin"')
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            try:
+                for _ in range(32 if self.command == "GET" else 0):
+                    self.wfile.write(b"\0" * (512 * 1024))
+                    self.wfile.flush()
+                    time.sleep(0.1)
+            except OSError:
+                pass  # the browser stopped the download
+            self.close_connection = True
+            return
         if self.command in {"GET", "HEAD"} and path == "/extras/redirect-private":
             # A public page that sends the browser on to a private address.
             self._respond(
@@ -333,7 +362,13 @@ class FixtureHandler(BaseHTTPRequestHandler):
             return
 
         allowed = []
-        if path in _PAGES or path in {"/whoami", "/download", "/_log"}:
+        if path in _PAGES or path in {
+            "/whoami",
+            "/download",
+            "/_log",
+            "/extras/big-download",
+            "/extras/redirect-private",
+        }:
             allowed.extend(("GET", "HEAD"))
         if path in _POST_RESULTS or path == "/_reset":
             allowed.append("POST")

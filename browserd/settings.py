@@ -89,6 +89,8 @@ class Settings:
     sensitive_match: str = "substring"
     # Also block fetch/XHR POSTs from actions Roland hasn't approved (stricter; off by default).
     block_background_posts: bool = False
+    # One downloaded file may be this large; a bigger one is stopped while it arrives.
+    max_download_bytes: int = MAX_DOWNLOAD_BYTES
     locale: str = "en-GB"
     timezone: str = "Europe/Helsinki"
     headless: bool = False  # development and tests only; production is headed on Xvfb
@@ -128,6 +130,7 @@ class Settings:
             allow_private_hosts=_names("BROWSER_ALLOW_PRIVATE_HOSTS"),
             sensitive_match=match,
             block_background_posts=_bool("BROWSER_BLOCK_BACKGROUND_POSTS"),
+            max_download_bytes=_int("BROWSER_MAX_DOWNLOAD_MB", MAX_DOWNLOAD_BYTES // 2**20, 1, 2048) * 2**20,
             timezone=os.environ.get("TZ", "").strip() or "Europe/Helsinki",
             headless=_bool("BROWSERD_HEADLESS"),
         )

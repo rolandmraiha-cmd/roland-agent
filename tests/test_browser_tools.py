@@ -1229,3 +1229,36 @@ async def test_tab_list_says_nothing_while_roland_has_the_browser(tmp_path, fake
     assert locked == "Error: Roland is using the browser right now."
     for private in ("bank.example", "abc123", "Reset password", "example.org"):
         assert private not in locked
+
+
+@pytest.mark.asyncio
+async def test_a_form_that_posts_into_a_new_tab_is_reported_and_not_retried(tmp_path, fake):
+    """browserd never sends such a form (it can't tell which tab asked), so the model is told
+    to hand the step to Roland, and the same call is not turned into an approval card."""
+    blocked = {"method": "POST", "url": f"{SITE}/order", "new_tab": True}
+    fake.handle_click = lambda: httpx.Response(200, json={
+        "ok": False, "mode": "agent", "url": fake.url, "title": fake.title, "navigated": False,
+        "blocked_submission": blocked,
+    })
+    original = fake.handle
+
+    def handle(request):
+        if request.url.path == "/v1/click":
+            fake.calls.append((request.method, request.url.path, json.loads(request.content)))
+            return fake.handle_click()
+        return original(request)
+
+    fake.handle = handle  # type: ignore[method-assign]
+    agent = browser_agent(tmp_path, fake, [("", [click("e7")]), ("", [click("e7")]), "I told Roland."])
+    cards: list[dict] = []
+
+    async def decide(row):
+        cards.append(dict(row))
+        await agent.gate.reject(row["id"], args_hash=row["args_hash"])
+
+    await chat_and_decide(agent, decide)
+    outputs = tool_outputs(agent)
+    assert "Not done: that form sends its data into a new tab (POST shop.example/order)" in outputs[0]
+    assert "Tell Roland he has to do this step himself" in outputs[0]
+    assert cards == []  # the retry is not gated as a form submission: approving could not help
+    assert agent.gate is not None and fake.posts == []

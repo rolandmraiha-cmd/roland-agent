@@ -30,7 +30,6 @@ from . import guards
 from .settings import (
     FULL_PAGE_MAX_HEIGHT,
     MAX_ANSWER_BYTES,
-    MAX_DOWNLOAD_BYTES,
     MAX_ELEMENTS,
     MAX_SCREENSHOT_BYTES,
     MAX_SNAPSHOT_CHARS,
@@ -109,6 +108,7 @@ class BrowserdError(Exception):
 class Tab:
     id: str
     page: object
+    number: int = 0  # tabs are numbered in the order they opened
     next_ref: int = 1
     doc: str = field(default_factory=lambda: secrets.token_hex(8))
     navigations: int = 0
@@ -120,6 +120,7 @@ class _Action:
     url: str
     navigations: int
     approved: bool
+    tabs_before: int = 0  # the number of the newest tab when the action began
     blocked: list[dict] = field(default_factory=list)
 
 
@@ -248,6 +249,7 @@ class Session:
         self._background: list[dict] = []
         self._popups_closed = 0
         self._incoming: dict[int, dict] = {}
+        self._download_watch: asyncio.Task | None = None
         self._download_seq = 0
         self._replacing = False
         self._tasks: set[asyncio.Task] = set()
@@ -385,7 +387,7 @@ class Session:
             self._spawn(self._close_quietly(page))
             return
         self._seq += 1
-        tab = Tab(f"t{self._seq}", page)
+        tab = Tab(f"t{self._seq}", page, number=self._seq)
         self._tabs[tab.id] = tab
         self._active = tab.id
         page.on("dialog", self._on_dialog)
@@ -472,9 +474,15 @@ class Session:
         self._download_seq += 1
         key = self._download_seq
         name = guards.safe_download_name(download.suggested_filename)
-        entry = {"name": name, "size": 0, "finished": False}
+        entry = {"name": name, "size": 0, "finished": False, "download": download}
         self._incoming[key] = entry
+        if self._download_watch is None or self._download_watch.done():
+            self._download_watch = asyncio.ensure_future(self._limit_downloads())
         try:
+            arrived = Path(await download.path())  # waits for the end; fails if it was stopped
+            size = arrived.stat().st_size
+            if entry.get("failed") or size > self.s.max_download_bytes:
+                raise BrowserdError("too_large")
             folder = self.s.downloads_dir
             target = folder / name
             stem, dot, extension = name.rpartition(".")
@@ -483,21 +491,34 @@ class Session:
                 number += 1
                 target = folder / (f"{stem}-{number}{dot}{extension}" if dot and stem else f"{name}-{number}")
             entry["name"] = target.name
-            await download.save_as(target)
-            size = target.stat().st_size
-            if size > MAX_DOWNLOAD_BYTES:
-                target.unlink()
-                entry["failed"] = True
-            else:
-                entry.update(size=size, finished=True)
+            os.replace(arrived, target)  # a move within /files: the file is never on disk twice
+            entry.update(size=size, finished=True)
         except Exception:
             entry["failed"] = True
         finally:
             try:
                 await download.delete()
-            except Exception:  # noqa: S110
+            except Exception:  # noqa: S110 -- moved away or already gone
                 pass
             self._incoming.pop(key, None)
+
+    async def _limit_downloads(self) -> None:
+        """A site can send a file without end. While files are arriving, add up what is there
+        so far and stop them once it is more than one file may be."""
+        while self._incoming and not self._stopping:
+            await asyncio.sleep(0.5)
+            try:
+                arrived = sum(item.stat().st_size for item in self._partial_dir.iterdir() if item.is_file())
+            except OSError:
+                continue
+            if arrived <= self.s.max_download_bytes:
+                continue
+            for entry in list(self._incoming.values()):
+                entry["failed"] = True
+                try:
+                    await asyncio.wait_for(entry["download"].cancel(), timeout=5)
+                except Exception:  # noqa: S110 -- it ended by itself in the meantime
+                    pass
 
     def _tab(self) -> Tab:
         tab = self._tabs.get(self._active or "")
@@ -519,15 +540,33 @@ class Session:
         except Exception:  # noqa: S110 -- the page went away
             pass
 
-    def _stops_post(self, request) -> bool:
-        if self.mode != "agent" or time.monotonic() < self._posts_open_until:
-            return False
-        if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+    def _guarded(self, request) -> bool:
+        """Is this a request that needs Roland's approval to go out?"""
+        if self.mode != "agent" or request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
             return False
         kind = request.resource_type
         if kind == "document":
             return True  # a form being submitted, in the tab or in a frame
         return self.s.block_background_posts and kind in {"fetch", "xhr", "ping", "eventsource", "other"}
+
+    async def _from_action(self, request, act: _Action) -> bool | None:
+        """Does this request come from the tab the action runs in, or from a tab which that
+        one opened during the action? None when it can't be said: the first request of a tab
+        that is only just opening (a form with target=_blank) has no tab yet, and Playwright
+        only reports the tab after the request has been answered."""
+        try:
+            page = request.frame.page
+        except Exception:
+            return None
+        if page is act.tab.page:
+            return True
+        try:
+            opened = next((tab for tab in self._tabs.values() if tab.page is page), None)
+            if opened is None or opened.number <= act.tabs_before:
+                return False
+            return await asyncio.wait_for(page.opener(), timeout=2) is act.tab.page
+        except Exception:
+            return False
 
     async def _on_route(self, route) -> None:
         try:
@@ -540,13 +579,21 @@ class Session:
                     self._refused = reason
                 await route.abort("aborted")
                 return
-            if self._stops_post(request):
-                entry = {"method": _text(request.method.upper(), 10), "url": _text(request.url, MAX_URL_CHARS)}
-                bucket = self._action.blocked if self._action is not None else self._background
-                if len(bucket) < MAX_NOTES:
-                    bucket.append(entry)
-                await route.abort("aborted")
-                return
+            if self._guarded(request):
+                # Only the action under way can vouch for a request, and only for its own
+                # tab: another tab's page must not get a form through on Roland's approval.
+                # A request that can't be placed (see _from_action) is never let through.
+                act = self._action
+                ours = await self._from_action(request, act) if act is not None else False
+                if not (ours is True and act.approved and time.monotonic() < self._posts_open_until):
+                    entry = {"method": _text(request.method.upper(), 10), "url": _text(request.url, MAX_URL_CHARS)}
+                    if ours is None:
+                        entry["new_tab"] = True
+                    bucket = self._background if ours is False else act.blocked
+                    if len(bucket) < MAX_NOTES:
+                        bucket.append(entry)
+                    await route.abort("aborted")
+                    return
             await route.continue_()
         except Exception:
             try:
@@ -628,7 +675,7 @@ class Session:
 
     @asynccontextmanager
     async def _acting(self, tab: Tab, mode: str):
-        act = _Action(tab, tab.page.url, tab.navigations, approved=mode == "approved")
+        act = _Action(tab, tab.page.url, tab.navigations, approved=mode == "approved", tabs_before=self._seq)
         quiet, longest = APPROVED_SETTLE if act.approved else SAFE_SETTLE
         self._action = act
         if act.approved:

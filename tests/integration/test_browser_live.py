@@ -338,6 +338,35 @@ async def test_downloads_land_in_workspace(agent_for):
         assert saved.read_text().startswith("item,quantity,total")
 
 
+async def test_oversized_download_is_stopped_while_it_arrives(agent_for):
+    """Found in review of #42. The test stack sets a small limit; the fixture sends 16 MB."""
+    limit = int(os.environ.get("BROWSER_MAX_DOWNLOAD_MB") or 200)
+    if limit >= 16:
+        pytest.skip("needs a browser service with BROWSER_MAX_DOWNLOAD_MB below 16")
+    agent = agent_for([open_page("/extras/big-download"), "started"])
+    await run(agent)
+    assert "downloading it" in agent.brain.outputs()[0]
+    for _ in range(40):  # the fixture needs about 3 s to send it all
+        await asyncio.sleep(0.25)
+        listed = raw("GET", "/v1/downloads").json()
+        if not any(item["name"].startswith("big") for item in listed):
+            break
+    assert not any(item["name"].startswith("big") for item in raw("GET", "/v1/downloads").json())
+    workspace = os.environ.get("WORKSPACE_DIR")
+    if workspace:
+        folder = Path(workspace) / "browser"
+        assert not list((folder / "downloads").glob("big*"))
+        for _ in range(20):
+            if not list((folder / ".incoming").iterdir()):
+                break
+            await asyncio.sleep(0.25)
+        assert list((folder / ".incoming").iterdir()) == []  # nothing half-arrived is left behind
+    # An ordinary file still arrives afterwards.
+    assert raw("POST", "/v1/navigate", {"url": f"{FIXTURE_URL}/download"}).json().get("download") is True
+    await asyncio.sleep(1)
+    assert any(item["name"].startswith("report") and item["finished"] for item in raw("GET", "/v1/downloads").json())
+
+
 def test_no_cookie_or_eval_endpoints():
     """Only the §8.4 routes exist. (The unit tests compare the full route table.)"""
     for path in ("/v1/cookies", "/v1/storage", "/v1/evaluate", "/v1/eval", "/v1/cdp", "/v1/har",
@@ -471,6 +500,43 @@ async def test_new_tabs_are_followed_and_limited(agent_for):
     link = next(item for item in snapshot["elements"] if item.get("name") == "Shop in a new tab")
     answer = raw("POST", "/v1/click", {"ref": link["ref"], "fingerprint": link["fingerprint"], "mode": "safe"}).json()
     assert answer.get("popup_closed") is True and len(raw("GET", "/v1/status").json()["tabs"]) == 2
+
+
+async def test_another_tab_cannot_use_an_approval(agent_for):
+    """Found in review of #42: a page in a background tab keeps trying to submit its own form.
+    Roland approves an order in the other tab. Only that order goes out."""
+    agent = agent_for([
+        open_page("/extras/keeps-trying"), open_page("/shop", new_tab=True), SNAPSHOT, click("Place order"),
+        SNAPSHOT, "ordered",
+    ])
+    cards: list[dict] = []
+    await run(agent, approving(agent, cards))
+    await asyncio.sleep(1)
+    assert len(cards) == 1
+    assert site_posts() == ["/order item=blue-mug"], site_posts()
+    assert "Order placed" in agent.brain.outputs()[-1]
+    # The other tab is still where it was, still being refused.
+    tabs = raw("GET", "/v1/status").json()["tabs"]
+    assert any(tab["url"].endswith("/extras/keeps-trying") for tab in tabs)
+
+
+async def test_a_form_that_posts_into_a_new_tab_is_never_sent(agent_for):
+    """The first request of a tab that is only just opening can't be tied to the tab that
+    asked for it, so no approval can cover it. The agent is told to hand the step to Roland."""
+    raw("POST", "/v1/navigate", {"url": f"{FIXTURE_URL}/extras/newtab-form"})
+    button = next(item for item in raw("POST", "/v1/snapshot", {"max_chars": 0}).json()["elements"]
+                  if item.get("name") == "Open the receipt")
+    for mode in ("safe", "approved"):
+        tried = raw("POST", "/v1/click", {"ref": button["ref"], "fingerprint": button["fingerprint"], "mode": mode})
+        assert tried.json()["blocked_submission"] == {"method": "POST", "url": f"{FIXTURE_URL}/order", "new_tab": True}
+    assert site_posts() == []
+
+    agent = agent_for([open_page("/extras/newtab-form"), SNAPSHOT, click("Open the receipt"), "told Roland"])
+    cards: list[dict] = []
+    await run(agent, approving(agent, cards))
+    assert len(cards) == 1  # a submit button always asks first
+    assert "sends its data into a new tab" in agent.brain.outputs()[-1]
+    assert site_posts() == []
 
 
 async def test_form_inside_a_frame_is_seen_and_gated(agent_for):

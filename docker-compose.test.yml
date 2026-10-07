@@ -33,6 +33,7 @@ services:
   browser:
     environment:
       BROWSER_ALLOW_PRIVATE_HOSTS: fixture-web
+      BROWSER_MAX_DOWNLOAD_MB: "4"  # small, so the test for an oversized download is quick
     volumes:
       - type: bind
         source: ${WORKSPACE_HOST_DIR:-./.ci-workspace}/browser
@@ -103,6 +104,7 @@ services:
       BROWSER_URL: http://10.77.4.40:7100
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
       FIXTURE_URL: http://fixture-web:8080
+      BROWSER_MAX_DOWNLOAD_MB: "4"
       BROWSER_LIVE_REQUIRED: ${BROWSER_LIVE_REQUIRED:-}
       BROWSER_LIVE_AFTER_RESTART: ${BROWSER_LIVE_AFTER_RESTART:-}
       SCREEN_ENABLED: "false"
