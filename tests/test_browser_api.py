@@ -50,7 +50,11 @@ class FakeBrowserd:
                 except asyncio.CancelledError:
                     self.cancelled += 1
                     raise
-            return httpx.Response(self.status_code, json=self.answer)
+            return httpx.Response(
+                self.status_code,
+                content=json.dumps(self.answer).encode(),
+                headers={"Content-Type": "application/json"},
+            )
         assert request.url.path == "/v1/screenshot"
         if self.screenshot_code != 200:
             return httpx.Response(
@@ -171,6 +175,33 @@ def test_untrusted_status_fields_are_bounded_and_typed(browser_env):
     assert result["tabs"] == [{"id": None, "url": None, "title": None, "active": False}]
     fake.answer["tabs"] = {"bad": "tabs"}
     assert client.get("/api/browser/status").json()["tabs"] == []
+
+
+def test_surrogate_status_text_is_replaced_without_breaking_bounds(browser_env):
+    assert routes_browser._text("a\ud800b\udfff\U0001f600", 5) == "a\ufffdb\ufffd\U0001f600"
+    assert routes_browser._text("x" * 119 + "\ud800tail", 120) == "x" * 119 + "\ufffd"
+    client, _, fake = browser_env
+    fake.answer = {
+        "mode": "agent",
+        "url": "u\udfff" * 200,
+        "title": "t\ud800" * 100,
+        "tabs": [{"id": "i\ud800", "url": "u\udfff" * 200, "title": "t\ud800" * 100, "active": True}],
+    }
+    response = client.get("/api/browser/status")
+    assert response.status_code == 200
+    result = response.json()
+    for value, bound in [
+        (result["url"], 300),
+        (result["title"], 120),
+        (result["tabs"][0]["id"], 120),
+        (result["tabs"][0]["url"], 300),
+        (result["tabs"][0]["title"], 120),
+    ]:
+        assert len(value) <= bound
+        value.encode("utf-8")  # No unpaired surrogate may reach JSONResponse.
+    summary = client.get("/api/status")
+    assert summary.status_code == 200
+    summary.json()["browser"]["url"].encode("utf-8")
 
 
 def test_screenshot_is_png_thumbnail_without_agent_side_effects(browser_env, monkeypatch):

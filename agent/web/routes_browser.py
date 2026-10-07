@@ -14,7 +14,9 @@ MAX_TABS = 20
 
 
 def _text(value: object, limit: int) -> str | None:
-    return value[:limit] if isinstance(value, str) else None
+    if not isinstance(value, str):
+        return None
+    return "".join("\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char for char in value[:limit])
 
 
 def _status_payload(answer: dict) -> dict:
