@@ -83,6 +83,10 @@ class Verdict:
 def words(text: str) -> list[str]:
     """Lower-cased word tokens: every character that isn't a letter or digit splits a word."""
     text = unicodedata.normalize("NFKC", str(text or "")[:MAX_FIELD_CHARS * 4].lower()).lower()
+    if not text.isascii():
+        # Invisible characters (zero-width joiners, direction marks) must not split a word:
+        # "pa\u200by" is still "pay" to whoever reads the button.
+        text = "".join(char for char in text if unicodedata.category(char) != "Cf")
     text = " ".join(text.split())[:MAX_FIELD_CHARS]
     out: list[str] = []
     current: list[str] = []

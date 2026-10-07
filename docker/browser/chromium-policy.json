@@ -1,0 +1,33 @@
+{
+  "PasswordManagerEnabled": false,
+  "PasswordLeakDetectionEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "MetricsReportingEnabled": false,
+  "UrlKeyedAnonymizedDataCollectionEnabled": false,
+  "SyncDisabled": true,
+  "BrowserSignin": 0,
+  "SearchSuggestEnabled": false,
+  "TranslateEnabled": false,
+  "SpellCheckServiceEnabled": false,
+  "AlternateErrorPagesEnabled": false,
+  "NetworkPredictionOptions": 2,
+  "BackgroundModeEnabled": false,
+  "DefaultBrowserSettingEnabled": false,
+  "DnsOverHttpsMode": "off",
+  "ExtensionInstallBlocklist": [
+    "*"
+  ],
+  "DefaultDownloadDirectory": "/files/downloads",
+  "PromptForDownloadLocation": false,
+  "URLBlocklist": [
+    "file://*",
+    "chrome://*",
+    "devtools://*",
+    "view-source:*",
+    "chrome-extension://*"
+  ],
+  "URLAllowlist": [
+    "chrome://newtab"
+  ]
+}

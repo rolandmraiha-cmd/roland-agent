@@ -1,4 +1,4 @@
-.PHONY: lint fmt-check test test-integration test-sandbox build compose-config \
+.PHONY: lint fmt-check test test-integration test-sandbox test-browser build compose-config \
 	preflight-edge preflight \
 	up down ps logs deploy secrets hash-password firewall firewall-install \
 	workspace-fs backup restore restore-test verify memory-report \
@@ -13,14 +13,14 @@ export HOST REF APPLY FORCE PULL S
 # Pass them explicitly when set: WORKSPACE_HOST_DIR=/path make …
 
 lint:
-	ruff check agent tests deploy
+	ruff check agent browserd tests deploy
 
 fmt-check:
 	ruff format --check agent tests deploy
 
 test:
 	pytest -q
-	node --test tests/frontend/chat.test.cjs
+	node --test tests/frontend/chat.test.cjs tests/frontend/snapshot.test.cjs
 
 test-integration:
 	bash tests/integration/edge.sh
@@ -33,8 +33,14 @@ test-sandbox:
 	test -f secrets/sandbox_api_token || { echo "missing secrets/sandbox_api_token; run make secrets" >&2; exit 2; }
 	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build sandbox
 	docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm tester
-	bash tests/integration/isolation.sh --ci
+	ISOLATION_COMPOSE_FILES="docker-compose.yml docker-compose.test.yml" bash tests/integration/isolation.sh --ci
 	docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
+
+# Live browser stack (A6.3; not run by CI). Needs Docker, a .env and secrets/ (make secrets).
+# Builds the browser image, runs it against the fixture site, restarts it, and removes the
+# test stack again. CHROMIUM_SANDBOX=1 runs the same with Chromium's own sandbox on.
+test-browser:
+	bash tests/integration/browser.sh
 
 build:
 	docker compose build

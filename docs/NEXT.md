@@ -90,7 +90,7 @@ Before writing any code:
 | Item | Value |
 |---|---|
 | Repository | https://github.com/rolandmraiha-cmd/roland-agent |
-| Integration branch | `v2`. Deployed on Contabo: **`a27b5ff`** (#37; M5 code `98971cc`, "M5: Workspace and files", #32). M6 part 1 sits on top and is not deployed |
+| Integration branch | `v2`. Deployed on Contabo: **`a27b5ff`** (#37; M5 code `98971cc`, "M5: Workspace and files", #32). M6 parts 1 and 2 (#39, #42) sit on top and are not deployed |
 | `main` | Untouched since v1; do not push until M9 |
 | Live URL | https://37-60-226-214.sslip.io/ |
 | Host | Contabo VPS, Ubuntu 24.04, ~4 vCPU / ~8 GB RAM, IPv4 `37.60.226.214` |
@@ -100,7 +100,7 @@ Before writing any code:
 | Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m` |
 | Repo defaults | `docker-compose.yml` and `.env.example` still default `MODEL_CTX` to 4096 |
 | Shell | On, via the sandbox (`ALLOW_SHELL=true`, `SHELL_BACKEND=sandbox`) |
-| Off | Browser, screen, training (compose sets the flags to `"false"`) |
+| Off | Browser (built in M6, off: `.env` has no `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED` defaults to `false`), screen and training (compose sets those flags to `"false"`) |
 | App version | `0.1.0` in `pyproject.toml` (bump to `2.0.0` in M9) |
 
 `MODEL_CTX` was lowered from 4096 to 3072 on Contabo after the model container was OOM-killed at 4096 with the 3840m limit. Do not "fix" this by raising memory.
@@ -117,12 +117,13 @@ Shipped milestones on `v2`: v1 (#1–#6), M0, M1a, M1, M2 web/edge/model/provide
 | `core` | FastAPI app, agent loop, gate, tools, SQLite (`/data`), backups (`/backups`), workspace (`/workspace`). Only accepts peer 10.77.1.2. | `edge` 10.77.1.10, `sandbox_ctl` 10.77.3.10, `model` 10.77.6.10, `core_egress` | 640m |
 | `model` | llama.cpp server (digest-pinned, `docker/model/VERSION`), read-only weights, bearer `model_server_token`, no egress, no published port. | `model` 10.77.6.60 | `${MODEL_MEM_LIMIT:-3840m}` |
 | `sandbox` | `sandboxd` on 10.77.3.20:7000; peer 10.77.3.10 + Bearer `sandbox_api_token`; output cap 64 KiB, timeout ≤ 300 s, concurrency 2; container-gated leftover reap. | `sandbox_ctl` 10.77.3.20, `sandbox_egress` 10.77.11.20 | 1g |
+| `browser` (in the compose file since M6; **not live**: only starts with the `browser` profile) | Chromium on Xvfb plus `browserd` on 10.77.4.40:7100; peer 10.77.4.10 + Bearer `browser_api_token`; profile volume mounted here only. | `browser_ctl` 10.77.4.40, `browser_egress` 10.77.12.40 | 1280m |
 
 All services are `read_only`, `cap_drop: [ALL]`, `no-new-privileges`, uid 1000, with `memswap_limit == mem_limit`.
 
-Reserved, unused networks already declared: `browser_ctl` 10.77.4.0/24, `vnc` 10.77.5.0/24, `trainer_ctl` 10.77.7.0/24, `browser_egress` 10.77.12.0/24, `trainer_egress` 10.77.13.0/24, plus `screen` (attached to caddy only today).
+Since M6, core is also on `browser_ctl` (10.77.4.10) and mounts `browser_api_token`, whether or not the browser runs. Reserved, unused networks already declared: `vnc` 10.77.5.0/24, `trainer_ctl` 10.77.7.0/24, `trainer_egress` 10.77.13.0/24, plus `screen` (attached to caddy only today).
 
-Config caps today: 3840 + 640 + 96 + 1024 = **5600 MiB**. Config limits are not proof of headroom; real usage must be measured.
+Config caps today: 3840 + 640 + 96 + 1024 = **5600 MiB**; with the browser on, 6880 MiB. Config limits are not proof of headroom; real usage must be measured.
 
 ### 4.2 M3 confirmation gate (live)
 
@@ -153,13 +154,15 @@ Work strictly in order: M6 → M7 → M8 → M9. M7 depends on M6's browser proc
 
 **Spec:** §5.5, §6.5, §8.4, §9.3, §9.4.1, §10.3, §13.2–13.3, M6 in §12.
 
-#### Status: part 1 of 2 done (7 Oct 2026)
+#### Status: code done, server work not started (7 Oct 2026)
 
-M6 is split into two PRs to `v2`.
+M6 was split into PRs to `v2`.
 
-- **Part 1, core side (#39): done, dormant.** `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py`, the browser policies in `agent/gate.py`, the screenshot on approval cards, and the tests for A6.1 and A6.2. Nothing is switched on: without `browserd` there is nothing to talk to, `BROWSER_ENABLED` stays `false`, and `agent/__main__.py` still refuses it.
-- **Part 2, the browser service: not started.** Deliverables 1–3, 5, 6, 8 and 9 below, the browser part of `docker-compose.test.yml`, A6.3–A6.5, the Contabo pre-step and smoke. Part 2 removes the "not implemented yet" refusal in `agent/__main__.py` for the browser (keep it for the screen until M7).
-- **Fixture site (deliverable 7): done in #38.** `tests/fixtures/site/server.py`, its loopback tests, and the `fixture-web` service on the internal `fixtures` test network. Part 2 attaches the `browser` service to that network and sets `BROWSER_ALLOW_PRIVATE_HOSTS=fixture-web` there.
+- **Part 1, core side (#39): done.** `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py`, the browser policies in `agent/gate.py`, the screenshot on approval cards, and the tests for A6.1 and A6.2.
+- **Part 2, the browser service (#42): done off the server, off by default.** Deliverables 1–3, 5 and 8 below, the browser part of `docker-compose.test.yml`, and A6.3 (`make test-browser`). `agent/__main__.py` now accepts `BROWSER_ENABLED=true` and still refuses `SCREEN_ENABLED`. Nothing changes on Contabo until `.env` there gets **both** `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`.
+- **Fixture site (deliverable 7): done in #38**, extended in #42 with pages for dialogs, new tabs, frames, self-submitting forms, secret field names, uploads and more.
+- **Also merged:** the Browser tab (deliverable 9, #40) and the server-side checks (isolation probes from the browser container for A6.4, `make memory-report`, #41).
+- **Not started: everything on Contabo.** The pre-step measurement, the deploy with the browser on, the smoke, A6.5. Nobody has run the browser there.
 
 #### Goal
 
@@ -172,7 +175,7 @@ The agent can drive one persistent, headed Chromium through a private `browserd`
 
 #### Deliverables
 
-Expected locations per `docs/v2-spec.md`; verify in tree (deliverables 4 and 7 exist; the rest do not yet):
+Expected locations per `docs/v2-spec.md`. All nine are in the tree after #40, #41 and #42. Deliverable 6's firewall rules were already in `deploy/firewall.sh`.
 
 1. **Image** `docker/browser/Dockerfile`: FROM a digest-pinned `mcr.microsoft.com/playwright/python` image whose Chromium matches the pinned Playwright version; `xvfb`, `x11vnc`, `tini`, fonts; `requirements-browser.lock` (hash-checked); `USER 1000:1000`; `/profile` and `/files` owned by 1000.
 2. **Chromium policy** `docker/browser/chromium-policy.json`: password manager, autofill, sync, sign-in, metrics off; downloads to `/files/downloads`; devtools disabled; `file://`, `chrome://`, `devtools://`, `view-source:`, `chrome-extension://` blocked. If managed policies are not honoured by the bundled Chromium, apply the same settings via launch args and profile preferences and document which worked.
@@ -192,12 +195,13 @@ Expected locations per `docs/v2-spec.md`; verify in tree (deliverables 4 and 7 e
    - How part 1 does it, so part 2 fits: the classifier looks at the element through `/v1/describe` just before the gate and returns `Decision.pinned = {"fingerprint": …}`. `call_tool` stores that under the reserved `_pin` key with the approval args and drops any `_pin` the model sent. Handlers send `mode="approved"` only while `call_tool` runs them with an approved approval row for that tool; otherwise `mode="safe"`. A `blocked_submission` answer is remembered on the run (`RunState.blocked_submissions`), so the same call is GATED `form_submit` next time. The approval screenshot is taken by `Decision.card_screenshot` inside `Gate.request` and saved as `screenshots/approval-<id>.png`.
 5. **Compose:** `browser` service on `browser_ctl` (10.77.4.40) and `browser_egress`; core joins `browser_ctl` at 10.77.4.10. Planned limits: `mem_limit`/`memswap_limit` 1280m (includes shm), `shm_size: 320m`, tmpfs `/tmp` 256m, cpus 2.0, pids 512, `oom_score_adj: 500`. Named volumes for `/profile` (browser-only) and a downloads location that core can expose as workspace files. New secret `browser_api_token` (add to `deploy/secrets.sh`). `agent/config.py` already refuses `BROWSER_ENABLED=true` without `BROWSER_API_TOKEN`; keep that.
 6. **Firewall** (`deploy/firewall.sh`): browser egress allowed to public internet only; no route from `browser` to core (10.77.1.10:8080, 10.77.4.10:8080), model, sandbox or host. Extend `tests/integration/isolation.sh`.
-   Browser isolation probes and read-only `make memory-report` are available; live A6.4/A6.5 measurements remain pending.
+   Browser isolation probes and read-only `make memory-report` are available (#41); live A6.4/A6.5 measurements remain pending. In `--server` mode a probed service that is not running fails the run. Without a host firewall the probes were run once against real core, sandbox and browser containers in the test stack (#42; the model was not running, so its probe was skipped): all blocked, each target confirmed listening from its own side. `make test-browser` repeats the sandbox and browser part every time.
 7. **Fixture site** `tests/fixtures/site/` and `fixture-web` service in `docker-compose.test.yml` (§13.2–13.3): order form, injection page, SPA div-POST, prefilled password, login + `/whoami`, download.
-   The fixture site exists with unit tests and the internal `fixture-web` service; browser integration remains pending.
+   The fixture site exists with unit tests and the internal `fixture-web` service; the live browser tests run against it (#42).
 8. **Chromium sandbox experiment** (`BROWSER_CHROMIUM_SANDBOX`, default `false`): try `true` with a pinned seccomp profile; report the result in the PR. Do not weaken host AppArmor to make it work.
+   Result (#42, dev container without AppArmor): with Docker's own seccomp profile Chromium refuses to start sandboxed. With Playwright's published profile it starts only if the container keeps `CAP_SYS_CHROOT`, because the profile allows `chroot` only with that capability. With that one rule changed (`docker/browser/seccomp-chromium.json`) it runs fully sandboxed with `cap_drop: ALL`, `no-new-privileges` and a read-only root, and the whole live suite passes (`CHROMIUM_SANDBOX=1 make test-browser`). Still open: whether Contabo's Ubuntu 24.04 host lets a container create user namespaces. To try there: `BROWSER_CHROMIUM_SANDBOX=true` and `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json` in `.env`; if the browser does not become healthy, set both back. The default stays `false` until Roland decides (§6, decision 3).
 9. **UI:** Browser tab showing status, current URL/title and a thumbnail. Vanilla JS, `textContent` only; keep function names used by `tests/frontend/chat.test.cjs`.
-   The Browser tab and core status/thumbnail routes exist; browser service and live smoke remain pending.
+   The Browser tab and core status/thumbnail routes exist (#40); the live smoke remains pending.
 
 #### Contract between core and browserd (fixed by part 1; part 2 must implement it)
 
@@ -214,6 +218,12 @@ Core calls exactly the §8.4 routes. Part 1 relies on these details and small ad
 9. **`browser_upload`** copies the approved workspace file to `browser/uploads/<name>` (≤ 25 MB) and sends `path: "<name>"` and `sha256` of the bytes. browserd must hash the staged file and answer `{"error": "file_changed"}` if it differs, because the sandbox can write to that folder too.
 10. **Second look before approved actions.** browserd's fingerprint covers eight fields (spec §6.5), but the classifier also reads `value`, `aria_label`, `title_attr`, `form_submit_name`, `submits`, `disabled`, `sensitive`, `aria_expanded`, `aria_haspopup`, `contenteditable`, `inside_dialog_title` and the page address. Core pins a SHA-256 of all of these together with the **full page address** (`_pin.seen`) and calls `/v1/describe` again just before every approved action; any difference fails the action. The full address matters in one-page apps, where the same button can mean something else after a route change. For a key press with nothing focused, core binds the page address from `/v1/status` instead. So `/v1/describe` must give the same answer for an unchanged element every time (stable key set, stable values).
 
+**What part 2 added to the contract (#42).** All optional for core, and core treats every one as untrusted data:
+
+11. **More error codes:** `load_failed` (502), `not_clickable`, `no_such_option`, `unavailable` (503, the browser is starting or restarting), `too_large`, `file_changed` (409), `bad_request` (400), `failed` (500). Core has words for each in `agent/browser_client.py` (`ERROR_TEXT`); a test fails if `browserd` gains a code without them.
+12. **Answers may also carry** `blocked_submission.new_tab: true` (the form would have posted into a new tab, which is never sent; core does not offer an approval for it), `blocked_background: [{method, url}]` (a form the page tried to submit by itself, outside any action), `popup_closed: true` (the page opened a tab over the limit), and on `/v1/navigate` `download: true` (the address was a file) or `blocked: "leave_dialog"` (the page asked "leave without saving?", which is always answered no). Snapshot elements may carry `checked` (tick boxes, radio buttons) and `options` / `more_options` (drop-down lists).
+13. **`/v1/user-mode` is implemented**, not a stub: on hand-back `browserd` takes the focus off the focused element and empties the X selections. The screen for it is M7.
+
 #### Where part 1 differs from the spec (for the reviewer)
 
 Each one is stricter than, or an addition to, `docs/v2-spec.md`; none loosens a rule.
@@ -227,6 +237,25 @@ Each one is stricter than, or an addition to, `docs/v2-spec.md`; none loosens a 
 7. **Approval cards** name the element by what it is ("button", "textbox", "link") and replace quote marks in the page's own text, so a page cannot imitate the card's wording.
 8. **No sign-in tool yet** (`request_signin` is M7): a page with a sign-in form tells the agent to stop and tell Roland.
 9. **Approvals are bound to more than the fingerprint.** Core re-reads the element before an approved action and compares every fact the classifier used and the full page address (contract item 10). An approved upload is bound to the file's SHA-256, so a file rewritten while the card waits is not sent. `browser_type` is GATED `form_submit` for a field whose typing already tried to submit a form. "The same element again" is recognised by what the element is (page, tag, role, name, type, link and form facts), not by its fingerprint, because the fingerprint changes as soon as text is typed. These came from the automated reviews of #39.
+
+#### Where part 2 differs from the spec (for the reviewer)
+
+Stricter or an addition unless marked **cannot be done as written**; those need Roland to know.
+
+1. **POST guard is always on in agent mode**, not only while a `safe` action runs. A form that a page submits by itself, or a moment after a harmless click has returned, is stopped too and reported with the next answer. It opens only for the action Roland approved (until 2 s without requests, 10 s at most) and in user mode. **It opens for that action's tab only** (and a tab that tab opens during the action): a page in another tab cannot get its own form through while an approval is carried out. One consequence: a form that posts **into a new tab** (`target=_blank`) is never sent by the agent, approved or not, because Playwright cannot say which tab such a request came from until after it has been let through. The agent is told to hand that step to Roland.
+2. **Private addresses are also refused inside Chromium** (`--host-resolver-rules`), because Playwright does not pass redirects or WebSockets to the request guard. The guard also refuses the forms a browser reads as an IPv4 address that don't look like one (`127.1`, `2130706433`, `0x7f.0.0.1`), `.local`, `.lan`, `.home.arpa`, single-label names and addresses with a user name.
+3. **The fingerprint is computed by `browserd` in Python**, from facts it has checked and cut, and it covers every fact in contract item 10. `snapshot.js` runs inside the page, so its answer is treated like any other page data.
+4. **Secret fields:** by default the spec's substring rule **and** a whole-word rule that also reads the label and placeholder; a field is secret if either says so. `BROWSER_SENSITIVE_MATCH=word` uses the word rule alone (§6, decision 8). The rule applies to fields, not to links or buttons whose id happens to contain "pin".
+5. **Blocked requests are aborted the way the Stop button does it**, so the tab stays on the page it was on and the agent can ask Roland properly. Aborting with "blocked by client" replaced the page with an error page.
+6. **Extra Chromium settings:** service workers are blocked (they would bypass the guards), the page cache has a size limit, the profile's preferences are also written before every start, and managed policy additionally blocks extensions, leak detection, search suggestions and DNS-over-HTTPS.
+7. **`DeveloperToolsAvailability=2`: cannot be done as written.** That policy also switches off the pipe Playwright drives Chromium through; the browser never starts. It is left out. The agent has no key or address that opens developer tools.
+8. **Policy folder: differs from the spec.** Playwright's Chromium is "Chrome for Testing" and reads `/etc/opt/chrome_for_testing/policies/managed/`. The file is copied to both that folder and `/etc/chromium/policies/managed/`. Checked by hand: with the file only in the spec's folder nothing is applied.
+9. **Not built from the spec's element list:** `rect` (core has no use for coordinates) and lists/tables in the outline (headings, page regions, frames and the page text are there).
+10. **Not in M6:** the browser container does not join the `vnc` network and nothing starts x11vnc (the package is in the image). Both are M7.
+11. **Compose:** the service sits behind the `browser` profile, so an ordinary deploy does not start it. Its seccomp profile comes from `BROWSER_SECCOMP` (default: Docker's own).
+12. **The `tester` service has its own image now** (`docker/tester/Dockerfile`, test tools installed at build time). As it was written it installed pytest when the container started, with a read-only root and only internal networks; in the dev container that ended in "pytest: command not found", so `make test-sandbox` did not get as far as the tests there.
+13. **Downloads** arrive in `browser/.incoming` and are moved to `browser/downloads` under a plain, unique file name; a name from a website is never used as a path. A download that grows past the limit (`BROWSER_MAX_DOWNLOAD_MB`, 200 by default) is stopped while it arrives, not after.
+14. **Tabs:** the last tab is replaced by a blank one before it closes, because Chromium quits with its last tab. A tab a page opens over the limit is closed and reported.
 
 #### Security requirements
 
@@ -243,9 +272,10 @@ Automated (must pass in CI or `make test-integration`):
 - [x] **A6.1** `tests/test_policy_browser.py`: ≥ 60 table-driven descriptors covering every §9.4.1 rule, both languages, default-deny, submit default type, disabled elements, precedence. *(Part 1: 99 descriptors, plus address, key and typing tables.)*
 - [x] **A6.2** `tests/test_browser_tools.py` (fake browserd via `httpx.MockTransport`): password typing forbidden; Enter gated except search; non-http forbidden; fingerprint mismatch fails; blocked submission reported; user-mode 423 mapped; snapshot output wrapped and taints. *(Part 1.)*
 - [x] `test_screenshot_not_sent_to_text_only_model`. *(Part 1, in `tests/test_browser_tools.py`.)*
-- [ ] **A6.3** `tests/integration/test_browser_live.py` against the fixture site: place-order needs approval (0 POSTs before, exactly 1 after); injection page cannot trigger delete; SPA div POST blocked in safe mode; password value never in snapshot; profile persists across browser restart; downloads land in workspace; no cookie/eval endpoints; private-IP navigation blocked.
-- [ ] **A6.4** isolation script: from `browser`, 10.77.4.10:8080 and 10.77.1.10:8080 unreachable.
-- [ ] Existing suites still green: `make lint`, `make test`, `make test-integration`.
+- [x] **A6.3** `tests/integration/test_browser_live.py` against the fixture site: place-order needs approval (0 POSTs before, exactly 1 after); injection page cannot trigger delete; SPA div POST blocked in safe mode; password value never in snapshot; profile persists across browser restart; downloads land in workspace; no cookie/eval endpoints; private-IP navigation blocked. *(Part 2: 32 tests, run by `make test-browser` in the compose test stack. **Not in CI yet:** adding a CI job means editing `.github/workflows/ci.yml`, which the credentials used so far cannot push. Whoever has `workflow` scope adds a job that runs `make secrets` and `make test-browser` on a disposable runner.)*
+- [x] Unit tests for the service itself: `tests/test_browserd_guards.py`, `tests/test_browserd_server.py` (exact route table, auth, limits, user mode, no cookie/eval surface) and `tests/frontend/snapshot.test.cjs` (the page script; run by `pytest` and `make test`).
+- [ ] **A6.4** isolation script: from `browser`, 10.77.4.10:8080 and 10.77.1.10:8080 unreachable. *(The script is in, #41, and passed in the test stack without a firewall. Open until it passes on Contabo with `make verify`.)*
+- [x] Existing suites still green: `make lint`, `make test`. *(`make test-integration` only runs in GitHub CI.)*
 
 Code Shipper (Grok) smoke on Contabo (after deploy with `BROWSER_ENABLED=true`):
 
@@ -262,11 +292,14 @@ Code Shipper (Grok) smoke on Contabo (after deploy with `BROWSER_ENABLED=true`):
 
 #### Contabo deploy notes
 
+0. **Even with the browser left off,** the first deploy of a version that contains #42 needs `secrets/browser_api_token`, because core now mounts it. Run `make secrets` first (it creates what is missing and leaves the rest alone). `make preflight` fails without the file, so the deploy stops before anything is recreated.
 1. `make secrets` to create `secrets/browser_api_token` (uid 1000, 0400). Never print it.
 2. `APPLY=1 make firewall-install` to apply the browser rules before starting the service.
-3. Build the browser image when the model is idle (builds need ~1–1.5 GB temporarily).
-4. Keep `MODEL_CTX=3072` and `MODEL_MEM_LIMIT=3840m`. If headroom fails, stop and ask Roland (§6). Do not lower other services' limits silently.
-5. Take a Contabo snapshot before the first browser deploy.
+3. To switch the browser on, put both `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true` in `.env`, then deploy. To switch it off again, remove both and deploy; `docker compose --profile browser stop browser` stops the container at once. The `browser-profile` volume keeps Roland's sign-ins; never delete it without him.
+4. Build the browser image when the model is idle (builds need ~1–1.5 GB of memory temporarily). The image takes about 3.8 GB of disk: Playwright's base image is 3.5 GB, and removing the browsers that are not used does not give that space back. Check free disk first (`df -h`).
+5. Keep `MODEL_CTX=3072` and `MODEL_MEM_LIMIT=3840m`. If headroom fails, stop and ask Roland (§6). Do not lower other services' limits silently.
+6. Take a Contabo snapshot before the first browser deploy.
+7. Optional, after the smoke passes: try Chromium's own sandbox (deliverable 8) and report what the host does.
 
 ---
 
@@ -450,12 +483,12 @@ Restore drill on a **copy** only (`make restore-test FILE=…`), never over live
    - (c) upgrade the VPS (e.g. ~12 GB) before M6.
    Until Roland decides, keep 3072/3840m on the host and do not change the limit.
 2. **Browser headroom.** If the M6 pre-measurement shows < ~800 MiB available with the browser cap added, Roland chooses between a smaller browser cap, a lower `MODEL_CTX`, or a larger VPS.
-3. **Chromium sandbox** (`BROWSER_CHROMIUM_SANDBOX`, spec Q4): accept `false` with the hardened container as boundary, or require `true` if the M6 experiment succeeds.
+3. **Chromium sandbox** (`BROWSER_CHROMIUM_SANDBOX`, spec Q4): accept `false` with the hardened container as boundary, or require `true` if the M6 experiment succeeds. *The experiment succeeded in a dev container (M6 deliverable 8) and is untested on Contabo. Recommended: try it there during the M6 smoke and keep it on if the browser stays healthy; it is the difference between a browser exploit reaching Roland's signed-in sessions or not (`docs/SECURITY.md`).*
 4. **GPU provider and budget** for A8.10, or stay on manual mode.
 5. **Training data in backups** (include or exclude).
 6. **Real domain** instead of the sslip.io fallback (DNS change needs Roland).
-7. **Background POSTs from "safe" clicks (found in M6 part 1).** The spec's POST-navigation guard only stops a click that *navigates* with a POST. A page script that sends a `fetch`/XHR POST when a plain link is clicked is not stopped, and §9.4.1 rule 4 lets plain links through without approval. Options for part 2: (a) keep the spec as is and accept it; (b) in `safe` mode, browserd also blocks non-GET `fetch`/XHR for a few seconds after an action, which closes the gap but breaks pages that load content with POST; (c) gate every link that has a script handler, which means many more approvals. Until Roland decides, part 2 builds (a) and leaves a switch for (b).
-8. **Sensitive-field word list (spec §6.5).** The spec matches `pass`, `pin`, `otp`… as plain substrings of a field's name, so "ship**pin**g address" and "**pass**enger name" count as secret fields and can never be typed into. Options: match whole words instead (recommended), or keep substrings and accept that the agent cannot fill such fields. Decide before `snapshot.js` is written.
+7. **Background POSTs from "safe" clicks (found in M6 part 1).** The spec's POST-navigation guard only stops a click that *navigates* with a POST. A page script that sends a `fetch`/XHR POST when a plain link is clicked is not stopped, and §9.4.1 rule 4 lets plain links through without approval. Options for part 2: (a) keep the spec as is and accept it; (b) in `safe` mode, browserd also blocks non-GET `fetch`/XHR for a few seconds after an action, which closes the gap but breaks pages that load content with POST; (c) gate every link that has a script handler, which means many more approvals. Until Roland decides, part 2 builds (a) and leaves a switch for (b). *Built in #42: (a) is the default, `BROWSER_BLOCK_BACKGROUND_POSTS=true` is (b). Part 2 also stops forms a page submits by itself at any time, which the spec did not ask for.*
+8. **Sensitive-field word list (spec §6.5).** The spec matches `pass`, `pin`, `otp`… as plain substrings of a field's name, so "ship**pin**g address" and "**pass**enger name" count as secret fields and can never be typed into. Options: match whole words instead (recommended), or keep substrings and accept that the agent cannot fill such fields. *Not decided when part 2 was written, so #42 built both. The default is the spec's substring rule plus a whole-word rule that also reads labels and placeholders. `BROWSER_SENSITIVE_MATCH=word` in `.env` switches to whole words alone. Nobody but Roland sets that.*
 9. **Everyday links that need approval.** By the §9.4.1 keyword rule, links such as "Next", "Reviews", "Share", "Sign up" or any address containing `/post/` ask for approval, some with the two-tap confirm. That is the spec working as written (Q3). If it proves too noisy in the Contabo smoke, Roland may drop words from the list; nobody else may.
 
 ## 7. Dev setup
@@ -480,6 +513,7 @@ Docker and integration:
 make build && make compose-config && make preflight-edge
 make test-integration      # edge/model fixtures (Docker)
 make test-sandbox          # live sandbox stack (Docker + secrets/sandbox_api_token)
+make test-browser          # live browser stack against the fixture site (Docker + secrets/; not on the server)
 make model-fetch MODEL=qwen3-4b-q4km
 make model-install FILE=/abs/path.gguf ID=qwen3-4b-q4km
 ```
@@ -510,9 +544,10 @@ CLI: `python -m agent` (serve), `chat`, `migrate --check`, `audit-verify`, `back
 | Models | `agent/models/` (llamacpp, ollama, parse, grammar `action.gbnf`, `endpoint_guard.py`, `modelreg.py`), `docker/model/`, `deploy/model_store.py`, `deploy/models.lock` | `agent/persona.py`, `agent/training/`, `agent/eval/`, `training/`, `trainerd/`, `docker/trainer/` |
 | Persistence | `agent/memory.py`, `agent/migrations/` (m0001, m0002), `agent/audit.py`, `agent/backup.py` | `m0003` |
 | Web/UI | `agent/web/app.py`, `auth.py`, `middleware.py`, `agent/web/static/` | `screen.html`, `screen.js`, Browser/Settings tabs |
-| Edge | `docker/caddy/Caddyfile` (screen routes present), `docker-compose.yml` (reserved networks) | `docker/browser/`, `browserd/`, `docker/novnc/` |
+| Browser service | `browserd/` (`launcher.py`, `session.py`, `server.py`, `guards.py`, `snapshot.js`, `settings.py`), `docker/browser/` (image, Chromium policy, seccomp profile), `requirements-browser.{in,lock}` | x11vnc child in `browserd/launcher.py` (`extra_children`), sign-in hand-over |
+| Edge | `docker/caddy/Caddyfile` (screen routes present), `docker-compose.yml` (reserved networks) | `docker/novnc/` |
 | Deploy | `deploy/*.sh`, `deploy/preflight_edge.py`, `Makefile` | browser/vnc/trainer secrets and firewall rules |
-| Tests | `tests/`, `tests/integration/` (`edge.sh`, `isolation.sh`, `test_sandbox_live.py`), `tests/frontend/chat.test.cjs`, `docker-compose.test.yml` | `tests/fixtures/site/`, `fixture-web` |
+| Tests | `tests/`, `tests/integration/` (`edge.sh`, `isolation.sh`, `browser.sh`, `test_sandbox_live.py`, `test_browser_live.py`), `tests/frontend/` (`chat.test.cjs`, `snapshot.test.cjs`), `tests/fixtures/site/`, `docker-compose.test.yml` (`fixture-web`, `browser`, `tester`), `docker/tester/` | — |
 
 `docs/v2-spec.md` is the target design; `docs/AGENT.md` is the status. Where a spec path differs from the tree, follow the tree's conventions and note it in the PR.
 

@@ -248,6 +248,8 @@ class Config:
                 raise SystemExit("Set ALLOWED_HOSTS or AGENT_HOST in production")
             if self.allow_shell and self.shell_backend == "local":
                 raise SystemExit("ALLOW_SHELL with SHELL_BACKEND=local is refused in production")
+            if self.browser_allow_private_hosts:
+                raise SystemExit("BROWSER_ALLOW_PRIVATE_HOSTS is for tests only; leave it empty in production")
         if self.shell_backend == "sandbox" and not self.sandbox_api_token:
             raise SystemExit("SANDBOX_API_TOKEN is required for SHELL_BACKEND=sandbox")
         if self.browser_enabled and not self.browser_api_token:

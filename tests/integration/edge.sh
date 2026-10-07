@@ -8,7 +8,7 @@ if [[ ${GITHUB_ACTIONS:-} != true ]]; then
 fi
 EDGE_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd -- "$EDGE_ROOT"
-if [[ -e .env || -L .env || -e secrets/agent_password_hash || -L secrets/agent_password_hash || -e secrets/model_server_token || -L secrets/model_server_token || -e secrets/sandbox_api_token || -L secrets/sandbox_api_token || -e .ci-workspace ]]; then
+if [[ -e .env || -L .env || -e secrets/agent_password_hash || -L secrets/agent_password_hash || -e secrets/model_server_token || -L secrets/model_server_token || -e secrets/sandbox_api_token || -L secrets/sandbox_api_token || -e secrets/browser_api_token || -L secrets/browser_api_token || -e .ci-workspace ]]; then
     echo "Refusing to overwrite existing config, secrets or CI workspace." >&2
     exit 2
 fi
@@ -25,7 +25,7 @@ edge_cleanup() {
 }
 trap edge_cleanup EXIT
 PYTHONPATH="$EDGE_ROOT" python tests/integration/edge_fixture.py
-sudo chown 1000:1000 secrets secrets/agent_password_hash secrets/model_server_token secrets/sandbox_api_token .ci-workspace/workspace
+sudo chown 1000:1000 secrets secrets/agent_password_hash secrets/model_server_token secrets/sandbox_api_token secrets/browser_api_token .ci-workspace/workspace
 sudo chmod 0700 secrets .ci-workspace/workspace
 sudo python3 deploy/preflight_edge.py
 "${edge_compose[@]}" config -q

@@ -14,12 +14,13 @@ import json
 import secrets
 import struct
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from . import policy_browser
-from .browser_client import BrowserClient, BrowserError, BrowserLocked, ElementChanged
+from .browser_client import ERROR_TEXT, BrowserClient, BrowserError, BrowserLocked, ElementChanged
 from .gate import PIN_KEY, Decision, Risk
 from .tools_files import workspace_from_ctx
 from .workspace import WorkspaceError
@@ -59,7 +60,14 @@ def _browser(ctx) -> BrowserClient | None:
 
 
 def _one_line(value: object, limit: int = 200) -> str:
-    text = " ".join(str(value if value is not None else "").split())
+    """Page text as one plain line. Invisible and direction-changing characters are taken out:
+    a page could use them to make an approval card read differently from what it says."""
+    text = str(value if value is not None else "")[: limit * 8]
+    if not text.isascii():
+        text = "".join(
+            char for char in text if unicodedata.category(char) not in {"Cf", "Cs", "Co", "Cn"}
+        )
+    text = " ".join("".join(char if char.isprintable() else " " for char in text).split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -467,6 +475,14 @@ def _action_result(ctx, tool: str, verb: str, answer: dict, target: object = "")
         if isinstance(blocked, dict):
             method = _one_line(blocked.get("method"), 10).upper() or "POST"
             where = _where(blocked.get("url"), path=True)
+        if isinstance(blocked, dict) and blocked.get("new_tab") is True:
+            # browserd can't tell which tab such a request belongs to, so it never sends
+            # one, approved or not. Asking Roland again would not help.
+            _audit(ctx, tool, ok=False, blocked_submission=f"{method} {where}", new_tab=True)
+            return (
+                f"Not done: that form sends its data into a new tab ({method} {where}), and the "
+                "browser can't do that for you. Tell Roland he has to do this step himself."
+            )
         run = getattr(ctx, "run", None)
         if target and run is not None and hasattr(run, "blocked_submissions"):
             run.blocked_submissions.add(target)
@@ -485,14 +501,37 @@ def _action_result(ctx, tool: str, verb: str, answer: dict, target: object = "")
         return "Error: the browser couldn't do that. Take a new snapshot and look again."
     lines = [f"{verb}."]
     lines.append(("Now at " if answer.get("navigated") else "The page is ") + _page_line(answer))
-    dialogs = answer.get("dialogs")
-    if isinstance(dialogs, list):
-        for dialog in dialogs[:3]:
-            if isinstance(dialog, dict):
-                kind = _one_line(dialog.get("type"), 20) or "dialog"
-                lines.append(f"A {kind} box was dismissed: {_one_line(dialog.get('message'), 160)}")
+    lines += _notes(answer)
     _audit(ctx, tool, ok=True, url=_one_line(answer.get("url"), 300), navigated=bool(answer.get("navigated")))
     return "\n".join(lines)
+
+
+def _notes(answer: dict) -> list[str]:
+    """Things browserd did on its own since the last call, in words for the model."""
+    lines = []
+    dialogs = answer.get("dialogs")
+    for dialog in [item for item in dialogs if isinstance(item, dict)][:3] if isinstance(dialogs, list) else []:
+        said = _one_line(dialog.get("message"), 160)
+        kind = dialog.get("type")
+        if kind == "confirm":
+            lines.append(f"The page asked a yes/no question, and it was answered no: {said}")
+        elif kind == "prompt":
+            lines.append(f"The page asked for text in a box, and the box was cancelled: {said}")
+        elif kind == "beforeunload":
+            lines.append("The page asked whether to leave it, and it was answered no.")
+        else:
+            lines.append(f"The page showed a message box, and it was closed: {said}")
+    background = answer.get("blocked_background")
+    if isinstance(background, list) and background and isinstance(background[0], dict):
+        method = _one_line(background[0].get("method"), 10).upper() or "POST"
+        where = _where(background[0].get("url"), path=True)
+        lines.append(f"The page tried to send a form by itself ({method} {where}). That was stopped.")
+    if answer.get("popup_closed") is True:
+        lines.append(
+            "The page tried to open another tab, but too many are open, so it was closed. "
+            "Close a tab with browser_close_tab if you need the new one."
+        )
+    return lines
 
 
 def _label(element: dict) -> str:
@@ -536,7 +575,9 @@ def element_line(element: dict, page_url: str = "") -> str:
     level = element.get("level")
     if isinstance(level, int) and 1 <= level <= 6:
         label += f"({level})"
-    line = f'{indent}{head}{label} "{_one_line(element.get("name"), 80)}"'
+    name = _one_line(element.get("name"), 80)
+    # Headings and page regions have no ref; an unnamed region is just its kind ("main").
+    line = f'{indent}{head}{label} "{name}"' if head or name else f"{indent}{label}"
     href = element.get("href")
     if isinstance(href, str) and href and _label(element) == "link":
         line += f" -> {_short_href(href, page_url)}"
@@ -544,6 +585,14 @@ def element_line(element: dict, page_url: str = "") -> str:
         line += " (sensitive, value hidden)"
     elif isinstance(element.get("value"), str) and element["value"]:
         line += f' value="{_one_line(element["value"], 60)}"'
+    if element.get("checked") is True:
+        line += " (checked)"
+    options = element.get("options")
+    if isinstance(options, list) and options:
+        shown = " | ".join(_one_line(option, 30) for option in options[:12] if isinstance(option, str))
+        extra = element.get("more_options")
+        more = max(0, len(options) - 12) + (extra if isinstance(extra, int) and extra > 0 else 0)
+        line += f" options: {_one_line(shown, 240)}" + (f" (+{more} more)" if more > 0 else "")
     if policy_browser.is_submit_control(element):
         form = policy_browser.form_line(element)
         line += f" (submits form {form})" if form else " (submits)"
@@ -563,6 +612,7 @@ def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
             "This page has a sign-in form. Never type a password or code; tell Roland he has "
             "to sign in himself."
         )
+    head += _notes(answer)
     elements = answer.get("elements")
     lines = [element_line(item, page_url) for item in elements if isinstance(item, dict)] \
         if isinstance(elements, list) else []
@@ -642,12 +692,25 @@ async def browser_open(ctx, args: dict) -> str:
         return _fail(error)
     if answer.get("blocked"):
         _audit(ctx, "browser_open", ok=False, url=_one_line(url, 300), blocked=_one_line(answer["blocked"], 40))
+        if answer["blocked"] == "leave_dialog":
+            return (
+                "Error: the page in this tab asked whether to leave it (it may hold unsaved "
+                "changes), and that is never answered with yes. To leave it anyway, close the "
+                "tab with browser_close_tab, or open the address with new_tab=true."
+            )
         return "Error: the browser refused that address (private, local or not a web page)."
+    if answer.get("download") is True:
+        _audit(ctx, "browser_open", ok=True, url=_one_line(url, 300), download=True)
+        return (
+            "That address is a file, not a page, so the browser is downloading it. "
+            "Use browser_downloads to see it; the tab still shows " + _page_line(answer)
+        )
     _audit(ctx, "browser_open", ok=True, url=_one_line(answer.get("url") or url, 300))
     status = answer.get("status")
     lines = [f"Opened {_page_line(answer)}"]
-    if isinstance(status, int):
+    if isinstance(status, int) and status:
         lines.append(f"HTTP {status}")
+    lines += _notes(answer)
     lines.append("Use browser_snapshot to read the page.")
     return "\n".join(lines)
 
@@ -846,6 +909,10 @@ async def browser_tabs(ctx, args: dict) -> str:
         answer = await client.status()
     except BrowserError as error:
         return _fail(error)
+    if answer.get("mode") != "agent":
+        # The status route stays open while Roland has the browser (his own Browser tab uses
+        # it). The model is told nothing about what he is looking at: not even an address.
+        return f"Error: {ERROR_TEXT['user_mode']}"
     tabs = answer.get("tabs")
     lines = []
     for tab in tabs[:MAX_LISTED] if isinstance(tabs, list) else []:
