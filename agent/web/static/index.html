@@ -28,6 +28,7 @@
         <button id="tab-chat" class="tab active" role="tab">Chat</button>
         <button id="tab-approvals" class="tab" role="tab">Approvals <span id="approval-badge" class="tab-badge" hidden>0</span></button>
         <button id="tab-files" class="tab" role="tab">Files</button>
+        <button id="tab-browser" class="tab" role="tab">Browser</button>
         <button id="tab-jobs" class="tab" role="tab">Jobs</button>
         <button id="tab-audit" class="tab" role="tab">Audit</button>
       </div>
@@ -99,6 +100,30 @@
           <h2>Trash</h2>
           <div id="trash-list"></div>
         </div>
+      </div>
+    </section>
+    <section id="browser-view" class="view jobs" hidden>
+      <div class="jobs-inner browser-inner">
+        <h2>Browser</h2>
+        <p id="browser-status" class="hint" role="status" aria-live="polite">Loading browser status…</p>
+        <div id="browser-details" hidden>
+          <dl class="browser-info">
+            <dt>Mode</dt><dd id="browser-mode"></dd>
+            <dt>Title</dt><dd id="browser-title"></dd>
+            <dt>Address</dt><dd id="browser-address"></dd>
+          </dl>
+          <h3>Tabs</h3>
+          <ul id="browser-tabs" class="browser-tabs" aria-label="Browser tabs"></ul>
+          <div class="browser-preview">
+            <div class="browser-preview-head">
+              <h3>Thumbnail</h3>
+              <button id="browser-refresh" class="ghost" type="button" disabled>Refresh</button>
+            </div>
+            <p id="browser-shot-note" class="hint">Choose Refresh to get the current thumbnail.</p>
+            <img id="browser-thumbnail" class="browser-thumbnail" alt="Current browser thumbnail" hidden>
+          </div>
+        </div>
+        <p id="browser-error" class="error" role="alert" hidden></p>
       </div>
     </section>
     <section id="audit-view" class="view jobs" hidden>

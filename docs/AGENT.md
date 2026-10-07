@@ -53,6 +53,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | M6 part 1 (core side, **dormant**) | Click classifier, `browserd` client, 16 browser tools with gate policies, element fingerprint pinned to approvals, screenshot on approval cards; A6.1 and A6.2 green. Not usable: no `browserd` yet | #39 |
 
 - M6.4 fixture site exists at `tests/fixtures/site/server.py` with the `fixture-web` test service (#38); browser integration remains pending.
+- M6.7 Browser tab and authenticated status/thumbnail routes exist; browser service and Contabo smoke remain pending.
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with `caddy`, `core`, `model`, `sandbox` healthy.
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).
 

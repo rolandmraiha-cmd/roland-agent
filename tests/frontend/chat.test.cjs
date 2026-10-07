@@ -6,7 +6,8 @@ const vm = require('node:vm');
 
 // A small DOM fixture runs the actual shipped script without packages or network access.
 class Element {
-  constructor() {
+  constructor(tag = 'div') {
+    this.tagName = tag.toUpperCase();
     this.children = []; this.textContent = ''; this.value = ''; this.disabled = false;
     this.style = {}; this.listeners = {}; this.scrollHeight = 100; this.scrollTop = 0;
     this.classes = new Set();
@@ -19,6 +20,8 @@ class Element {
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   querySelector() { return this.children[0]; }
   setAttribute() {}
+  removeAttribute(name) { delete this[name]; }
+  set innerHTML(_) { throw new Error('Use textContent for dynamic text'); }
   addEventListener(name, fn) { this.listeners[name] = fn; }
   focus() { this.focused = true; }
   remove() { this.parent.children = this.parent.children.filter((node) => node !== this); }
@@ -32,9 +35,15 @@ function fixture() {
     return elements.get(id);
   };
   const timers = new Map();
+  const pageEvents = {}, createdURLs = [], revokedURLs = [];
   let nextTimer = 1;
   const context = vm.createContext({
-    document: { getElementById: get, createElement: () => new Element() },
+    document: { getElementById: get, createElement: (tag) => new Element(tag) },
+    window: { addEventListener: (name, fn) => { pageEvents[name] = fn; } },
+    URL: {
+      createObjectURL: (blob) => { const url = `blob:fixture-${createdURLs.length}`; createdURLs.push({ url, blob }); return url; },
+      revokeObjectURL: (url) => { revokedURLs.push(url); },
+    },
     TextDecoder, matchMedia: () => ({ matches: false }),
     location: {}, alert() {}, confirm: () => true,
     Date,
@@ -47,7 +56,7 @@ function fixture() {
   const source = fs.readFileSync(path.join(__dirname, '../../agent/web/static/app.js'), 'utf8');
   vm.runInContext(source.split('// ---------- start ----------')[0], context);
   vm.runInContext('loadChats = async () => []; loadStatus = async () => {};', context);
-  return { context, get, run: (code) => vm.runInContext(code, context) };
+  return { context, get, pageEvents, createdURLs, revokedURLs, run: (code) => vm.runInContext(code, context) };
 }
 function deferred() {
   let resolve, reject;
@@ -55,6 +64,159 @@ function deferred() {
   return { promise, resolve, reject };
 }
 const finishedStream = { body: { getReader: () => ({ read: async () => ({ done: true }) }) } };
+
+function browserFixture() {
+  const f = fixture();
+  f.state = {
+    enabled: true, reachable: true, mode: 'agent', title: 'Fixture blog',
+    url: 'https://fixture.example/blog',
+    tabs: [{ id: 't1', title: 'Fixture blog', url: 'https://fixture.example/blog', active: true }],
+  };
+  f.calls = [];
+  f.context.api = async (url, options = {}) => {
+    f.calls.push({ url, options });
+    if (url === '/api/browser/status') return { json: async () => f.state };
+    if (url === '/api/browser/screenshot') return { blob: async () => ({ type: 'image/png' }) };
+    if (url === '/logout') return {};
+    throw new Error(`Unexpected browser API call: ${url}`);
+  };
+  f.run('activeView = "browser"');
+  return f;
+}
+
+test('Browser tab follows Files and renders titles and addresses as text, never links', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '../../agent/web/static/index.html'), 'utf8');
+  assert.match(html, /id="tab-files"[^]*?id="tab-browser"/);
+  assert.match(html, /<dd id="browser-address"><\/dd>/);
+  const f = browserFixture();
+  const title = '<img src=x onerror=alert(1)>', url = 'javascript:alert("fixture")';
+  f.state.title = title;
+  f.state.url = url;
+  f.state.tabs = [{ id: 't1', title, url, active: true }];
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-status').textContent, 'Browser is on.');
+  assert.equal(f.get('browser-mode').textContent, 'Agent mode');
+  assert.equal(f.get('browser-title').textContent, title);
+  assert.equal(f.get('browser-address').textContent, url);
+  const row = f.get('browser-tabs').children[0];
+  assert.equal(row.children[1].textContent, title);
+  assert.equal(row.children[2].textContent, url);
+  assert.equal(row.children.some((node) => node.tagName === 'A'), false);
+  assert.equal(f.get('browser-address').href, undefined);
+  assert.equal(f.get('browser-refresh').disabled, false);
+});
+
+test('Browser off shows one sentence and hides browser details', async () => {
+  const f = browserFixture();
+  f.state = { enabled: false };
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-status').textContent, 'Browser is off.');
+  assert.equal(f.get('browser-details').hidden, true);
+  assert.equal(f.get('browser-refresh').disabled, true);
+  await f.run('refreshBrowserThumbnail()');
+  assert.equal(f.calls.length, 1);
+});
+
+test('thumbnail uses POST and blob URLs, revoking replacements and on tab exit', async () => {
+  const f = browserFixture();
+  await f.run('loadBrowserStatus()');
+  await f.get('browser-refresh').onclick();
+  assert.equal(f.calls[1].url, '/api/browser/screenshot');
+  assert.equal(f.calls[1].options.method, 'POST');
+  assert.equal(f.get('browser-thumbnail').src, 'blob:fixture-0');
+  assert.equal(f.get('browser-thumbnail').hidden, false);
+  await f.run('refreshBrowserThumbnail()');
+  assert.deepEqual(f.revokedURLs, ['blob:fixture-0']);
+  // A poll with the same status keeps the current image.
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-thumbnail').src, 'blob:fixture-1');
+  f.run('showView("chat")');
+  assert.deepEqual(f.revokedURLs, ['blob:fixture-0', 'blob:fixture-1']);
+  assert.equal(f.get('browser-thumbnail').src, undefined);
+  assert.equal(f.get('browser-thumbnail').hidden, true);
+});
+
+test('user mode and unavailable or unknown status disable refresh and clear thumbnails', async () => {
+  const f = browserFixture();
+  await f.run('loadBrowserStatus();');
+  await f.run('refreshBrowserThumbnail()');
+  f.state = { ...f.state, mode: 'user' };
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-mode').textContent, 'User mode');
+  assert.equal(f.get('browser-refresh').disabled, true);
+  assert.equal(f.get('browser-thumbnail').hidden, true);
+  assert.deepEqual(f.revokedURLs, ['blob:fixture-0']);
+  f.state = { ...f.state, mode: null };
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-refresh').disabled, true);
+  f.state = { enabled: true, reachable: false };
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-status').textContent, 'Browser is on but unavailable.');
+  assert.equal(f.get('browser-details').hidden, true);
+  assert.equal(f.get('browser-address').textContent, '');
+});
+
+test('late thumbnail cannot restore an image after leaving the Browser tab', async () => {
+  const f = browserFixture(), shot = deferred();
+  await f.run('loadBrowserStatus()');
+  f.context.api = () => shot.promise;
+  const refreshing = f.run('refreshBrowserThumbnail()');
+  assert.equal(f.get('browser-refresh').disabled, true);
+  f.run('showView("chat")');
+  shot.resolve({ blob: async () => ({ type: 'image/png' }) });
+  await refreshing;
+  assert.equal(f.createdURLs.length, 0);
+  assert.equal(f.get('browser-thumbnail').hidden, true);
+});
+
+test('thumbnail errors render as text and refuse non-PNG blobs', async () => {
+  const f = browserFixture();
+  await f.run('loadBrowserStatus()');
+  f.context.api = async () => ({ blob: async () => ({ type: 'image/svg+xml' }) });
+  await f.run('refreshBrowserThumbnail()');
+  assert.equal(f.createdURLs.length, 0);
+  assert.match(f.get('browser-error').textContent, /not a PNG/);
+  f.context.api = async () => { throw new Error('<script>fixture</script>'); };
+  await f.run('refreshBrowserThumbnail()');
+  assert.equal(f.get('browser-error').textContent, '<script>fixture</script>');
+  assert.equal(f.get('browser-refresh').disabled, false);
+});
+
+test('logout and page exit revoke thumbnails', async () => {
+  for (const exit of ['logout', 'pagehide']) {
+    const f = browserFixture();
+    await f.run('loadBrowserStatus()');
+    await f.run('refreshBrowserThumbnail()');
+    if (exit === 'logout') await f.get('logout').onclick();
+    else f.pageEvents.pagehide();
+    assert.deepEqual(f.revokedURLs, ['blob:fixture-0']);
+    assert.equal(f.get('browser-thumbnail').hidden, true);
+  }
+});
+
+test('a mode change during capture reloads status and pauses Refresh', async () => {
+  const f = browserFixture();
+  await f.run('loadBrowserStatus()');
+  f.state = { ...f.state, mode: 'user' };
+  f.context.api = async (url) => {
+    if (url === '/api/browser/screenshot') throw new Error('user_mode');
+    assert.equal(url, '/api/browser/status');
+    return { json: async () => f.state };
+  };
+  await f.run('refreshBrowserThumbnail()');
+  assert.equal(f.get('browser-mode').textContent, 'User mode');
+  assert.equal(f.get('browser-refresh').disabled, true);
+  assert.notEqual(f.get('browser-error').textContent, 'user_mode');
+});
+
+test('Browser polling starts on tab entry and stops on exit', async () => {
+  const f = browserFixture();
+  f.run('activeView = "chat"; showView("browser")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.notEqual(f.run('browserPollTimer'), null);
+  f.run('showView("chat")');
+  assert.equal(f.run('browserPollTimer'), null);
+});
 
 test('first send reserves composer before chat creation and blocks navigation/double send', async () => {
   const f = fixture(), creation = deferred();

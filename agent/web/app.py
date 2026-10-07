@@ -49,6 +49,8 @@ from .middleware import (
     _strip_port as _strip_port,
 )
 from .routes_approvals import build_router as build_approvals_router
+from .routes_browser import browser_status
+from .routes_browser import build_router as build_browser_router
 from .routes_files import build_router as build_files_router
 
 STATIC = Path(__file__).parent / "static"
@@ -138,6 +140,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     for _route in build_approvals_router(agent).routes:
         app.routes.append(_route)
     for _route in build_files_router(agent).routes:
+        app.routes.append(_route)
+    for _route in build_browser_router(agent).routes:
         app.routes.append(_route)
 
 
@@ -250,6 +254,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     @app.get("/api/status")
     async def status(request: Request):
         info = load_model_info(config.model_provider)
+        browser = await browser_status(agent)
         return {
             "name": config.agent_name,
             "model": config.model_name,
@@ -261,6 +266,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             "pending_approvals": agent.memory.count_pending_approvals(),
             "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
             "last_backup_error": agent.memory.get_meta("last_backup_error"),
+            "browser": {"enabled": browser["enabled"], "mode": browser.get("mode"), "url": browser.get("url")},
         }
 
     @app.get("/api/chats")
