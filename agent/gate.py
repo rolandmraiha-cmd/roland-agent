@@ -71,8 +71,9 @@ class RunState:
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
     pending_approval_id: str | None = None
     stopped: bool = False
-    # Fingerprints of page elements whose "safe" click tried to submit a form. The next click
-    # on the same element is gated instead of being blocked again (§6.5 POST-navigation guard).
+    # Page elements whose unapproved action tried to submit a form (keys from
+    # tools_browser._target). The next action on the same element is gated instead of being
+    # blocked again (§6.5 POST-navigation guard).
     blocked_submissions: set[str] = field(default_factory=set)
 
 

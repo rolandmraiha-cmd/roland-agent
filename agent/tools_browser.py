@@ -109,9 +109,25 @@ def _seen(element: dict | None, page_url: object = None) -> str:
     return hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
+# What an element *is*, leaving out what an action on it changes (a field's value, a list's
+# choice). The fingerprint moves when text is typed, so it can't be used to recognise "the
+# same field again" after a blocked form submission; this can.
+_TARGET_KEYS = ("tag", "role", "name", "type", "href", "in_form", "form_method", "form_action")
+
+
+def _target(element: dict) -> str:
+    try:
+        parts = urlsplit(str(element.get("url") or "")[: policy_browser.MAX_URL_CHARS])
+        page = f"{parts.scheme}://{parts.netloc}{parts.path}"
+    except ValueError:
+        page = ""
+    facts = [page] + [element.get(key) for key in _TARGET_KEYS]
+    return hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
 def _pins(element: dict) -> dict:
     """What every element classifier pins to the action."""
-    return {"fingerprint": element["fingerprint"], "seen": _seen(element)}
+    return {"fingerprint": element["fingerprint"], "seen": _seen(element), "target": _target(element)}
 
 
 async def _changed_since_approval(client: BrowserClient, pin: dict, ref: str | None) -> str | None:
@@ -232,9 +248,10 @@ def _element_card(element: dict, verb: str, why: str) -> tuple[str, dict]:
     return summary, {key: value for key, value in details.items() if value}
 
 
-def _blocked_before(ctx, fingerprint: str) -> bool:
+def _blocked_before(ctx, element: dict) -> bool:
+    """True when an unapproved action on this same element already tried to submit a form."""
     run = getattr(ctx, "run", None)
-    return fingerprint in getattr(run, "blocked_submissions", ()) if run is not None else False
+    return _target(element) in getattr(run, "blocked_submissions", ()) if run is not None else False
 
 
 async def classify_open(ctx, args: dict) -> Decision:
@@ -260,12 +277,11 @@ async def classify_click(ctx, args: dict) -> Decision:
     element, refusal = await _describe(ctx, args)
     if element is None:
         return refusal  # type: ignore[return-value]
-    fingerprint = element["fingerprint"]
     pinned = _pins(element)
     verdict = policy_browser.classify_click(element)
     if element.get("disabled"):
         pinned["disabled"] = True
-    elif verdict.risk == "safe" and _blocked_before(ctx, fingerprint):
+    elif verdict.risk == "safe" and _blocked_before(ctx, element):
         verdict = policy_browser.Verdict(
             "gated", "form_submit", "an earlier click on this tried to submit a form",
         )
@@ -291,7 +307,7 @@ async def classify_type(ctx, args: dict) -> Decision:
     if verdict.risk == "forbidden":
         return _forbid(verdict.why)
     pinned = _pins(element)
-    if verdict.risk == "safe" and _blocked_before(ctx, element["fingerprint"]):
+    if verdict.risk == "safe" and _blocked_before(ctx, element):
         # Some fields submit by themselves as soon as their text changes.
         verdict = policy_browser.Verdict(
             "gated", "form_submit", "typing here tried to submit a form before",
@@ -338,7 +354,8 @@ async def classify_press(ctx, args: dict) -> Decision:
     pinned: dict = {"key": key, "seen": _seen(focused, page_url)}
     if focused is not None:
         pinned["fingerprint"] = focused["fingerprint"]
-        if verdict.risk == "safe" and _blocked_before(ctx, focused["fingerprint"]):
+        pinned["target"] = _target(focused)
+        if verdict.risk == "safe" and _blocked_before(ctx, focused):
             verdict = policy_browser.Verdict(
                 "gated", "form_submit", "this key press tried to submit a form before",
             )
@@ -362,7 +379,7 @@ async def classify_select(ctx, args: dict) -> Decision:
     if element is None:
         return refusal  # type: ignore[return-value]
     pinned = _pins(element)
-    if not _blocked_before(ctx, element["fingerprint"]):
+    if not _blocked_before(ctx, element):
         return Decision(Risk.SAFE, pinned=pinned)
     why = "choosing an option here tried to submit a form before"
     summary, details = _element_card(element, "Choose an option in", why)
@@ -438,10 +455,12 @@ def _page_line(answer: dict) -> str:
     return f"{url} — {title}" if title else url
 
 
-def _action_result(ctx, tool: str, verb: str, answer: dict, fingerprint: str = "") -> str:
+def _action_result(ctx, tool: str, verb: str, answer: dict, target: object = "") -> str:
     """One short result for click/type/press/select/back/forward, from browserd's answer.
-    With a fingerprint, a blocked form submission is remembered so the same call asks Roland
-    next time; without one (history moves) there is nothing to approve, so it just stops."""
+    With a target (see `_target`), a blocked form submission is remembered so the same call
+    asks Roland next time; without one (history moves) there is nothing to approve, so it
+    just stops."""
+    target = target if isinstance(target, str) else ""
     blocked = answer.get("blocked_submission")
     if blocked:
         method, where = "POST", "a form"
@@ -449,10 +468,10 @@ def _action_result(ctx, tool: str, verb: str, answer: dict, fingerprint: str = "
             method = _one_line(blocked.get("method"), 10).upper() or "POST"
             where = _where(blocked.get("url"), path=True)
         run = getattr(ctx, "run", None)
-        if fingerprint and run is not None and hasattr(run, "blocked_submissions"):
-            run.blocked_submissions.add(fingerprint)
+        if target and run is not None and hasattr(run, "blocked_submissions"):
+            run.blocked_submissions.add(target)
         _audit(ctx, tool, ok=False, blocked_submission=f"{method} {where}")
-        if not fingerprint:
+        if not target:
             return (
                 f"Not done: that would send a form again ({method} {where}), which isn't "
                 "allowed here. Open the page you need with browser_open instead."
@@ -696,7 +715,7 @@ async def browser_click(ctx, args: dict) -> str:
         return CHANGED_AFTER_APPROVAL if mode == "approved" else _fail(error)
     except BrowserError as error:
         return _fail(error)
-    return _action_result(ctx, "browser_click", "Clicked", answer, fingerprint)
+    return _action_result(ctx, "browser_click", "Clicked", answer, pin.get("target"))
 
 
 async def browser_type(ctx, args: dict) -> str:
@@ -726,7 +745,7 @@ async def browser_type(ctx, args: dict) -> str:
     except BrowserError as error:
         return _fail(error)
     verb = f"Typed {len(text)} characters" + (" and submitted" if submit else "")
-    return _action_result(ctx, "browser_type", verb, answer, fingerprint)
+    return _action_result(ctx, "browser_type", verb, answer, pin.get("target"))
 
 
 async def browser_press(ctx, args: dict) -> str:
@@ -749,7 +768,7 @@ async def browser_press(ctx, args: dict) -> str:
         return CHANGED_AFTER_APPROVAL if mode == "approved" else _fail(error)
     except BrowserError as error:
         return _fail(error)
-    return _action_result(ctx, "browser_press", f"Pressed {key}", answer, fingerprint)
+    return _action_result(ctx, "browser_press", f"Pressed {key}", answer, pin.get("target"))
 
 
 async def browser_select(ctx, args: dict) -> str:
@@ -779,7 +798,7 @@ async def browser_select(ctx, args: dict) -> str:
         return CHANGED_AFTER_APPROVAL if mode == "approved" else _fail(error)
     except BrowserError as error:
         return _fail(error)
-    return _action_result(ctx, "browser_select", "Selected", answer, fingerprint)
+    return _action_result(ctx, "browser_select", "Selected", answer, pin.get("target"))
 
 
 async def browser_scroll(ctx, args: dict) -> str:
@@ -917,7 +936,7 @@ async def browser_upload(ctx, args: dict) -> str:
         return _fail(error)
     except (WorkspaceError, ValueError, OSError) as error:
         return f"Error: {error}"
-    return _action_result(ctx, "browser_upload", f"Uploaded {info['path']}", answer, fingerprint)
+    return _action_result(ctx, "browser_upload", f"Uploaded {info['path']}", answer, pin.get("target"))
 
 
 async def browser_downloads(ctx, args: dict) -> str:

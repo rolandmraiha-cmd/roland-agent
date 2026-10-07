@@ -224,7 +224,7 @@ Each one is stricter than, or an addition to, `docs/v2-spec.md`; none loosens a 
 6. **Tool schemas** carry no `maxLength`/`minimum`/`maximum`, like the existing tools; the limits are enforced in the handlers. Large length bounds make the llama.cpp grammar big.
 7. **Approval cards** name the element by what it is ("button", "textbox", "link") and replace quote marks in the page's own text, so a page cannot imitate the card's wording.
 8. **No sign-in tool yet** (`request_signin` is M7): a page with a sign-in form tells the agent to stop and tell Roland.
-9. **Approvals are bound to more than the fingerprint.** Core re-reads the element before an approved action and compares every fact the classifier used and the full page address (contract item 10). An approved upload is bound to the file's SHA-256, so a file rewritten while the card waits is not sent. `browser_type` is GATED `form_submit` for a field whose typing already tried to submit a form. These came from the automated reviews of #39.
+9. **Approvals are bound to more than the fingerprint.** Core re-reads the element before an approved action and compares every fact the classifier used and the full page address (contract item 10). An approved upload is bound to the file's SHA-256, so a file rewritten while the card waits is not sent. `browser_type` is GATED `form_submit` for a field whose typing already tried to submit a form. "The same element again" is recognised by what the element is (page, tag, role, name, type, link and form facts), not by its fingerprint, because the fingerprint changes as soon as text is typed. These came from the automated reviews of #39.
 
 #### Security requirements
 

@@ -32,9 +32,19 @@ SECRET = "hunter2-fixture-secret"
 PNG = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 1280, 800) + b"\x08\x02\x00\x00\x00" + b"x" * 64
 
 
-def fingerprint(element: dict) -> str:
-    keys = ["tag", "role", "name", "type", "href", "form_method", "form_action", "in_form"]
-    return hashlib.sha256(json.dumps([element.get(k) for k in keys]).encode()).hexdigest()
+# The spec's fingerprint (§6.5) covers eight fields. The contract in docs/NEXT.md asks browserd
+# to cover every fact the classifier reads, which is what this fake does unless a test says
+# otherwise. Note that it then changes when a field's value does.
+SPEC_KEYS = ("tag", "role", "name", "type", "href", "form_method", "form_action", "in_form")
+CONTRACT_KEYS = SPEC_KEYS + (
+    "value", "aria_label", "title_attr", "form_submit_name", "submits", "disabled", "sensitive",
+    "aria_expanded", "aria_haspopup", "contenteditable", "inside_dialog_title",
+)
+
+
+def fingerprint(element: dict, keys: tuple[str, ...] = CONTRACT_KEYS) -> str:
+    facts = [None if (k == "value" and element.get("sensitive")) else element.get(k) for k in keys]
+    return hashlib.sha256(json.dumps(facts).encode()).hexdigest()
 
 
 def make(tag, name, **kw):
@@ -51,6 +61,7 @@ class FakeBrowserd:
     def __init__(self):
         self.url = f"{SITE}/cart"
         self.title = "Cart"
+        self.keys = CONTRACT_KEYS           # what this browserd's fingerprint covers
         self.text = "Your cart\nBlue mug 12,00 €"
         self.user_mode = False
         self.focused: str | None = None
@@ -92,14 +103,14 @@ class FakeBrowserd:
     def _element(self, ref: str) -> dict:
         element = dict(self.elements[ref])
         public = {k: v for k, v in element.items() if not (k == "value" and element["sensitive"])}
-        return {"ref": ref, **public, "fingerprint": fingerprint(element)}
+        return {"ref": ref, **public, "fingerprint": fingerprint(element, self.keys)}
 
     def _act(self, body: dict, ref: str | None, submits: bool = True) -> httpx.Response:
         """Shared by click/type/press/select: fingerprint check, then the POST guard."""
         if ref is not None:
             if ref not in self.elements:
                 return httpx.Response(404, json={"error": "no_such_element"})
-            if body.get("fingerprint") and body["fingerprint"] != fingerprint(self.elements[ref]):
+            if body.get("fingerprint") and body["fingerprint"] != fingerprint(self.elements[ref], self.keys):
                 return httpx.Response(409, json={"error": "element_changed"})
         target = self.submits.get(ref or "") if submits else None
         if target:
@@ -152,6 +163,7 @@ class FakeBrowserd:
             response = self._act(body, ref, submits=bool(body.get("submit")) or ref in self.autosubmit)
             if response.status_code == 200:
                 self.typed.append((ref, body["text"]))
+                self.elements[ref]["value"] = body["text"]  # typing changes the field
             return response
         if path == "/v1/press":
             return self._act(body, self.focused if body["key"] in {"Enter", "Space"} else None)
@@ -383,8 +395,9 @@ async def test_browserd_409_after_approval_fails_the_action(tmp_path, fake):
 async def test_change_in_any_classified_field_fails_the_approved_action(tmp_path, fake, field, value):
     """browserd's fingerprint covers only part of what the classifier reads (spec §6.5). Core
     pins a digest of all of it and looks again before an approved action runs."""
+    fake.keys = SPEC_KEYS  # a browserd that follows the spec's shorter fingerprint
     agent = browser_agent(tmp_path, fake, [("", [click("e5")]), "It didn't go through."])
-    before = fingerprint(fake.elements["e5"])
+    before = fingerprint(fake.elements["e5"], SPEC_KEYS)
 
     async def change_then_approve(row):
         if field == "site":
@@ -394,7 +407,7 @@ async def test_change_in_any_classified_field_fails_the_approved_action(tmp_path
         await agent.gate.approve(row["id"], row["args_hash"], confirm=True)
 
     await chat_and_decide(agent, change_then_approve)
-    assert fingerprint(fake.elements["e5"]) == before  # browserd alone would not have noticed
+    assert fingerprint(fake.elements["e5"], SPEC_KEYS) == before  # that browserd would not have noticed
     assert fake.paths("/v1/click") == [] and fake.posts == []
     assert any("the page changed after Roland approved this" in text for text in tool_outputs(agent))
     assert [row["status"] for row in agent.memory.approvals(status="all")] == ["failed"]
@@ -559,7 +572,7 @@ async def test_gated_click_card_has_screenshot_and_code_made_summary(tmp_path, f
     assert approval_public(card)["screenshot_url"].endswith(card["screenshot_path"])
     stored = json.loads(card["args_json"])
     assert stored[PIN_KEY]["fingerprint"] == fingerprint(fake.elements["e5"])
-    assert set(stored[PIN_KEY]) == {"fingerprint", "seen"} and len(stored[PIN_KEY]["seen"]) == 64
+    assert set(stored[PIN_KEY]) == {"fingerprint", "seen", "target"} and len(stored[PIN_KEY]["seen"]) == 64
     assert fake.paths("/v1/click") == [] and fake.posts == []
     assert any("Not done: Roland rejected this." in text for text in tool_outputs(agent))
 
