@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-07. Last verified `v2` tip **`98971cc`** (#32). Verify against remote `v2` before coding.
+> Snapshot: 2026-10-07. Last verified `v2` tip **`5104fb6`** (#33). Verify against remote `v2` before coding.
 
 ## 1. What we are building
 
@@ -47,7 +47,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | Contabo fixes | Thinking stuck, tool-loop and duplicate failed-tool fixes | #27, #28 |
 | M3 gate | Approve risky tools in the UI before they run; Shipper nits | #29, #30 |
 | M4 sandbox | `sandboxd` container, `SHELL_BACKEND=sandbox`, shell classifier | #31 |
-| M5 files | Workspace + Files UI/API, trash and restore (A5.4 is the Contabo smoke; #32 title still says A5.1–A5.3) | #32 → tip **`98971cc`** |
+| M5 files | Workspace + Files UI/API, trash and restore (A5.4 is the Contabo smoke; #32 title still says A5.1–A5.3) | #32; docs tip **`5104fb6`** |
 
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with `caddy`, `core`, `model`, `sandbox` healthy.
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).
@@ -206,4 +206,4 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 
 ## 12. Last verified
 
-Remote `v2` tip **`98971cc`** (#32), deployed on Contabo with caddy/core/model/sandbox healthy and M5 A5.4 green. Re-run `make test` before claiming anything newer. CI's tiny model does not prove Qwen RAM or Contabo speed.
+Remote `v2` tip **`5104fb6`** (#33 docs; M5 code `98971cc`), deployed on Contabo with caddy/core/model/sandbox healthy and M5 A5.4 green. Re-run `make test` before claiming anything newer. CI's tiny model does not prove Qwen RAM or Contabo speed.
