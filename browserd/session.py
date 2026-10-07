@@ -53,7 +53,7 @@ except ImportError:  # the server's unit tests run without Playwright installed
 
 log = logging.getLogger("browserd")
 
-# Spec §6.5. No remote-debugging port is ever opened: Playwright talks to Chromium over a pipe.
+# Spec §6.5. No debugging port is ever opened: Playwright talks to Chromium over a pipe.
 CHROMIUM_ARGS = (
     "--disable-background-networking",
     "--disable-component-update",

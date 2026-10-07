@@ -434,7 +434,7 @@ async def test_dialogs_are_dismissed_and_reported(agent_for):
     agent = agent_for([open_page("/extras/alert"), SNAPSHOT, click("Ask me"), SNAPSHOT, "asked"])
     await run(agent)
     outputs = agent.brain.outputs()
-    assert "A confirm box was dismissed: Delete everything?" in outputs[2]
+    assert "The page asked a yes/no question, and it was answered no: Delete everything?" in outputs[2]
     assert "confirm said false" in outputs[3]
 
 
@@ -486,6 +486,20 @@ async def test_button_inside_a_web_component(agent_for):
     agent = agent_for([open_page("/extras/shadow"), SNAPSHOT, click("Shadow button"), SNAPSHOT, "pressed"])
     await run(agent)
     assert "pressed" in agent.brain.outputs()[3].split("--- page text ---")[1]
+
+
+async def test_field_names_cannot_hide_where_a_form_goes(agent_for):
+    """<input name="children">, name="action", name="method": common, and they hide the form's
+    own properties from scripts. The snapshot still works and still tells the truth."""
+    agent = agent_for([open_page("/extras/booking"), SNAPSHOT, click("Book now"), "booked"])
+    cards: list[dict] = []
+    await run(agent, approving(agent, cards))
+    snapshot = agent.brain.outputs()[1]
+    assert 'textbox "Children" value="1"' in snapshot
+    assert re.search(r'button "Book now" \(submits form POST [^)]*/order\)', snapshot), snapshot
+    assert len(cards) == 1 and cards[0]["details"]["form"].endswith("/order")
+    assert [post.split(" ")[0] for post in site_posts()] == ["/order"], agent.brain.outputs()[2]
+    assert "children=1" in site_posts()[0]
 
 
 async def test_secret_fields_by_name_and_plain_fields_with_similar_names(agent_for):

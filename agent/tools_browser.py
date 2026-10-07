@@ -502,11 +502,17 @@ def _notes(answer: dict) -> list[str]:
     """Things browserd did on its own since the last call, in words for the model."""
     lines = []
     dialogs = answer.get("dialogs")
-    if isinstance(dialogs, list):
-        for dialog in dialogs[:3]:
-            if isinstance(dialog, dict):
-                kind = _one_line(dialog.get("type"), 20) or "dialog"
-                lines.append(f"A {kind} box was dismissed: {_one_line(dialog.get('message'), 160)}")
+    for dialog in [item for item in dialogs if isinstance(item, dict)][:3] if isinstance(dialogs, list) else []:
+        said = _one_line(dialog.get("message"), 160)
+        kind = dialog.get("type")
+        if kind == "confirm":
+            lines.append(f"The page asked a yes/no question, and it was answered no: {said}")
+        elif kind == "prompt":
+            lines.append(f"The page asked for text in a box, and the box was cancelled: {said}")
+        elif kind == "beforeunload":
+            lines.append("The page asked whether to leave it, and it was answered no.")
+        else:
+            lines.append(f"The page showed a message box, and it was closed: {said}")
     background = answer.get("blocked_background")
     if isinstance(background, list) and background and isinstance(background[0], dict):
         method = _one_line(background[0].get("method"), 10).upper() or "POST"
@@ -576,7 +582,8 @@ def element_line(element: dict, page_url: str = "") -> str:
     options = element.get("options")
     if isinstance(options, list) and options:
         shown = " | ".join(_one_line(option, 30) for option in options[:12] if isinstance(option, str))
-        more = len(options) - 12 + (element.get("more_options") if isinstance(element.get("more_options"), int) else 0)
+        extra = element.get("more_options")
+        more = max(0, len(options) - 12) + (extra if isinstance(extra, int) and extra > 0 else 0)
         line += f" options: {_one_line(shown, 240)}" + (f" (+{more} more)" if more > 0 else "")
     if policy_browser.is_submit_control(element):
         form = policy_browser.form_line(element)

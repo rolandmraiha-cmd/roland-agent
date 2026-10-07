@@ -178,10 +178,22 @@ _PAGES.update(
         ),
         "/extras/unsaved": _page(
             "Unsaved changes",
-            '<button type="button" onclick="document.getElementById(\'out\').textContent = \'edited\'">Edit</button>'
+            "<button type=\"button\" onclick=\"document.getElementById('out').textContent = 'edited'\">Edit</button>"
             '<p id="out">untouched</p>'
             "<script>window.addEventListener('beforeunload', function (event) "
             "{ event.preventDefault(); event.returnValue = 'unsaved'; });</script>",
+        ),
+        # Field names that hide the form's own properties from scripts ("children" is common
+        # on travel sites). The form still posts to /order.
+        "/extras/booking": _page(
+            "Booking",
+            '<form action="/order" method="post">'
+            '<label>Adults <input name="adults" value="2"></label>'
+            '<label>Children <input name="children" value="1"></label>'
+            '<input type="hidden" name="action" value="/elsewhere"><input type="hidden" name="method" value="get">'
+            '<input type="hidden" name="id" value="x"><input type="hidden" name="name" value="x">'
+            '<input type="hidden" name="target" value="x"><input type="hidden" name="elements" value="x">'
+            '<button type="submit">Book now</button></form>',
         ),
         "/extras/editable": _page(
             "Notes",

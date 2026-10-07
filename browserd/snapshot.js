@@ -29,6 +29,46 @@
   const REGION_ROLES = ["main", "navigation", "banner", "contentinfo", "complementary", "dialog",
     "alertdialog", "form", "search"];
 
+  // --- reading the page ---
+  // A form field's name hides the form's own property of that name from scripts: with
+  // <input name="children"> in it, form.children is that field. So elements are read
+  // through the browser's built-in getters and methods, never through the element itself.
+  const getter = (owner, name) => {
+    const found = Object.getOwnPropertyDescriptor(owner.prototype, name);
+    return (node) => {
+      try { return found.get.call(node); } catch (error) { return undefined; }
+    };
+  };
+  const method = (owner, name) => {
+    const found = owner.prototype[name];
+    return (node, ...rest) => found.apply(node, rest);
+  };
+  const tagOf = getter(Element, "tagName");
+  const kidsOf = getter(Element, "children");
+  const shadowOf = getter(Element, "shadowRoot");
+  const firstKidOf = getter(Element, "firstElementChild");
+  const parentOf = getter(Node, "parentElement");
+  const textOf = getter(Node, "textContent");
+  const innerTextOf = getter(HTMLElement, "innerText");
+  const editableOf = getter(HTMLElement, "isContentEditable");
+  const getAttr = method(Element, "getAttribute");
+  const hasAttr = method(Element, "hasAttribute");
+  const setAttr = method(Element, "setAttribute");
+  const matches = method(Element, "matches");
+  const closest = method(Element, "closest");
+  const queryOne = method(Element, "querySelector");
+  const boxOf = method(Element, "getBoundingClientRect");
+  const rootOf = method(Node, "getRootNode");
+  const editable = (el) => editableOf(el) === true;
+  // The same goes for the document: <img name="body"> hides document.body.
+  const page = {
+    body: getter(Document, "body")(document) || null,
+    top: getter(Document, "documentElement")(document) || null,
+    active: () => getter(Document, "activeElement")(document) || null,
+    focused: () => { try { return method(Document, "hasFocus")(document) === true; } catch (error) { return false; } },
+    base: getter(Node, "baseURI")(document) || "about:blank",
+  };
+
   // --- text helpers ---
   const wellFormed = (s) => (typeof s.toWellFormed === "function" ? s.toWellFormed() : s.replace(/\p{Cs}/gu, "�"));
   const tidy = (value, max) => {
@@ -36,13 +76,13 @@
     return wellFormed(value.slice(0, max * 8).replace(/\s+/g, " ").trim().slice(0, max));
   };
   const attr = (el, name) => {
-    const value = el.getAttribute(name);
+    const value = getAttr(el, name);
     return typeof value === "string" ? value : "";
   };
   const lower = (el, name) => attr(el, name).trim().toLowerCase();
   const absolute = (raw) => {
     try {
-      return wellFormed(new URL(raw, document.baseURI).href.slice(0, MAX_URL));
+      return wellFormed(new URL(raw, page.base).href.slice(0, MAX_URL));
     } catch (error) {
       return "";
     }
@@ -96,11 +136,11 @@
 
   const TEXT_INPUTS = ["", "text", "password", "tel", "number", "email", "url", "search"];
   const takesText = (el) => {
-    const tag = el.tagName;
+    const tag = tagOf(el);
     if (tag === "TEXTAREA") return true;
     if (tag === "INPUT") return TEXT_INPUTS.includes(lower(el, "type"));
     const role = lower(el, "role").split(" ")[0];
-    return el.isContentEditable === true || role === "textbox" || role === "searchbox";
+    return editable(el) || role === "textbox" || role === "searchbox";
   };
   // The words of a <label>, without the text of a field it wraps (the options of a
   // <select>, the text inside a <textarea>): those are the field's contents, not its name.
@@ -113,7 +153,7 @@
       const node = stack.pop();
       visited += 1;
       if (node.nodeType === 3) parts.push(node.nodeValue || "");
-      if (node.nodeType !== 1 || (node !== root && NOT_LABEL_TEXT.includes(node.tagName))) continue;
+      if (node.nodeType !== 1 || (node !== root && NOT_LABEL_TEXT.includes(tagOf(node)))) continue;
       for (let child = node.lastChild; child; child = child.previousSibling) stack.push(child);
     }
     return parts.join(" ");
@@ -127,7 +167,7 @@
     return "";
   };
   const isSensitive = (el, mode) => {
-    if (el.tagName === "INPUT" && lower(el, "type") === "password") return true;
+    if (tagOf(el) === "INPUT" && lower(el, "type") === "password") return true;
     const hints = lower(el, "autocomplete").split(/\s+/);
     if (hints.some((hint) => SECRET_AUTOCOMPLETE.includes(hint))) return true;
     const named = [attr(el, "name"), attr(el, "id"), attr(el, "aria-label")];
@@ -151,21 +191,22 @@
   };
   const referenced = (el, name) => {
     const ids = attr(el, name).split(/\s+/).filter(Boolean).slice(0, 8);
-    const root = el.getRootNode();
     const parts = [];
-    for (const id of ids) {
-      const target = root && root.getElementById ? root.getElementById(id) : null;
-      if (target) parts.push(target.textContent || "");
-    }
+    try {
+      const root = rootOf(el);
+      for (const id of ids) {
+        const target = root && typeof root.getElementById === "function" ? root.getElementById(id) : null;
+        if (target instanceof Element) parts.push(textOf(target) || "");
+      }
+    } catch (error) { /* a page that hides getElementById just gets no name from it */ }
     return tidy(parts.join(" "), MAX_NAME);
   };
   const shownText = (el) => {
-    let text = "";
-    try { text = el.innerText || ""; } catch (error) { text = ""; }
-    return tidy(text || el.textContent || "", MAX_NAME);
+    const text = innerTextOf(el);  // undefined for SVG and the like
+    return tidy((typeof text === "string" && text) || textOf(el) || "", MAX_NAME);
   };
   const accessibleName = (el) => {
-    const tag = el.tagName;
+    const tag = tagOf(el);
     const kind = lower(el, "type");
     let name = tidy(attr(el, "aria-label"), MAX_NAME) || referenced(el, "aria-labelledby");
     if (name) return name;
@@ -179,65 +220,65 @@
         || tidy(attr(el, "title"), MAX_NAME) || tidy(attr(el, "name"), MAX_NAME);
     }
     // An editable area's own text is what was typed into it: that is its value, not its name.
-    if (el.isContentEditable === true) {
+    if (editable(el)) {
       return tidy(attr(el, "title"), MAX_NAME) || tidy(attr(el, "aria-placeholder"), MAX_NAME)
         || tidy(attr(el, "data-placeholder"), MAX_NAME);
     }
     name = shownText(el);
     if (name) return name;
-    const picture = el.querySelector("img[alt], svg[aria-label], [aria-label]");
+    const picture = queryOne(el, "img[alt], svg[aria-label], [aria-label]");
     if (picture) name = tidy(attr(picture, "alt") || attr(picture, "aria-label"), MAX_NAME);
     return name || tidy(attr(el, "title"), MAX_NAME);
   };
   const formOf = (el) => {
     let form = null;
     try { form = el.form instanceof HTMLFormElement ? el.form : null; } catch (error) { form = null; }
-    return form || el.closest("form");
+    return form || closest(el, "form");
   };
   const SUBMIT_CONTROLS = 'button:not([type]), button[type="submit" i], input[type="submit" i], input[type="image" i]';
   const isSubmitControl = (el) => {
-    if (el.tagName === "BUTTON") return !["button", "reset"].includes(lower(el, "type"));
-    return el.tagName === "INPUT" && ["submit", "image"].includes(lower(el, "type"));
+    if (tagOf(el) === "BUTTON") return !["button", "reset"].includes(lower(el, "type"));
+    return tagOf(el) === "INPUT" && ["submit", "image"].includes(lower(el, "type"));
   };
   const dialogTitle = (el) => {
-    const box = el.closest('dialog, [role="dialog"], [role="alertdialog"]');
+    const box = closest(el, 'dialog, [role="dialog"], [role="alertdialog"]');
     if (!box) return "";
-    const heading = box.querySelector("h1, h2, h3, [role='heading']");
+    const heading = queryOne(box, "h1, h2, h3, [role='heading']");
     return (tidy(attr(box, "aria-label"), 80) || referenced(box, "aria-labelledby").slice(0, 80)
-      || (heading ? tidy(heading.textContent || "", 80) : ""));
+      || (heading ? tidy(textOf(heading) || "", 80) : ""));
   };
   const isDisabled = (el) => {
     let off = false;
-    try { off = el.matches(":disabled"); } catch (error) { off = false; }
+    try { off = matches(el, ":disabled"); } catch (error) { off = false; }
     return off || lower(el, "aria-disabled") === "true";
   };
 
   const facts = (el) => {
-    const tag = el.tagName.toLowerCase();
+    const tag = tagOf(el).toLowerCase();
     const sensitive = isSensitive(el, mode);
     const form = formOf(el);
     const submit = form !== null && isSubmitControl(el);
-    let method = "";
+    let sends = "";
     let action = "";
     let submitName = "";
     if (form) {
       // Read attributes, not form.method / form.action: a field called "action" hides those.
-      method = (submit && attr(el, "formmethod") ? lower(el, "formmethod") : lower(form, "method")) || "get";
-      if (!["get", "post", "dialog"].includes(method)) method = "get";
-      action = absolute(submit && el.hasAttribute("formaction") ? attr(el, "formaction") : attr(form, "action"));
-      const button = submit ? el : form.querySelector(SUBMIT_CONTROLS);
+      sends = (submit && attr(el, "formmethod") ? lower(el, "formmethod") : lower(form, "method")) || "get";
+      if (!["get", "post", "dialog"].includes(sends)) sends = "get";
+      action = absolute(submit && hasAttr(el, "formaction") ? attr(el, "formaction") : attr(form, "action"));
+      const button = submit ? el : queryOne(form, SUBMIT_CONTROLS);
       if (button && button !== el) submitName = accessibleName(button);
     }
     let value = "";
     if (!sensitive) {
       if (tag === "select") {
-        value = tidy(Array.from(el.selectedOptions || [], (option) => option.textContent || "").join(", "), MAX_VALUE);
+        value = tidy(Array.from(el.selectedOptions || [], (option) => textOf(option) || "").join(", "), MAX_VALUE);
       } else if (tag === "input" || tag === "textarea") {
         const kind = lower(el, "type");
         value = ["checkbox", "radio", "file"].includes(kind) ? "" : tidy(String(el.value || ""), MAX_VALUE);
       } else if (tag === "button") {
         value = tidy(attr(el, "value"), MAX_VALUE);
-      } else if (el.isContentEditable === true) {
+      } else if (editable(el)) {
         value = shownText(el);
       }
     }
@@ -248,12 +289,12 @@
       role: lower(el, "role").split(" ")[0] || "",
       name: accessibleName(el),
       type: tag === "input" || tag === "button" ? lower(el, "type") : "",
-      href: (tag === "a" || tag === "area") && el.hasAttribute("href") ? absolute(attr(el, "href")) : "",
+      href: (tag === "a" || tag === "area") && hasAttr(el, "href") ? absolute(attr(el, "href")) : "",
       value,
       aria_label: tidy(attr(el, "aria-label"), MAX_NAME),
       title_attr: tidy(attr(el, "title"), MAX_NAME),
       in_form: form !== null,
-      form_method: method,
+      form_method: sends,
       form_action: action,
       form_submit_name: submitName,
       submits: submit,
@@ -261,12 +302,12 @@
       sensitive,
       aria_expanded: expanded === "true" ? true : expanded === "false" ? false : null,
       aria_haspopup: !["", "false"].includes(lower(el, "aria-haspopup")),
-      contenteditable: el.isContentEditable === true,
+      contenteditable: editable(el),
       inside_dialog_title: dialogTitle(el),
     };
     if (tag === "input" && ["checkbox", "radio"].includes(lower(el, "type"))) out.checked = el.checked === true;
     if (tag === "select") {
-      out.options = Array.from(el.options || []).slice(0, MAX_OPTIONS).map((option) => tidy(option.textContent || "", 60));
+      out.options = Array.from(el.options || []).slice(0, MAX_OPTIONS).map((option) => tidy(textOf(option) || "", 60));
       out.more_options = Math.max(0, (el.options ? el.options.length : 0) - MAX_OPTIONS);
     }
     return out;
@@ -275,14 +316,14 @@
   if (args.op === "describe") {
     if (!element) return { error: "no_such_element" };
     const out = facts(element);
-    out.focused = element === element.ownerDocument.activeElement;
+    out.focused = element === page.active();
     return out;
   }
 
   if (args.op === "focused") {
-    const active = document.hasFocus() ? document.activeElement : null;
-    if (!active || active === document.body || active === document.documentElement) return { error: "no_focused_element" };
-    if (active.tagName === "IFRAME" || active.tagName === "FRAME") return { error: "in_frame" };
+    const active = page.focused() ? page.active() : null;
+    if (!active || active === page.body || active === page.top) return { error: "no_focused_element" };
+    if (tagOf(active) === "IFRAME" || tagOf(active) === "FRAME") return { error: "in_frame" };
     const out = facts(active);
     out.focused = true;
     return out;
@@ -293,7 +334,7 @@
   // --- the whole page ---
   const shown = (el, style) => {
     if (style.visibility !== "visible") return false;
-    const box = el.getBoundingClientRect();
+    const box = boxOf(el);
     return box.width >= 1 && box.height >= 1;
   };
   const maxElements = Math.max(1, Math.min(Number(args.max_elements) || 400, 1000));
@@ -301,10 +342,10 @@
   // A new document has no labels yet, so numbering starts again at e1. browserd keeps one
   // counter per tab and hands it to each frame in turn; only the top frame may restart it.
   const marker = typeof args.doc === "string" ? args.doc.slice(0, 40) : "";
-  const top = document.documentElement;
+  const top = page.top;
   if (top && marker) {
     if (args.main === true && attr(top, "data-ra-doc") !== marker) next = 1;
-    top.setAttribute("data-ra-doc", marker);
+    setAttr(top, "data-ra-doc", marker);
   }
   const used = new Set();
   const elements = [];
@@ -314,13 +355,13 @@
   let more = 0;
   let loginForm = false;
 
-  const root = document.body || document.documentElement;
+  const root = page.body || page.top;
   const stack = root ? [[root, 0]] : [];
   while (stack.length) {
     const [el, depth] = stack.pop();
     visited += 1;
     if (visited > MAX_VISITED) { more += 1; break; }
-    const tag = el.tagName;
+    const tag = tagOf(el);
     if (tag === "SCRIPT" || tag === "STYLE" || tag === "NOSCRIPT" || tag === "TEMPLATE" || tag === "HEAD") continue;
     let style;
     try { style = getComputedStyle(el); } catch (error) { continue; }
@@ -333,9 +374,9 @@
       const region = REGIONS[tag] || (REGION_ROLES.includes(role) ? role : "");
       // A link without an address is listed only when it has text: scripts often make
       // those clickable. An editing area is listed once, at its outermost element.
-      const editor = el.isContentEditable === true && !(el.parentElement && el.parentElement.isContentEditable === true);
-      const bareLink = tag === "A" && !el.hasAttribute("href") && shownText(el) !== "";
-      const interactive = (el.matches(INTERACTIVE) || editor || bareLink)
+      const editor = editable(el) && !(parentOf(el) && editable(parentOf(el)));
+      const bareLink = tag === "A" && !hasAttr(el, "href") && shownText(el) !== "";
+      const interactive = (matches(el, INTERACTIVE) || editor || bareLink)
         && !(tag === "INPUT" && lower(el, "type") === "hidden");
       if (interactive) {
         if (listed >= maxElements) {
@@ -345,7 +386,7 @@
           if (!ref || used.has(ref) || Number(ref.slice(1)) >= next) {
             ref = "e" + next;
             next += 1;
-            el.setAttribute("data-ra-ref", ref);
+            setAttr(el, "data-ra-ref", ref);
           }
           used.add(ref);
           const item = facts(el);
@@ -358,7 +399,7 @@
       } else if ((heading || region) && structure < MAX_STRUCTURE) {
         const item = { role: heading ? "heading" : region, depth, name: heading
           ? shownText(el)
-          : tidy(attr(el, "aria-label"), 80) || (region === "dialog" || region === "alertdialog" ? dialogTitle(el.firstElementChild || el) : "") };
+          : tidy(attr(el, "aria-label"), 80) || (region === "dialog" || region === "alertdialog" ? dialogTitle(firstKidOf(el) || el) : "") };
         if (heading) {
           const level = /^H[1-6]$/.test(tag) ? Number(tag[1]) : Number(attr(el, "aria-level")) || 2;
           item.level = Math.max(1, Math.min(level, 6));
@@ -371,17 +412,18 @@
       }
     }
     const kids = [];
-    if (el.shadowRoot) kids.push(...el.shadowRoot.children);
-    kids.push(...el.children);
+    const shadow = shadowOf(el);
+    if (shadow) kids.push(...Array.from(shadow.children || []));
+    kids.push(...Array.from(kidsOf(el) || []));
     for (let i = kids.length - 1; i >= 0; i -= 1) stack.push([kids[i], Math.min(childDepth, 6)]);
   }
 
   const maxChars = Math.max(0, Math.min(Number(args.max_chars) || 0, 20000));
   let text = "";
   let cut = false;
-  if (maxChars && document.body) {
-    let raw = "";
-    try { raw = document.body.innerText || ""; } catch (error) { raw = ""; }
+  if (maxChars && page.body) {
+    let raw = innerTextOf(page.body);
+    if (typeof raw !== "string") raw = "";
     cut = raw.length > maxChars * 4;
     raw = raw.slice(0, maxChars * 4).replace(/[ \t\f\v ]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     cut = cut || raw.length > maxChars;
