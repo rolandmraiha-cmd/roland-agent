@@ -80,9 +80,9 @@ Before writing any code:
 ### 2.6 Documentation
 
 1. Instruction markdown is limited to: one master `docs/AGENT.md`, a short `README.md`, and this `docs/NEXT.md`. Do not add more handoff files; fold M4-style notes into `docs/AGENT.md`.
-2. **Keep docs current (standing rule):** anyone (human or AI) who changes code, Contabo/deploy state, or plans must update `docs/AGENT.md`, `docs/NEXT.md`, and `README.md` in the **same PR or handoff**. If a new plan appears mid-work, write it into `docs/NEXT.md` (or AGENT.md next-order) before or with the code — never leave plans only in chat.
+2. **Keep docs current (standing rule):** anyone (human or AI) who changes code, Contabo/deploy state, plans, or instructions must update `docs/AGENT.md`, `docs/NEXT.md`, and `README.md` in the **same PR**, before squash-merge. Every edit on the branch, including review fixes, updates those files again if status, instructions, or plans changed. Squash-merge does not carry a chat-only plan into the repo and is not a reason to defer the doc update. If a new plan appears mid-work, write it into `docs/NEXT.md` (or AGENT.md next-order) before or with the code — never leave plans only in chat.
 3. Large instruction-MD replacements still follow draft → Roland approves the text → PR. Routine status updates that match already-shipped work may land in the feature PR after Shipper review.
-4. Each milestone PR updates the Done/Not done tables and tip in `docs/AGENT.md`, the remaining plan in `docs/NEXT.md`, the short “what works / what does not” in `README.md` when that reality changed, and `docs/SECURITY.md` for any accepted limit.
+4. Each PR, not only milestone PRs, updates the Done/Not done tables and tip in `docs/AGENT.md`, the remaining plan in `docs/NEXT.md`, and the short “what works / what does not” in `README.md` when that reality changed, plus `docs/SECURITY.md` for any accepted limit. Do that on every edit that changes the story, and again before squash-merge so the merged commit is not ahead of the docs.
 
 ## 3. Current production state (7 Oct 2026)
 
@@ -481,7 +481,7 @@ A milestone is done only when all of these are true:
 2. Code Shipper reviewed it (COMMENT review), ran the Contabo smoke listed above, and merged it to `v2`.
 3. Any substantial manual test (A7.4, A8.10) was done with Roland or explicitly deferred by him in writing.
 4. Measured memory on Contabo is recorded in the PR and headroom is ≥ ~800 MiB available.
-5. `docs/AGENT.md` and `docs/SECURITY.md` updates were drafted and approved by Roland, then merged.
+5. `docs/AGENT.md`, `docs/NEXT.md`, and `README.md` were updated in the same PR before squash-merge, and `docs/SECURITY.md` too if an accepted limit changed. Large instruction-text replacements were approved by Roland.
 6. Feature flags in production match Roland's decision (on only after smoke).
 
 ### Overall (v2 release)
@@ -508,5 +508,5 @@ A milestone is done only when all of these are true:
 14. Do not commit secrets, credentials, provider SDKs or keys; do not print secret values in logs or chat.
 15. Do not run sandboxd's leftover reap outside its container; never set `SANDBOX_REAP_ALL` on a host.
 16. Do not run host-mutating commands without `APPLY=1`, and do not change DNS, delete volumes or restore over live data without Roland.
-17. Do not merge docs text Roland has not approved; do not add new instruction markdown files.
+17. Do not merge docs text Roland has not approved; do not add new instruction markdown files. Do not squash-merge a PR that changed code, deploy state, plans, or instructions without updating `docs/AGENT.md`, `docs/NEXT.md`, and `README.md` in that same PR.
 18. Do not claim a feature works in docs until it is merged and smoked on Contabo.

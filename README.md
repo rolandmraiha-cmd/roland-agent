@@ -42,4 +42,4 @@ Never set `ALLOW_SHELL=true` on a personal computer. Host-mutating `make` target
 - [docs/v2-spec.md](docs/v2-spec.md): detailed target design (not an inventory of shipped code).
 - [docs/SECURITY.md](docs/SECURITY.md): accepted security limits so far.
 
-**Keep them updated:** every code, deploy, or plan change updates `docs/AGENT.md`, `docs/NEXT.md`, and this README in the same PR when the “what works” story changes. Do not leave new plans only in chat.
+**Keep them updated:** every PR, every edit on that branch, and every squash merge must update `docs/AGENT.md`, `docs/NEXT.md`, and this README in that same PR before merge, whenever code, deploy state, plans, or instructions change. Status, instructions, and plans stay in these files, not only in chat. Do not squash-merge a PR whose README or instruction docs are stale. `docs/SECURITY.md` updates in that same PR when an accepted limit changes.
