@@ -58,6 +58,7 @@ class FakeBrowserd:
         self.posts: list[str] = []          # form submissions that really went out
         self.typed: list[tuple[str, str]] = []
         self.submits: dict[str, str] = {}   # ref -> the POST its click or key press causes
+        self.autosubmit: set[str] = set()   # fields that post their form as soon as text changes
         self.elements: dict[str, dict] = {
             "e3": make("a", "Blue mug", href=f"{SITE}/p/blue-mug"),
             "e4": make("input", "Coupon code", type="text", in_form=True, form_method="post",
@@ -93,14 +94,14 @@ class FakeBrowserd:
         public = {k: v for k, v in element.items() if not (k == "value" and element["sensitive"])}
         return {"ref": ref, **public, "fingerprint": fingerprint(element)}
 
-    def _act(self, body: dict, ref: str | None, done: dict | None = None) -> httpx.Response:
+    def _act(self, body: dict, ref: str | None, submits: bool = True) -> httpx.Response:
         """Shared by click/type/press/select: fingerprint check, then the POST guard."""
         if ref is not None:
             if ref not in self.elements:
                 return httpx.Response(404, json={"error": "no_such_element"})
             if body.get("fingerprint") and body["fingerprint"] != fingerprint(self.elements[ref]):
                 return httpx.Response(409, json={"error": "element_changed"})
-        target = self.submits.get(ref or "")
+        target = self.submits.get(ref or "") if submits else None
         if target:
             if body.get("mode") != "approved":
                 return httpx.Response(200, json=self._page(
@@ -108,7 +109,7 @@ class FakeBrowserd:
             self.posts.append(target)
             self.url, self.title = f"{SITE}/thanks", "Thank you"
             return httpx.Response(200, json=self._page(ok=True, navigated=True, dialogs=[]))
-        return httpx.Response(200, json=self._page(ok=True, navigated=False, dialogs=[], **(done or {})))
+        return httpx.Response(200, json=self._page(ok=True, navigated=False, dialogs=[]))
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -148,7 +149,7 @@ class FakeBrowserd:
             ref = body.get("ref")
             if ref in self.elements and self.elements[ref]["sensitive"]:
                 return httpx.Response(403, json={"error": "sensitive_field"})
-            response = self._act(body, ref if not body.get("submit") else ref)
+            response = self._act(body, ref, submits=bool(body.get("submit")) or ref in self.autosubmit)
             if response.status_code == 200:
                 self.typed.append((ref, body["text"]))
             return response
@@ -374,6 +375,10 @@ async def test_browserd_409_after_approval_fails_the_action(tmp_path, fake):
     ("value", "Buy now"), ("aria_label", "Pay"), ("title_attr", "Delete everything"),
     ("form_submit_name", "Place order"), ("submits", True), ("inside_dialog_title", "Confirm payment"),
     ("aria_expanded", True), ("disabled", True), ("site", "https://evil.example/cart"),
+    # A one-page app moves to another route on the same site: the same button now means
+    # something else, and the card showed the old address.
+    ("site", "https://shop.example/orders/982/confirm"), ("site", "https://shop.example/cart?item=2"),
+    ("site", "https://shop.example/cart#/orders/982"),
 ])
 async def test_change_in_any_classified_field_fails_the_approved_action(tmp_path, fake, field, value):
     """browserd's fingerprint covers only part of what the classifier reads (spec §6.5). Core
@@ -782,6 +787,8 @@ async def test_type_safe_then_submit_needs_approval(tmp_path, fake):
     assert cards[0]["details"]["text"] == "SPRING10"
     sent = [body for _, path, body in fake.calls if path == "/v1/type"]
     assert [(body["submit"], body["mode"], body["clear"]) for body in sent] == [(False, "safe", True), (True, "approved", True)]
+    assert "Typed 8 characters." in tool_outputs(agent)[0]  # plain typing went through unasked
+    assert fake.typed == [("e4", "SPRING10"), ("e4", "SPRING10")]
     assert fake.posts == [f"{SITE}/cart"]
 
     ctx = tool_ctx(tmp_path / "direct", fake)
@@ -1020,3 +1027,48 @@ async def test_gated_address_opens_only_after_approval(tmp_path, fake):
     assert cards[0]["category"] == "other" and cards[0]["needs_confirm"] is False
     assert cards[0]["summary"] == f"Open {url} · the address contains “delete”"
     assert fake.last("/v1/navigate")["url"] == url
+
+
+@pytest.mark.asyncio
+async def test_typing_that_submits_by_itself_is_gated_on_the_retry(tmp_path, fake):
+    """A field whose change handler posts a form: blocked once, then the same call asks Roland."""
+    fake.submits["e4"] = f"{SITE}/cart"
+    fake.autosubmit.add("e4")
+    typing = call("browser_type", json.dumps({"ref": "e4", "text": "SPRING10"}))
+    agent = browser_agent(tmp_path, fake, [("", [typing]), ("", [typing]), "Applied."])
+    cards: list[dict] = []
+
+    async def look_then_approve(row):
+        cards.append(dict(row))
+        assert fake.posts == []
+        await agent.gate.approve(row["id"], row["args_hash"], confirm=True)
+
+    await chat_and_decide(agent, look_then_approve)
+    outputs = tool_outputs(agent)
+    assert "Not done: that tried to submit a form" in outputs[0] and "Call browser_type again" in outputs[0]
+    assert len(cards) == 1 and cards[0]["category"] == "form_submit"
+    assert "typing here tried to submit a form before" in cards[0]["summary"]
+    assert cards[0]["details"]["text"] == "SPRING10"
+    modes = [body["mode"] for _, path, body in fake.calls if path == "/v1/type"]
+    assert modes == ["safe", "approved"] and fake.posts == [f"{SITE}/cart"]
+
+
+@pytest.mark.asyncio
+async def test_enter_with_nothing_focused_is_bound_to_the_page_address(tmp_path, fake):
+    fake.focused = None
+    press = call("browser_press", json.dumps({"key": "Enter"}))
+    agent = browser_agent(tmp_path, fake, [("", [press]), "ok"])
+
+    async def move_then_approve(row):
+        assert row["summary"].startswith("Press Enter on shop.example")
+        fake.url = f"{SITE}/orders/982/confirm"
+        await agent.gate.approve(row["id"], row["args_hash"], confirm=True)
+
+    await chat_and_decide(agent, move_then_approve)
+    assert fake.paths("/v1/press") == []
+    assert any("the page changed after Roland approved this" in text for text in tool_outputs(agent))
+
+    fake.url = f"{SITE}/cart"
+    same = browser_agent(tmp_path / "same", fake, [("", [press]), "ok"])
+    await chat_and_decide(same, approve(same))
+    assert fake.last("/v1/press")["mode"] == "approved"

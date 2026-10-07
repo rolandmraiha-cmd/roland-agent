@@ -99,17 +99,13 @@ def _where(url: object, *, path: bool = False) -> str:
     return _one_line(f"{host}{parts.path}" if path else host, 200)
 
 
-def _seen(element: dict | None) -> str:
-    """A digest of what was classified and shown: the element's facts and the site it is on.
-    `None` (nothing has the focus) has its own fixed digest."""
-    if element is None:
-        return hashlib.sha256(b"no element").hexdigest()
-    try:
-        parts = urlsplit(str(element.get("url") or "")[: policy_browser.MAX_URL_CHARS])
-        site = f"{parts.scheme}://{parts.netloc}"
-    except ValueError:
-        site = ""
-    facts = [site] + [element.get(key) for key in _SEEN_KEYS]
+def _seen(element: dict | None, page_url: object = None) -> str:
+    """A digest of what was classified and shown: the element's facts and the full address of
+    the page it is on (a one-page app can change what a button means by changing the route).
+    With no element (nothing has the focus) it covers the page address alone."""
+    url = element.get("url") if element is not None else page_url
+    url = str(url or "")[: policy_browser.MAX_URL_CHARS]
+    facts = [url] + ([element.get(key) for key in _SEEN_KEYS] if element is not None else ["no element"])
     return hashlib.sha256(json.dumps(facts, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
@@ -124,11 +120,12 @@ async def _changed_since_approval(client: BrowserClient, pin: dict, ref: str | N
     `ref=None` means the focused element (key presses)."""
     try:
         fresh = await (client.describe(ref) if ref is not None else client.describe_focused())
+        page_url = (await client.status()).get("url") if fresh is None else None
     except BrowserLocked as error:
         return _fail(error)
     except BrowserError:
         return CHANGED_AFTER_APPROVAL
-    if not isinstance(pin.get("seen"), str) or _seen(fresh) != pin["seen"]:
+    if not isinstance(pin.get("seen"), str) or _seen(fresh, page_url) != pin["seen"]:
         return CHANGED_AFTER_APPROVAL
     if fresh is not None and fresh.get("fingerprint") != pin.get("fingerprint"):
         return CHANGED_AFTER_APPROVAL
@@ -294,6 +291,17 @@ async def classify_type(ctx, args: dict) -> Decision:
     if verdict.risk == "forbidden":
         return _forbid(verdict.why)
     pinned = _pins(element)
+    if verdict.risk == "safe" and _blocked_before(ctx, element["fingerprint"]):
+        # Some fields submit by themselves as soon as their text changes.
+        verdict = policy_browser.Verdict(
+            "gated", "form_submit", "typing here tried to submit a form before",
+        )
+        summary, details = _element_card(element, "Type into", verdict.why)
+        details["text"] = _one_line(text, 500)
+        return Decision(
+            Risk.GATED, verdict.category, reason=verdict.why, summary=summary, details=details,
+            pinned=pinned, card_screenshot=_card_screenshot(ctx),
+        )
     if verdict.risk == "safe":
         return Decision(Risk.SAFE, pinned=pinned)
     summary, details = _element_card(element, "Type into", f"then submit · {verdict.why}")
@@ -321,7 +329,13 @@ async def classify_press(ctx, args: dict) -> Decision:
         if focused is not None and not _valid_fingerprint(focused.get("fingerprint")):
             focused = None
     verdict = policy_browser.classify_press(key, focused)
-    pinned: dict = {"key": key, "seen": _seen(focused)}
+    page_url = None
+    if focused is None and verdict.risk == "gated":
+        try:
+            page_url = (await client.status()).get("url")
+        except BrowserError as error:
+            return _forbid(str(error))
+    pinned: dict = {"key": key, "seen": _seen(focused, page_url)}
     if focused is not None:
         pinned["fingerprint"] = focused["fingerprint"]
         if verdict.risk == "safe" and _blocked_before(ctx, focused["fingerprint"]):
@@ -333,7 +347,8 @@ async def classify_press(ctx, args: dict) -> Decision:
     if focused is not None:
         summary, details = _element_card(focused, f"Press {key} on", verdict.why)
     else:
-        summary, details = f"Press {key} · {verdict.why}", {"why": verdict.why}
+        summary = f"Press {key} on {_where(page_url)} · {verdict.why}"
+        details = {"why": verdict.why, "page": _one_line(page_url, 300)}
     details["key"] = key
     return Decision(
         Risk.GATED, verdict.category, reason=verdict.why, summary=summary, details=details,
