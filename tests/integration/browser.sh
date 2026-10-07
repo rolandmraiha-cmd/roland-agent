@@ -68,18 +68,23 @@ printf '==> start the fixture site and the browser\n'
 printf '==> live tests\n'
 "${compose[@]}" run --rm --no-deps -e BROWSER_LIVE_REQUIRED=1 tester "${tests[@]}"
 
-# The most memory the container used so far, /dev/shm and /tmp included (the cap is 1280 MiB).
+# Memory after the tests. The counters include file cache (the Chromium program itself the
+# first time it starts), which the kernel gives back when needed, so "programs" is the figure
+# to compare with the 1280 MiB cap.
 "${compose[@]}" exec -T browser python -c '
 import pathlib
-for name in ("memory.peak", "memory/memory.max_usage_in_bytes"):  # cgroup v2, then v1
-    try:
-        peak = int(pathlib.Path("/sys/fs/cgroup", name).read_text())
-    except (OSError, ValueError):
-        continue
-    print(f"peak memory during the tests: {peak // 2**20} MiB of 1280 MiB")
-    break
-else:
-    print("peak memory: not reported by this kernel")'
+root = pathlib.Path("/sys/fs/cgroup")
+old = (root / "memory/memory.stat").is_file()  # cgroup v1
+stat_file, peak_file = ("memory/memory.stat", "memory/memory.max_usage_in_bytes") if old else ("memory.stat", "memory.peak")
+names = ("total_rss", "total_shmem", "total_cache") if old else ("anon", "shmem", "file")
+try:
+    stat = dict(line.split() for line in (root / stat_file).read_text().splitlines())
+    programs, shared, cache = (int(stat[name]) // 2**20 for name in names)
+    print(f"memory after the tests: programs {programs} MiB, shared memory and /tmp {shared} MiB, "
+          f"file cache {max(cache - shared, 0)} MiB")
+    print(f"highest total so far, file cache included: {int((root / peak_file).read_text()) // 2**20} MiB")
+except (OSError, ValueError, KeyError):
+    print("memory: not reported by this kernel")'
 
 printf '==> restart the browser; the profile must keep the sign-in\n'
 "${compose[@]}" restart browser
@@ -186,8 +191,21 @@ if [[ $ports == *"0.0.0.0"* || $ports == *":::"* ]]; then
 fi
 printf 'ok: profile volume only in the browser container, no published port\n'
 
+# Nothing may have died along the way: no out-of-memory kill, no crash that the launcher
+# or Docker quietly recovered from.
+browser_container=$("${compose[@]}" ps --quiet browser)
+state=$(docker inspect --format '{{ .State.OOMKilled }} {{ .RestartCount }}' "$browser_container")
+if [[ $state != "false 0" ]]; then
+    printf 'FAIL the browser container was killed or restarted by itself (OOMKilled RestartCount: %s)\n' "$state" >&2
+    exit 1
+fi
+if "${compose[@]}" logs --no-color browser 2>&1 | grep -E 'exited with|next start in' >/dev/null; then
+    printf 'FAIL a process inside the browser container died and was started again\n' >&2
+    exit 1
+fi
+printf 'ok: no out-of-memory kill, no restart, no process died\n'
+
 printf '==> memory now, after the restart\n'
-docker stats --no-stream --format '{{ .Name }}  {{ .MemUsage }}  {{ .MemPerc }}' \
-    "$("${compose[@]}" ps --quiet browser)"
+docker stats --no-stream --format '{{ .Name }}  {{ .MemUsage }}  {{ .MemPerc }}' "$browser_container"
 
 printf '\nbrowser stack: all checks passed\n'

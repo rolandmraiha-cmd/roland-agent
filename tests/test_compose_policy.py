@@ -438,6 +438,7 @@ def test_browser_service_is_off_by_default_and_hardened():
     assert env["BROWSER_CHROMIUM_SANDBOX"] == "${BROWSER_CHROMIUM_SANDBOX:-false}"
     assert env["BROWSER_SENSITIVE_MATCH"] == "${BROWSER_SENSITIVE_MATCH:-substring}"  # the spec's rule
     assert env["BROWSER_BLOCK_BACKGROUND_POSTS"] == "${BROWSER_BLOCK_BACKGROUND_POSTS:-false}"
+    assert env["BROWSER_MAX_DOWNLOAD_MB"] == "${BROWSER_MAX_DOWNLOAD_MB:-200}"
     assert env["DISPLAY"] == ":99" and env["HOME"] == "/tmp/home"
     assert "BROWSER_ALLOW_PRIVATE_HOSTS" not in env and not any(key.startswith("VNC") for key in env)
     assert browser["secrets"] == ["browser_api_token"]
@@ -471,7 +472,7 @@ def test_private_addresses_are_only_let_through_in_the_test_stack():
     assert "BROWSER_ALLOW_PRIVATE_HOSTS" not in production
     test_stack = yaml.safe_load((ROOT / "docker-compose.test.yml").read_text())
     browser = test_stack["services"]["browser"]
-    assert browser["environment"] == {"BROWSER_ALLOW_PRIVATE_HOSTS": "fixture-web"}
+    assert browser["environment"] == {"BROWSER_ALLOW_PRIVATE_HOSTS": "fixture-web", "BROWSER_MAX_DOWNLOAD_MB": "4"}
     assert browser["networks"] == {"fixtures": {"ipv4_address": "10.77.20.40"}}
     assert test_stack["networks"]["fixtures"]["internal"] is True
     tester = test_stack["services"]["tester"]
