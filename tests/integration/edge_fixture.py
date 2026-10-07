@@ -14,7 +14,12 @@ def main():
         raise SystemExit("The edge fixture is restricted to GitHub CI")
     env = ROOT / ".env"
     secret_dir = ROOT / "secrets"
-    paths = [env, secret_dir / "agent_password_hash", secret_dir / "model_server_token"]
+    paths = [
+        env,
+        secret_dir / "agent_password_hash",
+        secret_dir / "model_server_token",
+        secret_dir / "sandbox_api_token",
+    ]
     if any(path.exists() or path.is_symlink() for path in paths):
         raise SystemExit("Refusing to overwrite existing configuration or credentials")
     private = ROOT / ".ci-workspace"
@@ -26,6 +31,7 @@ def main():
     values = {
         secret_dir / "agent_password_hash": hash_password(password),
         secret_dir / "model_server_token": secrets.token_urlsafe(32),
+        secret_dir / "sandbox_api_token": secrets.token_urlsafe(32),
         private / "login-password": password,
     }
     for path, value in values.items():

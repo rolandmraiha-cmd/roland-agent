@@ -1,4 +1,4 @@
-"""Read-only checks for the M2 edge slice; no deployment or firewall changes."""
+"""Read-only checks for the M4 edge/runtime slice; no deployment or firewall changes."""
 
 from __future__ import annotations
 
@@ -32,8 +32,8 @@ def configuration_errors(config: dict) -> list[str]:
     """Inspect resolved Compose JSON without printing environment values."""
     errors = []
     services = config.get("services", {})
-    if set(services) != {"caddy", "core", "model"}:
-        return ["This runtime slice must contain only caddy, core and model"]
+    if set(services) != {"caddy", "core", "model", "sandbox"}:
+        return ["This runtime slice must contain only caddy, core, model and sandbox"]
     for name, service in services.items():
         if (
             service.get("user") != "1000:1000"
@@ -83,6 +83,19 @@ def configuration_errors(config: dict) -> list[str]:
             errors.append("Model context or thread count is outside the current host limits")
     except (ValueError, TypeError):
         errors.append("Invalid model context or thread count")
+    sandbox = services["sandbox"]
+    if sandbox.get("ports") or set(sandbox.get("networks", {})) != {"sandbox_ctl", "sandbox_egress"}:
+        errors.append("Sandbox must have only sandbox_ctl and sandbox_egress networks and no published ports")
+    if config.get("networks", {}).get("sandbox_ctl", {}).get("internal") is not True:
+        errors.append("Sandbox control network must be internal")
+    sandbox_env = sandbox.get("environment", {})
+    if (
+        sandbox_env.get("SANDBOXD_HOST") != "10.77.3.20"
+        or sandbox_env.get("SANDBOXD_ALLOWED_PEERS") != "10.77.3.10"
+    ):
+        errors.append("Sandbox must listen on the control address and allow only core")
+    if any(sandbox_env.get(name) for name in SECRET_ENV):
+        errors.append("Remove direct secret values from sandbox environment; use mounted secret files")
     core = services["core"].get("environment", {})
     caddy = services["caddy"].get("environment", {})
     for key, value in {
@@ -156,7 +169,7 @@ def private_path_errors(path: Path, *, directory: bool, uid: int = 1000) -> list
 def path_errors(config: dict) -> list[str]:
     errors = []
     secrets = config.get("secrets", {})
-    for name in ("agent_password_hash", "model_server_token"):
+    for name in ("agent_password_hash", "model_server_token", "sandbox_api_token"):
         filename = secrets.get(name, {}).get("file")
         if not filename:
             errors.append(f"{name}: required file secret is missing")

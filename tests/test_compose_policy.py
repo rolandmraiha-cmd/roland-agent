@@ -250,6 +250,7 @@ def test_hostname_selection_applies_to_both_services(tmp_path, domain, fallback,
         "model_network",
         "model_write",
         "model_ctx",
+        "sandbox_network",
     ],
 )
 def test_preflight_refuses_modified_policy_without_printing_secret_values(resolved, change):
@@ -273,6 +274,8 @@ def test_preflight_refuses_modified_policy_without_printing_secret_values(resolv
         config["services"]["model"]["volumes"][0]["read_only"] = False
     elif change == "model_ctx":
         config["services"]["model"]["environment"]["MODEL_CTX"] = "8192"
+    elif change == "sandbox_network":
+        config["services"]["sandbox"]["networks"]["public"] = {}
     else:
         core["environment"]["MODEL_SERVER_TOKEN"] = "synthetic-value-must-not-be-printed"
     errors = preflight.configuration_errors(config)
@@ -319,6 +322,41 @@ def test_model_ctx_compose_default_is_4096():
     assert "${MODEL_CTX:-4096}" in raw
     assert "${MODEL_CTX:-6144}" not in raw
     assert "${MODEL_CTX:-5120}" not in raw
+
+
+def test_path_errors_requires_sandbox_api_token(tmp_path):
+    secrets = tmp_path / "secrets"
+    secrets.mkdir(mode=0o700)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(mode=0o700)
+    for name in ("agent_password_hash", "model_server_token"):
+        path = secrets / name
+        path.write_text("synthetic-fixture")
+        path.chmod(0o400)
+    config = {
+        "secrets": {
+            "agent_password_hash": {"file": str(secrets / "agent_password_hash")},
+            "model_server_token": {"file": str(secrets / "model_server_token")},
+        },
+        "services": {"core": {"volumes": [{"source": str(workspace), "target": "/workspace"}]}},
+    }
+    # Force uid match for this process (CI/local may not be 1000).
+    original = preflight.private_path_errors
+
+    def check(path, *, directory, uid=1000):
+        return original(path, directory=directory, uid=os.getuid())
+
+    preflight.private_path_errors = check
+    try:
+        errors = preflight.path_errors(config)
+        assert any("sandbox_api_token" in error for error in errors)
+        token = secrets / "sandbox_api_token"
+        token.write_text("synthetic-fixture")
+        token.chmod(0o400)
+        config["secrets"]["sandbox_api_token"] = {"file": str(token)}
+        assert preflight.path_errors(config) == []
+    finally:
+        preflight.private_path_errors = original
 
 
 def test_sandbox_service_hardening():
