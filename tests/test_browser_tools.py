@@ -16,7 +16,14 @@ from agent.core import Agent
 from agent.gate import PIN_KEY, approval_public
 from agent.memory import Memory
 from agent.tools import ToolContext, call_tool
-from agent.tools_browser import BROWSER_TOOLS, NOT_CHECKED, browser_click, browser_upload, format_snapshot
+from agent.tools_browser import (
+    BROWSER_TOOLS,
+    NOT_CHECKED,
+    browser_click,
+    browser_open,
+    browser_upload,
+    format_snapshot,
+)
 
 TOKEN = "browser-test-token"
 SITE = "https://shop.example"
@@ -594,6 +601,8 @@ async def test_safe_link_click_and_model_cannot_supply_its_own_pin(tmp_path, fak
     assert sent == {"ref": "e3", "fingerprint": fingerprint(fake.elements["e3"]), "mode": "safe"}
 
     # A handler reached without the gate's pin refuses to act (fail closed).
+    assert await browser_open(ctx, {"url": f"{SITE}/checkout"}) == NOT_CHECKED
+    assert fake.paths("/v1/navigate") == []
     assert await browser_click(ctx, {"ref": "e3"}) == NOT_CHECKED
     assert await browser_click(ctx, {"ref": "e3", PIN_KEY: {"fingerprint": "short"}}) == NOT_CHECKED
     assert await browser_upload(ctx, {"ref": "e8", "path": "a.txt", PIN_KEY: {"fingerprint": "f" * 64}}) == NOT_CHECKED
@@ -994,3 +1003,20 @@ async def test_page_title_does_not_decide_what_a_click_is(tmp_path, fake):
     out = await call_tool(ctx, "browser_click", {"ref": "e3"})
     assert out.startswith("Clicked."), out
     assert fake.last("/v1/click")["mode"] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_gated_address_opens_only_after_approval(tmp_path, fake):
+    url = f"{SITE}/account/delete?confirm=1"
+    agent = browser_agent(tmp_path, fake, [("", [call("browser_open", json.dumps({"url": url}))]), "ok"])
+    cards: list[dict] = []
+
+    async def look_then_approve(row):
+        cards.append(dict(row))
+        assert fake.paths("/v1/navigate") == []
+        await agent.gate.approve(row["id"], row["args_hash"], confirm=True)
+
+    await chat_and_decide(agent, look_then_approve)
+    assert cards[0]["category"] == "other" and cards[0]["needs_confirm"] is False
+    assert cards[0]["summary"] == f"Open {url} · the address contains “delete”"
+    assert fake.last("/v1/navigate")["url"] == url

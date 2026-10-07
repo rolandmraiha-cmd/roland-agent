@@ -600,6 +600,8 @@ async def browser_open(ctx, args: dict) -> str:
     verdict = policy_browser.classify_open(url)
     if verdict.risk == "forbidden":
         return f"Error: {verdict.why}."
+    if verdict.risk == "gated" and not _approved(ctx, "browser_open"):
+        return NOT_CHECKED  # same rule as the classifier; only the gate can let this through
     try:
         answer = await client.navigate(url, bool(args.get("new_tab")))
     except BrowserError as error:
