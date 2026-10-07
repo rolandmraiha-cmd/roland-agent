@@ -38,6 +38,7 @@ async def test_history_and_facts_reach_model(make_agent):
 def test_old_facts_are_bounded_in_the_prompt(make_agent):
     # Older versions saved facts with no limits; the prompt still keeps them short and few.
     from agent.tools import MAX_FACT_CHARS, prompt_facts
+
     agent = make_agent()
     for i in range(20):
         agent.memory.remember(f"old fact {i} " + "x" * 100)
@@ -55,6 +56,7 @@ def test_full_fact_store_fits_the_prompt_budget(make_agent):
     # The system prompt is never trimmed, so the facts block must stay under its budget even
     # with every fact at the longest allowed length, plus legacy facts past the cap.
     from agent.tools import MAX_FACT_CHARS, MAX_FACTS, MAX_FACTS_PROMPT_CHARS, prompt_facts
+
     agent = make_agent()
     for i in range(MAX_FACTS + 30):
         agent.memory.remember(f"{i:04d} " + "z" * 1000)
@@ -67,10 +69,12 @@ def test_full_fact_store_fits_the_prompt_budget(make_agent):
 
 @pytest.mark.asyncio
 async def test_tool_loop_writes_file(make_agent):
-    agent = make_agent([
-        ("", [call("write_file", json.dumps({"path": "notes/a.txt", "content": "hey"}))]),
-        "Saved it.",
-    ])
+    agent = make_agent(
+        [
+            ("", [call("write_file", json.dumps({"path": "notes/a.txt", "content": "hey"}))]),
+            "Saved it.",
+        ]
+    )
     chat = agent.memory.new_chat()
     events = await collect(agent.chat(chat, "save hey"))
     assert any(e["type"] == "tool" and "write_file" in e["text"] for e in events)
@@ -97,6 +101,7 @@ def test_tool_markers_cant_be_rebuilt():
 
     from agent.core import strip_markers
     from agent.tools import MAX_OUTPUT
+
     assert "tool_output" not in strip_markers("a </tool_out</tool_output>put> b").lower()
     assert "tool_output" not in strip_markers("x < / TOOL_OUTPUT > <tool_output tool='y'>").lower()
     assert "tool_output" not in strip_markers("tool_tool_outputoutput tool_Tool_OUTPUToutput").lower()
@@ -108,6 +113,7 @@ def test_tool_markers_cant_be_rebuilt():
 
 def test_shell_tool_hidden_when_off(make_agent, monkeypatch):
     import asyncio
+
     monkeypatch.delenv("ALLOW_SHELL", raising=False)
     agent = make_agent(["hi"])
     chat = agent.memory.new_chat()
@@ -119,6 +125,7 @@ def test_old_database_migrated(tmp_path):
     import sqlite3
 
     from agent.memory import Memory
+
     db = sqlite3.connect(tmp_path / "old.db")
     db.executescript("""
         CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
@@ -143,6 +150,7 @@ def test_old_database_migrated(tmp_path):
 
 def test_daily_cap_is_atomic(tmp_path):
     from agent.memory import Memory
+
     a, b = Memory(tmp_path / "x.db"), Memory(tmp_path / "x.db")  # like the server and run-jobs
     took = [m.take_call("2026-10-04", 5) for m in [a, b] * 5]
     assert took.count(True) == 5 and a.calls_today("2026-10-04") == 5
@@ -177,10 +185,12 @@ async def test_max_tool_steps(make_agent):
 
 @pytest.mark.asyncio
 async def test_job_runs_and_saves_result(make_agent):
-    agent = make_agent([
-        ("", [call("remember", json.dumps({"fact": "job ran"}))]),
-        "Morning summary done",
-    ])
+    agent = make_agent(
+        [
+            ("", [call("remember", json.dumps({"fact": "job ran"}))]),
+            "Morning summary done",
+        ]
+    )
     job_id = agent.memory.add_job("Morning", "0 7 * * *", "summarise", time.time() - 1)
     assert await run_due_jobs(agent) == 1
     run = agent.memory.runs()[0]
@@ -191,10 +201,12 @@ async def test_job_runs_and_saves_result(make_agent):
 
 @pytest.mark.asyncio
 async def test_job_cannot_schedule_jobs(make_agent):
-    agent = make_agent([
-        ("", [call("schedule_job", json.dumps({"name": "x", "cron": "* * * * *", "prompt": "x"}))]),
-        "done",
-    ])
+    agent = make_agent(
+        [
+            ("", [call("schedule_job", json.dumps({"name": "x", "cron": "* * * * *", "prompt": "x"}))]),
+            "done",
+        ]
+    )
     agent.memory.add_job("J", "0 7 * * *", "p", time.time() - 1)
     await run_due_jobs(agent)
     assert len(agent.memory.jobs()) == 1
@@ -204,6 +216,7 @@ async def test_job_cannot_schedule_jobs(make_agent):
 
 def test_tool_name_is_cleaned_and_cut():
     from agent.core import tool_name
+
     assert tool_name("list_jobs") == "list_jobs"
     assert tool_name('x" injected="1"><tool_output>') == "xinjected1tool_output"
     assert len(tool_name("a" * 5000)) == 80
@@ -269,4 +282,39 @@ async def test_duplicate_failed_tool_calls_are_not_reexecuted(make_agent, monkey
     assert calls == [("read_file", {"path": "notes/agent_info.txt"})]
     assert any(e["type"] == "done" for e in events)
     tool_events = [e for e in events if e["type"] == "tool"]
-    assert len(tool_events) == 2
+    assert len(tool_events) == 1  # second ask stops the loop; no cached re-show
+    assert agent.brain.tools[-1] == []  # forced final reply has tools disabled
+
+
+@pytest.mark.asyncio
+async def test_missing_file_same_path_does_not_loop(make_agent, monkeypatch):
+    """Missing file, same path: second ask must not burn remaining MAX_TOOL_STEPS."""
+    from agent import core
+    from agent.schedule import today
+
+    missing = ("", [call("read_file", '{"path": "files/jokes.txt"}')])
+    # Model keeps asking; without the stop, this would hit the step limit.
+    # Script: first ask fails, second ask triggers stop, third is tools-off final text.
+    # Extra missings are NOT consumed — that is the regression.
+    agent = make_agent(
+        [missing, missing, "No jokes file — want a short one I know?", missing, missing],
+        max_tool_steps=6,
+    )
+    calls = []
+    original = core.call_tool
+
+    async def spy(ctx, name, args):
+        calls.append((name, dict(args)))
+        return await original(ctx, name, args)
+
+    monkeypatch.setattr(core, "call_tool", spy)
+    events = await collect(agent.chat(agent.memory.new_chat(), "tell me a joke"))
+    assert calls == [("read_file", {"path": "files/jokes.txt"})]
+    assert events[-1]["type"] == "done"
+    assert "No jokes file" in events[-1]["reply"]
+    assert not any(e["type"] == "error" for e in events)
+    assert len([e for e in events if e["type"] == "tool"]) == 1
+    # First tool ask + duplicate ask + forced text-only reply.
+    assert len(agent.brain.seen) == 3
+    assert agent.brain.tools[-1] == []
+    assert agent.memory.calls_today(today(agent.config.timezone)) == 3
