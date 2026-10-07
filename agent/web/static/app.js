@@ -168,27 +168,56 @@ async function send(text) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
-    try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
+    const applyEvent = (ev) => {
+      if (ev.type === "text") {
+        if (!gotText) {
+          gotText = true;
+          bubble.textContent = "";
+          clearInterval(thinkTimer);
+          reply.classList.remove("typing"); // drop ◦ caret; avoids a flash on replace
+        }
+        bubble.textContent += ev.text;
+      } else if (ev.type === "done") {
+        // Authoritative final reply. Required when the model never streamed text deltas
+        // (common with JSON/grammar actions) or the idle connection only delivered done.
+        clearInterval(thinkTimer);
+        gotText = true;
+        reply.classList.remove("typing");
+        if (typeof ev.reply === "string") bubble.textContent = ev.reply;
+      } else if (ev.type === "tool") reply.before(el("div", "msg tool", `⚙ ${ev.text}`));
+      else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
+      else if (ev.type === "error") {
+        clearInterval(thinkTimer);
+        reply.classList.remove("typing");
+        // Clear the thinking placeholder so the error isn't paired with a stuck spinner.
+        if (!gotText) bubble.textContent = "";
+        reply.after(el("div", "msg error", ev.message));
+      }
+      // "end" and SSE comments are ignored.
+      scrollDown();
+    };
+    const consume = () => {
+      // Accept both LF and CRLF event separators (proxies may normalize).
+      buf = buf.replace(/\r\n/g, "\n");
       let i;
       while ((i = buf.indexOf("\n\n")) >= 0) {
-        const chunk = buf.slice(0, i);
+        const chunk = buf.slice(0, i).trim();
         buf = buf.slice(i + 2);
         if (!chunk.startsWith("data: ")) continue;
-        const ev = JSON.parse(chunk.slice(6));
-        if (ev.type === "text") {
-          if (!gotText) { gotText = true; bubble.textContent = ""; clearInterval(thinkTimer); }
-          bubble.textContent += ev.text;
-        }
-        else if (ev.type === "tool") reply.before(el("div", "msg tool", `⚙ ${ev.text}`));
-        else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
-        else if (ev.type === "error") reply.after(el("div", "msg error", ev.message));
-        scrollDown();
+        applyEvent(JSON.parse(chunk.slice(6)));
       }
-    }
+    };
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (value) buf += decoder.decode(value, { stream: true });
+        if (done) {
+          buf += decoder.decode(); // flush any trailing multibyte sequence
+          consume();
+          break;
+        }
+        consume();
+      }
     } finally { clearInterval(thinkTimer); }
   } catch (e) {
     if (reply) reply.after(el("div", "msg error", e.message));
@@ -200,7 +229,20 @@ async function send(text) {
   } finally {
     if (reply) {
       reply.classList.remove("typing");
-      if (!reply.querySelector(".bubble").textContent) reply.remove();
+      let final = reply.querySelector(".bubble").textContent;
+      // Idle drop / partial SSE: server may still have saved the reply (produce() runs detached).
+      if ((!final || final.startsWith("thinking…")) && currentChat != null) {
+        try {
+          const data = await (await api(`/api/chats/${currentChat}/messages`)).json();
+          const last = [...data.messages].reverse().find((m) => m.role === "assistant");
+          if (last && last.content) {
+            reply.querySelector(".bubble").textContent = last.content;
+            final = last.content;
+          }
+        } catch (_) {}
+      }
+      // Drop an empty bubble or a leftover thinking placeholder.
+      if (!final || final.startsWith("thinking…")) reply.remove();
     }
     setSending(false);
     loadChats().then((chats) => {

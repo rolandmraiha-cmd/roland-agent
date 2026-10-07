@@ -128,6 +128,40 @@ def test_chat_stream_and_history(client):
     assert client.get("/api/chats").json()[0]["title"] == "hello"
 
 
+def test_chat_stream_sends_keepalive_while_model_thinks(make_agent, monkeypatch):
+    """Mobile Safari drops idle SSE; keepalive comments must flow during long waits."""
+    import asyncio
+    from agent.brain import Step
+
+    class SlowBrain:
+        async def stream(self, messages, tools):
+            await asyncio.sleep(0.05)  # shorter than production; monkeypatched wait_for below
+            yield "Hi "
+            yield "there "
+            yield Step(text="Hi there ")
+
+    # Force keepalive every 0.01s so one sleep(0.05) produces several comments.
+    real_wait = asyncio.wait_for
+
+    async def wait_for(awaitable, timeout=None):
+        if timeout == 5.0:
+            return await real_wait(awaitable, timeout=0.01)
+        return await real_wait(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", wait_for)
+    agent = make_agent()
+    agent.brain = SlowBrain()
+    with TestClient(create_app(agent, run_scheduler=False)) as client:
+        login(client)
+        chat_id = client.post("/api/chats", headers=ORIGIN).json()["id"]
+        with client.stream(
+            "POST", f"/api/chats/{chat_id}/send", json={"text": "hello"}, headers=ORIGIN
+        ) as r:
+            body = "".join(r.iter_text())
+    assert ": keepalive" in body
+    assert '"type": "done"' in body and '"type": "end"' in body
+
+
 def test_jobs_api(client):
     login(client)
     assert client.post("/api/jobs", json={"name": "n", "cron": "nope nope", "prompt": "p"}, headers=ORIGIN).status_code in (400, 422)

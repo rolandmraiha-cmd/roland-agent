@@ -303,7 +303,16 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         task.add_done_callback(tasks.discard)
 
         async def stream():
-            while (event := await queue.get()) is not None:
+            # Keepalive comments reset mobile/proxy idle timers during long local-model waits.
+            # Clients ignore ":" lines; fetch still sees bytes so the stream stays alive.
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=5.0)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
                 yield sse(event)
             yield sse({"type": "end"})
 
@@ -407,6 +416,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     @app.get("/favicon.ico")
     async def favicon():
-        return Response(status_code=204)
+        # Real icon avoids Safari briefly flashing another site's tab mark (seen as a
+        # "GitHub logo" flash during the thinking→reply transition on Contabo).
+        return FileResponse(STATIC / "favicon.svg", media_type="image/svg+xml")
 
     return app
