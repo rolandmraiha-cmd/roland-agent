@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
-import os
 import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -31,9 +31,6 @@ MAX_FACTS = 50             # saved facts in total
 MAX_FACTS_PROMPT_CHARS = 1500  # the whole facts block in the system prompt (~500 tokens)
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
-# Environment variables the shell never gets, so commands can't print the agent's secrets.
-SECRET_ENV = {"AGENT_PASSWORD_HASH", "MODEL_API_KEY", "MODEL_SERVER_TOKEN"}
-
 
 def clip(text: str, limit: int = MAX_OUTPUT) -> str:
     if len(text) <= limit:
@@ -51,6 +48,7 @@ class ToolContext:
     gate: object | None = None
     run: object | None = None
     config: object | None = None
+    shell: object | None = None  # ShellBackend; None → LocalShell when allow_shell
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[str]]
@@ -144,58 +142,57 @@ async def _fetch(url: str) -> str:
 
 
 # --- shell ---
+def _shell_timeout(ctx: ToolContext, args: dict) -> int:
+    config = getattr(ctx, "config", None)
+    default = getattr(config, "shell_timeout_default", None) or SHELL_TIMEOUT
+    maximum = getattr(config, "shell_timeout_max", None) or 300
+    raw = args.get("timeout_s", default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, maximum))
+
+
 async def run_shell(ctx: ToolContext, args: dict) -> str:
     if not ctx.allow_shell:
         return ("Error: shell commands are turned off. Roland can turn them on with "
                 "ALLOW_SHELL=true.")
     command = str(args.get("command", ""))
-    ctx.workspace.mkdir(parents=True, exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
-    proc = await asyncio.create_subprocess_shell(
-        command, cwd=ctx.workspace, env=env,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        start_new_session=True,
+    timeout_s = _shell_timeout(ctx, args)
+    backend = ctx.shell
+    if backend is None:
+        from .local_shell import LocalShell
+
+        backend = LocalShell(ctx.workspace, max_output=MAX_OUTPUT)
+    result = await backend.run(command, timeout_s)
+    # Audit every command (§6.2.5 shell_exec).
+    run = ctx.run
+    run_id = getattr(run, "run_id", None) if run is not None else None
+    chat_id = getattr(run, "chat_id", None) if run is not None else None
+    ctx.audit.write(
+        "agent",
+        "shell_exec",
+        run_id=run_id,
+        chat_id=chat_id,
+        tool="run_shell",
+        detail={
+            "command": command[:4096],
+            "exit_code": result.exit_code,
+            "duration_ms": result.duration_ms,
+            "output_sha256": hashlib.sha256(result.output.encode("utf-8", errors="replace")).hexdigest(),
+            "output_preview": result.output[:2048],
+            "truncated": result.truncated,
+            "timed_out": result.timed_out,
+            "timeout_s": timeout_s,
+        },
     )
-
-    def kill() -> None:
-        try:
-            os.killpg(proc.pid, 9)
-        except ProcessLookupError:
-            pass
-
-    async def read_capped() -> tuple[bytes, bool]:
-        # Reads at most MAX_OUTPUT bytes; a command that prints more is stopped right there.
-        out = b""
-        while len(out) <= MAX_OUTPUT:
-            part = await proc.stdout.read(4096)
-            if not part:
-                return out, False
-            out += part
-        kill()
-        return out, True
-
-    async def finish() -> None:
-        # Drains what's left (the process is dead or done) so its pipes close cleanly.
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=5)
-        except TimeoutError:
-            pass
-
-    try:
-        out, cut = await asyncio.wait_for(read_capped(), timeout=SHELL_TIMEOUT)
-        await finish()
-    except asyncio.CancelledError:
-        kill()
-        await finish()
-        raise
-    except TimeoutError:
-        kill()
-        await finish()
-        return f"Error: the command took longer than {SHELL_TIMEOUT} seconds and was stopped."
-    text = clip(out.decode(errors="replace"))
-    if cut:
+    if result.timed_out:
+        return f"Error: the command took longer than {timeout_s} seconds and was stopped."
+    text = clip(result.output)
+    if result.truncated:
         return f"{text}\n[stopped: the command printed more than {MAX_OUTPUT} characters]"
-    return f"exit code {proc.returncode}\n{text}"
+    return f"exit code {result.exit_code}\n{text}"
 
 
 # --- files ---
@@ -383,8 +380,9 @@ INTEGER = {"type": "integer"}
 TOOLS: dict[str, tuple[dict, Handler]] = {
     "fetch_url": (_fn("fetch_url", "Download a public web page and return its text.",
                       {"url": S}, ["url"]), fetch_url),
-    "run_shell": (_fn("run_shell", "Run a shell command in your own container, in your workspace "
-                      "folder. 60 second limit.", {"command": S}, ["command"]), run_shell),
+    "run_shell": (_fn("run_shell", "Run a shell command in the isolated sandbox workspace. "
+                      "Optional timeout_s (seconds) and reason for gated commands.",
+                      {"command": S, "timeout_s": INTEGER, "reason": S}, ["command"]), run_shell),
     "read_file": (_fn("read_file", "Read a text file from your workspace. Paths are relative to the workspace, e.g. 'notes/todo.txt'.",
                       {"path": S}, ["path"]), read_file),
     "write_file": (_fn("write_file", "Write (or append to) a text file in your workspace. Paths are relative to the workspace, e.g. 'notes/todo.txt'.",

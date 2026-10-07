@@ -86,14 +86,23 @@ class Agent:
         self.brain = brain
         self.audit = Audit.from_config(memory, config)
         self.gate = Gate(memory, self.audit, config)
-        # Off unless ALLOW_SHELL=true. Commands run as the agent's own user, so they could reach
-        # its database and settings; a separate sandbox is planned for v2.
+        # Off unless ALLOW_SHELL=true. Production uses the isolated sandbox backend (§6.2.5).
         self.allow_shell = config.allow_shell
         slots = max(1, config.model_max_concurrency)
         self._streams = asyncio.Semaphore(slots)
+        shell = None
+        if self.allow_shell and config.shell_backend == "sandbox":
+            from .sandbox_client import SandboxShell
+
+            shell = SandboxShell(
+                config.sandbox_url,
+                config.sandbox_api_token,
+                timeout_default=config.shell_timeout_default,
+                timeout_max=config.shell_timeout_max,
+            )
         self.ctx = ToolContext(
             memory, config.workspace, config.timezone, self.allow_shell,
-            audit=self.audit, gate=self.gate, config=config,
+            audit=self.audit, gate=self.gate, config=config, shell=shell,
         )
         self._token_cache: dict[str, int] = {}
         self._chat_runs: dict[int, RunState] = {}
