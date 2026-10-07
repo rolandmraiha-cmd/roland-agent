@@ -53,13 +53,14 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | M6 part 1 (core side, **dormant**) | Click classifier, `browserd` client, 16 browser tools with gate policies, element fingerprint pinned to approvals, screenshot on approval cards; A6.1 and A6.2 green. Not usable: no `browserd` yet | #39 |
 
 - M6.4 fixture site exists at `tests/fixtures/site/server.py` with the `fixture-web` test service (#38); browser integration remains pending.
+- M6.7 Browser tab and authenticated status/thumbnail routes exist; browser service and Contabo smoke remain pending.
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with `caddy`, `core`, `model`, `sandbox` healthy.
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).
 
 ## 4. Not done (do not document as available)
 
 - **M6** browser (rest of it) · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
-- **M6 still missing:** `browserd/` (launcher, session, server, `snapshot.js`), `docker/browser/` image and Chromium policy, the `browser` compose service and secret, firewall rules, the live tests against the fixture site (A6.3, A6.4), the Browser tab, the Contabo memory measurement and smoke (A6.5). Until then `python -m agent` refuses `BROWSER_ENABLED=true` ("not implemented yet").
+- **M6 still missing:** `browserd/` (launcher, session, server, `snapshot.js`), `docker/browser/` image and Chromium policy, the `browser` compose service and secret, firewall rules, the live tests against the fixture site (A6.3, A6.4), the Contabo memory measurement and smoke (A6.5). Until then `python -m agent` refuses `BROWSER_ENABLED=true` ("not implemented yet").
 - Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit CI already runs `tests/test_no_hosted_llm.py`.
 - `make model-bench`: deferred.
 - Full measured model acceptance table (§6): not yet recorded in the repo.
@@ -165,7 +166,7 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 
 1. **Grok bots:** wait for Roland to unpause THE SCAM CALL CENTER before those bots start M6. **External AI:** if Roland already handed you this plan, start when he said — Grok parking does not block you.
 2. Decide MODEL_CTX vs memory (§6) and record host memory under load.
-3. **M6 part 2** (`browserd`, image, compose, firewall, fixture site, live tests, Browser tab) → **M7** screen/sign-in → **M8** persona/training → **M9** release.
+3. **M6 part 2** (`browserd`, image, compose, firewall, fixture site, live tests) → **M7** screen/sign-in → **M8** persona/training → **M9** release.
 
 Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 

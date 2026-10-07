@@ -196,6 +196,7 @@ Expected locations per `docs/v2-spec.md`; verify in tree (deliverables 4 and 7 e
    The fixture site exists with unit tests and the internal `fixture-web` service; browser integration remains pending.
 8. **Chromium sandbox experiment** (`BROWSER_CHROMIUM_SANDBOX`, default `false`): try `true` with a pinned seccomp profile; report the result in the PR. Do not weaken host AppArmor to make it work.
 9. **UI:** Browser tab showing status, current URL/title and a thumbnail. Vanilla JS, `textContent` only; keep function names used by `tests/frontend/chat.test.cjs`.
+   The Browser tab and core status/thumbnail routes exist; browser service and live smoke remain pending.
 
 #### Contract between core and browserd (fixed by part 1; part 2 must implement it)
 
