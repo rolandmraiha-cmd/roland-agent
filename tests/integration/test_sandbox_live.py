@@ -58,7 +58,8 @@ def test_proc_environ_has_no_token():
     token = _token()
     body = _exec("cat /proc/1/environ | tr '\\0' '\\n' || true")
     assert token not in body["output"]
-    assert "SANDBOX_API_TOKEN" not in body["output"]
+    # The name of the secret *file* is there (SANDBOX_API_TOKEN_FILE); the token itself is not.
+    assert "SANDBOX_API_TOKEN=" not in body["output"]
 
 
 def test_fork_bomb_does_not_kill_sandbox():

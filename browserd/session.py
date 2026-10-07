@@ -244,6 +244,7 @@ class Session:
         self._last_request = 0.0
         self._refused: str | None = None
         self._dialogs: list[dict] = []
+        self._open_dialogs: list = []
         self._background: list[dict] = []
         self._popups_closed = 0
         self._incoming: dict[int, dict] = {}
@@ -343,6 +344,7 @@ class Session:
             self._on_page(page)
         if not self._tabs:
             self._on_page(await context.new_page())
+        self._popups_closed = 0  # tabs Chromium restored beyond the limit are not "pop-ups"
         self.browser_ok = True
 
     async def stop(self) -> None:
@@ -376,7 +378,9 @@ class Session:
     def _on_page(self, page) -> None:
         if any(tab.page is page for tab in self._tabs.values()):
             return
-        if len(self._tabs) >= self.s.max_tabs and not self._replacing:
+        # The limit is for the agent. While Roland drives, a site may open the windows it needs
+        # (sign-in pop-ups); the agent closes what it doesn't want afterwards.
+        if len(self._tabs) >= self.s.max_tabs and not self._replacing and self.mode == "agent":
             self._popups_closed += 1
             self._spawn(self._close_quietly(page))
             return
@@ -451,7 +455,11 @@ class Session:
     async def _on_dialog(self, dialog) -> None:
         """alert, confirm, prompt and "leave this page?" are all answered with No."""
         if self.mode == "user":
-            return  # Roland is at the controls and answers them himself (M7)
+            # Roland is at the controls and answers it himself on the screen (M7). If it is
+            # still open when he hands the browser back, it is dismissed then.
+            self._open_dialogs.append(dialog)
+            del self._open_dialogs[:-MAX_NOTES]
+            return
         try:
             entry = {"type": _text(dialog.type, 20), "message": _text(dialog.message, 200)}
             if len(self._dialogs) < MAX_NOTES:
@@ -724,6 +732,12 @@ class Session:
     async def _hand_back(self) -> None:
         """Take the focus off whatever Roland was typing in, and empty the screen's clipboard,
         so nothing of his is left where the next action could meet it. Nothing is read."""
+        waiting, self._open_dialogs = self._open_dialogs, []
+        for dialog in waiting:
+            try:
+                await asyncio.wait_for(dialog.dismiss(), timeout=3)
+            except Exception:  # noqa: S110 -- he answered that one already
+                pass
         for tab in list(self._tabs.values()):
             for frame in self._frames(tab.page):
                 try:
