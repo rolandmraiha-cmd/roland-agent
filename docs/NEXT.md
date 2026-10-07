@@ -1,6 +1,7 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 7 Oct 2026. Integration branch `v2`, verified tip **`5104fb6`** (#33; M5 code `98971cc`).
+> Snapshot: 7 Oct 2026. Integration branch `v2`, verified tip **`adc492e`** (#35; M5 code `98971cc`).
+> **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
 
@@ -37,7 +38,7 @@ If the documents disagree, follow this order: Roland's latest explicit decision 
 
 Before writing any code:
 
-1. Run `git fetch origin && git switch v2 && git pull --ff-only` and confirm the tip. If it is newer than `5104fb6`, read the new commits and update your assumptions.
+1. Run `git fetch origin && git switch v2 && git pull --ff-only` and confirm the tip. If it is newer than `adc492e`, read the new commits and update your assumptions.
 2. Read `docs/AGENT.md`, then the spec sections listed for your milestone.
 3. Verify every file path mentioned here in the tree. Paths marked "expected" come from `docs/v2-spec.md` and do not exist yet.
 

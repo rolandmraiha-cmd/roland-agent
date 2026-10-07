@@ -2,6 +2,8 @@
 
 Full write-up lands in M9. This file records accepted limits as they ship.
 
+Update this file in the same PR, before squash-merge, whenever an accepted limit changes. Do not leave that note only in chat.
+
 ## Sandbox (M4)
 
 - The shell classifier (`agent/policy_shell.py`) is a **usability filter**, not the security boundary. The boundary is the isolated `sandbox` container (§6.3), peer + Bearer auth on sandboxd, DOCKER-USER firewall rules, and gating every command once a run is tainted (or when `SHELL_APPROVAL=always`).
