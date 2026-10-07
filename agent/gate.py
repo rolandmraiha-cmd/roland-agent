@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
 CONFIRM_CATEGORIES = frozenset({"payment", "message", "public_post", "delete"})
 
+# Reserved argument name. Only a classifier may fill it (through Decision.pinned): call_tool
+# drops anything the model put there. It carries facts that must stay bound to the approved
+# action, such as the fingerprint of the page element Roland was shown.
+PIN_KEY = "_pin"
+CARD_SCREENSHOT_TIMEOUT_S = 15
+
 
 class Risk(StrEnum):
     SAFE = "safe"
@@ -33,6 +39,11 @@ class Decision:
     reason: str = ""
     summary: str | None = None
     details: dict | None = None
+    # Code-made values stored with the args under PIN_KEY and handed to the tool handler.
+    pinned: dict | None = None
+    # Optional: called with the new approval id, returns a workspace-relative PNG path to show
+    # on the approval card (browser actions). Best-effort; the card appears without it.
+    card_screenshot: Callable[[str], Awaitable[str | None]] | None = None
 
 
 @dataclass
@@ -60,6 +71,10 @@ class RunState:
     events: asyncio.Queue = field(default_factory=asyncio.Queue)
     pending_approval_id: str | None = None
     stopped: bool = False
+    # Page elements whose unapproved action tried to submit a form (keys from
+    # tools_browser._target). The next action on the same element is gated instead of being
+    # blocked again (§6.5 POST-navigation guard).
+    blocked_submissions: set[str] = field(default_factory=set)
 
 
 def _safe(_ctx: ToolContext, _args: dict) -> Awaitable[Decision]:
@@ -224,6 +239,17 @@ async def _classify_run_shell(ctx: ToolContext, args: dict) -> Decision:
     return await classify_run_shell(ctx, args)
 
 
+def _browser_policy(name: str) -> ToolPolicy:
+    """A browser tool whose risk depends on the page (§9.3). Every browser tool taints the run."""
+
+    async def classify(ctx: ToolContext, args: dict) -> Decision:
+        from .tools_browser import CLASSIFIERS
+
+        return await CLASSIFIERS[name](ctx, args)
+
+    return ToolPolicy(classify=classify, taints=True)
+
+
 def _build_policies() -> dict[str, ToolPolicy]:
     return {
         "fetch_url": _safe_policy(taints=True),
@@ -240,6 +266,23 @@ def _build_policies() -> dict[str, ToolPolicy]:
         "schedule_job": _safe_policy(taints=False, in_jobs=False),
         "list_jobs": _safe_policy(taints=False),
         "cancel_job": ToolPolicy(classify=_classify_cancel_job, taints=False),
+        # Browser (M6). Page content is untrusted, so every one of these taints the run.
+        "browser_open": _browser_policy("browser_open"),
+        "browser_snapshot": _safe_policy(taints=True),
+        "browser_screenshot": _safe_policy(taints=True),
+        "browser_click": _browser_policy("browser_click"),
+        "browser_type": _browser_policy("browser_type"),
+        "browser_press": _browser_policy("browser_press"),
+        "browser_select": _browser_policy("browser_select"),
+        "browser_scroll": _safe_policy(taints=True),
+        "browser_back": _safe_policy(taints=True),
+        "browser_forward": _safe_policy(taints=True),
+        "browser_tabs": _safe_policy(taints=True),
+        "browser_switch_tab": _safe_policy(taints=True),
+        "browser_close_tab": _safe_policy(taints=True),
+        "browser_wait": _safe_policy(taints=True),
+        "browser_upload": _browser_policy("browser_upload"),
+        "browser_downloads": _safe_policy(taints=True),
     }
 
 
@@ -390,6 +433,8 @@ class Gate:
                 tainted=run.tainted,
                 needs_confirm=needs_confirm,
             )
+            if decision.card_screenshot is not None:
+                await self._attach_card_screenshot(approval_id, decision)
             run.pending_approval_id = approval_id
             self.audit.write(
                 "agent",
@@ -460,6 +505,19 @@ class Gate:
         finally:
             run.pending_approval_id = None
             self._waiters.pop(approval_id, None)
+
+    async def _attach_card_screenshot(self, approval_id: str, decision: Decision) -> None:
+        """Save what the browser shows right now so Roland can see it on the card. A failure
+        here (browser busy, disk full, slow page) must never block or approve anything."""
+        assert decision.card_screenshot is not None
+        try:
+            path = await asyncio.wait_for(
+                decision.card_screenshot(approval_id), timeout=CARD_SCREENSHOT_TIMEOUT_S,
+            )
+            if path:
+                self.memory.set_approval_screenshot(approval_id, path)
+        except Exception:  # noqa: S110 -- best-effort picture; the card still appears
+            pass
 
     def _resolve_waiter(self, approval_id: str, outcome: Outcome) -> None:
         future = self._waiters.get(approval_id)

@@ -96,6 +96,7 @@ code { font-size: .85em; color: var(--muted); }
 .approval-card .summary { font-weight: 600; margin: .2rem 0; }
 .approval-card .taint { color: #e0a060; font-size: .85rem; }
 .approval-card .agent-says { font-style: italic; color: var(--muted); }
+.approval-card .shot { display: block; max-width: 100%; height: auto; margin: .4rem 0; border: 1px solid var(--line); border-radius: 8px; }
 .approval-card dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .8rem; margin: .4rem 0; font-size: .9rem; }
 .approval-card dt { color: var(--muted); }
 .approval-card .exact pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; background: var(--bg); padding: .5rem; border-radius: 8px; }

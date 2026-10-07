@@ -18,6 +18,7 @@ from bs4 import BeautifulSoup
 from .audit import Audit, NullAudit
 from .memory import Memory
 from .schedule import next_run_after, valid_cron
+from .tools_browser import SPECS as BROWSER_SPECS
 from .tools_files import attach_file, delete_file, file_info, move_file
 
 MAX_OUTPUT = 8000          # characters of tool output the model sees
@@ -50,6 +51,7 @@ class ToolContext:
     run: object | None = None
     config: object | None = None
     shell: object | None = None  # ShellBackend; None → LocalShell when allow_shell
+    browser: object | None = None  # BrowserClient; None → browser tools are off
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[str]]
@@ -407,6 +409,11 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
     "cancel_job": (_fn("cancel_job", "Delete a scheduled job by its id.",
                        {"job_id": INTEGER}, ["job_id"]), cancel_job),
 }
+# Browser tools (M6) come last. They are only offered when BROWSER_ENABLED=true.
+TOOLS.update({
+    name: (_fn(name, description, properties, required), handler)
+    for name, description, properties, required, handler in BROWSER_SPECS
+})
 
 
 def schemas(exclude: set[str] = frozenset()) -> list[dict]:
@@ -414,17 +421,23 @@ def schemas(exclude: set[str] = frozenset()) -> list[dict]:
 
 
 async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
-    from .gate import POLICIES, Decision, NoApproverGate, Risk, mark_executed
+    from .gate import PIN_KEY, POLICIES, Decision, NoApproverGate, Risk, mark_executed
 
     if name not in TOOLS:
         return f"Error: there is no tool called {name}."
     policy = POLICIES.get(name)
     if policy is None:
         return f"Error: there is no tool called {name}."
+    if PIN_KEY in args:
+        # Reserved for values a classifier pins. The model can never supply them.
+        args = {key: value for key, value in args.items() if key != PIN_KEY}
     try:
         decision = await policy.classify(ctx, args)
     except Exception:
         decision = Decision(Risk.FORBIDDEN, "other", reason="classifier error")
+    if decision.pinned and decision.risk is not Risk.FORBIDDEN:
+        # Stored with the approval, so what Roland approves is bound to what was classified.
+        args = {**args, PIN_KEY: dict(decision.pinned)}
     run = ctx.run
     run_id = getattr(run, "run_id", None) if run is not None else None
     chat_id = getattr(run, "chat_id", None) if run is not None else None

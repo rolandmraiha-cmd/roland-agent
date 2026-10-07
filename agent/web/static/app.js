@@ -353,6 +353,16 @@ function renderApprovalCard(approval, { compact } = {}) {
   if (approval.model_reason) {
     card.append(el("p", "agent-says", "The agent says: " + approval.model_reason));
   }
+  // Browser actions carry a picture of the page, taken when the agent asked. Only the
+  // server's own preview route is ever used as the image address.
+  const shot = approval.screenshot_url;
+  if (typeof shot === "string" && shot.startsWith("/api/files/preview?path=screenshots/")) {
+    const img = el("img", "shot");
+    img.alt = "What the browser showed when the agent asked";
+    img.loading = "lazy";
+    img.src = shot;
+    card.append(img);
+  }
   const details = approval.details || {};
   const dl = el("dl", "");
   for (const [key, value] of Object.entries(details)) {
