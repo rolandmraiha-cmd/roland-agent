@@ -15,7 +15,8 @@ COPY requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY pyproject.toml README.md ./
 COPY agent ./agent
-RUN pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
+# Repo pyproject also lists sandboxd for local/dev installs; core image ships agent only.
+RUN sed -i 's/, "sandboxd"//' pyproject.toml     && pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
 
 # Runs as a normal user, never root. Its data lives in the /data volume. HOME points at the
 # throwaway /tmp, and Python ignores per-user packages, so the shell can't plant code there

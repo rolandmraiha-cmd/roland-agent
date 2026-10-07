@@ -160,6 +160,9 @@ def test_image_pins_and_nonroot_volume_ownership():
     assert "chown -R agent:agent /data /backups /workspace" in core
     assert "chmod 0700 /data /backups /workspace" in core and "USER agent" in core
     assert "curl git jq" not in core
+    # Core must not ship sandboxd; install strips it from pyproject packages.
+    assert "COPY sandboxd" not in core
+    assert 's/, "sandboxd"//' in core
 
 
 def test_caddy_does_not_compress_chat_sse():
