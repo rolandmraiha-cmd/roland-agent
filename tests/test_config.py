@@ -228,3 +228,8 @@ def test_shell_uses_validated_config(clean_env, monkeypatch, make_agent):
     assert parsed.allow_shell is True
     assert make_agent(allow_shell=parsed.allow_shell).allow_shell is True
     assert make_agent(allow_shell=False).allow_shell is False
+
+
+def test_model_ctx_default_is_5120():
+    from agent.config import Config
+    assert Config.__dataclass_fields__["model_ctx"].default == 5120

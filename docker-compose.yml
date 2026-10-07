@@ -110,7 +110,7 @@ services:
     user: "1000:1000"
     entrypoint: ["bash", "/opt/run/run.sh"]
     environment:
-      MODEL_CTX: ${MODEL_CTX:-6144}
+      MODEL_CTX: ${MODEL_CTX:-5120}
       MODEL_THREADS: ${MODEL_THREADS:-3}
       MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
     secrets: [model_server_token]

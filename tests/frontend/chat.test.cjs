@@ -73,7 +73,9 @@ test('first send reserves composer before chat creation and blocks navigation/do
   assert.deepEqual(calls, ['/api/chats']);
   creation.resolve({ json: async () => ({ id: 7 }) });
   await first;
-  assert.deepEqual(calls, ['/api/chats', '/api/chats/7/send']);
+  assert.deepEqual(calls.slice(0, 2), ['/api/chats', '/api/chats/7/send']);
+  // Empty stream may refetch history to recover a server-saved reply.
+  assert.ok(calls.length <= 3);
   assert.equal(f.run('sending'), false);
   assert.equal(f.get('send').disabled, false);
 });
@@ -258,4 +260,195 @@ test('deleting the open chat suppresses its pending load error', async () => {
   assert.equal(f.run('currentChat'), null);
   assert.equal(f.get('messages').children.length, 0);
   assert.equal(f.get('title').textContent, 'Chat');
+});
+
+
+
+function sseStream(events, { crlf = false, keepalives = [] } = {}) {
+  const sep = crlf ? "\r\n\r\n" : "\n\n";
+  const pieces = [];
+  for (const item of keepalives) pieces.push(`: keepalive${sep}`);
+  for (const ev of events) pieces.push(`data: ${JSON.stringify(ev)}${sep}`);
+  let i = 0;
+  const encoder = new TextEncoder();
+  return {
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (i >= pieces.length) return { done: true };
+          const value = encoder.encode(pieces[i++]);
+          return { value, done: false };
+        },
+      }),
+    },
+  };
+}
+
+test('done event replaces thinking placeholder without any text deltas', async () => {
+  const f = fixture();
+  f.run('currentChat = 1');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) {
+      return sseStream([{ type: "done", reply: "Final answer from local model" }, { type: "end" }]);
+    }
+    return { json: async () => ([]) };
+  };
+  await f.run('send("hi")');
+  const msgs = f.get('messages').children;
+  assert.equal(msgs[0].children[0].textContent, "hi");
+  assert.equal(msgs[1].children[0].textContent, "Final answer from local model");
+  assert.equal(msgs[1].classes.has("typing"), false);
+  assert.equal(f.run('sending'), false);
+});
+
+test('done overwrites streamed text with the authoritative reply', async () => {
+  const f = fixture();
+  f.run('currentChat = 2');
+  f.context.api = async (url) => url.endsWith('/send')
+    ? sseStream([
+        { type: "text", text: "partial" },
+        { type: "done", reply: "complete reply" },
+        { type: "end" },
+      ])
+    : { json: async () => ([]) };
+  await f.run('send("go")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "complete reply");
+  assert.equal(f.get('messages').children[1].classes.has("typing"), false);
+});
+
+test('CRLF SSE framing and keepalive comments still deliver done', async () => {
+  const f = fixture();
+  f.run('currentChat = 3');
+  f.context.api = async (url) => url.endsWith('/send')
+    ? sseStream([{ type: "done", reply: "crlf ok" }, { type: "end" }], { crlf: true, keepalives: [1] })
+    : { json: async () => ([]) };
+  await f.run('send("ping")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "crlf ok");
+});
+
+test('stream end with only thinking removes the placeholder bubble', async () => {
+  const f = fixture();
+  f.run('currentChat = 4');
+  f.context.api = async (url) => url.endsWith('/send')
+    ? finishedStream
+    : { json: async () => ({ messages: [] }) };
+  await f.run('send("empty")');
+  assert.equal(f.get('messages').children.length, 1); // user only; thinking bubble removed
+  assert.equal(f.get('messages').children[0].children[0].textContent, "empty");
+});
+
+
+test('error event clears thinking and shows the error', async () => {
+  const f = fixture();
+  f.run('currentChat = 5');
+  f.context.api = async (url) => url.endsWith('/send')
+    ? sseStream([
+        { type: "error", message: "RemoteProtocolError: Server disconnected without sending a response." },
+        { type: "end" },
+      ])
+    : { json: async () => ({ messages: [] }) };
+  await f.run('send("are you shore")');
+  const msgs = f.get('messages').children;
+  assert.equal(msgs.length, 2); // user + error (empty thinking assistant removed)
+  assert.equal(msgs[0].children[0].textContent, "are you shore");
+  assert.match(msgs[1].textContent, /RemoteProtocolError/);
+  assert.equal(msgs.every((m) => !String(m.textContent).startsWith("thinking")), true);
+});
+
+test('stream disconnect recovers saved assistant reply from history', async () => {
+  const f = fixture();
+  f.run('currentChat = 6');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) return finishedStream;
+    if (url.endsWith('/messages')) {
+      return { json: async () => ({ messages: [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "saved after disconnect" },
+      ] }) };
+    }
+    return { json: async () => ([]) };
+  };
+  await f.run('send("hi")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "saved after disconnect");
+});
+
+
+test('empty done.reply does not wipe already-streamed text', async () => {
+  const f = fixture();
+  f.run('currentChat = 7');
+  f.context.api = async (url) => url.endsWith('/send')
+    ? sseStream([
+        { type: "text", text: "partial stream" },
+        { type: "done", reply: "" },
+        { type: "end" },
+      ])
+    : { json: async () => ({ messages: [] }) };
+  await f.run('send("go")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "partial stream");
+});
+
+test('error with prior history does not resurrect an older assistant reply', async () => {
+  const f = fixture();
+  f.run('currentChat = 8');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) {
+      return sseStream([
+        { type: "error", message: "RemoteProtocolError: disconnected" },
+        { type: "end" },
+      ]);
+    }
+    if (url.endsWith('/messages')) {
+      // History still only has the previous turn — this turn never saved an assistant.
+      return { json: async () => ({ messages: [
+        { role: "user", content: "earlier" },
+        { role: "assistant", content: "old reply that must not resurface" },
+        { role: "user", content: "new question" },
+      ] }) };
+    }
+    return { json: async () => ({ messages: [] }) };
+  };
+  await f.run('send("new question")');
+  const texts = f.get('messages').children.map((m) => m.textContent || (m.children[0] && m.children[0].textContent) || "");
+  assert.equal(texts.some((t) => t.includes("old reply that must not resurface")), false);
+  assert.equal(texts.some((t) => /RemoteProtocolError/.test(t)), true);
+});
+
+test('soft-recover ignores assistant messages from before this turn', async () => {
+  const f = fixture();
+  f.run('currentChat = 9');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) return finishedStream;
+    if (url.endsWith('/messages')) {
+      // Disconnect before this turn's assistant was saved — only prior assistant exists.
+      return { json: async () => ({ messages: [
+        { role: "user", content: "earlier" },
+        { role: "assistant", content: "stale prior reply" },
+        { role: "user", content: "latest" },
+      ] }) };
+    }
+    return { json: async () => ({ messages: [] }) };
+  };
+  await f.run('send("latest")');
+  const msgs = f.get('messages').children;
+  assert.equal(msgs.length, 1); // user only; thinking removed, stale not resurrected
+  assert.equal(msgs[0].children[0].textContent, "latest");
+});
+
+test('soft-recover still picks assistant that follows this turn\'s user message', async () => {
+  const f = fixture();
+  f.run('currentChat = 10');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) return finishedStream;
+    if (url.endsWith('/messages')) {
+      return { json: async () => ({ messages: [
+        { role: "user", content: "earlier" },
+        { role: "assistant", content: "stale prior reply" },
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "fresh reply for this turn" },
+      ] }) };
+    }
+    return { json: async () => ({ messages: [] }) };
+  };
+  await f.run('send("hi")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "fresh reply for this turn");
 });

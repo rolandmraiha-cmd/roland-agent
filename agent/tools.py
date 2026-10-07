@@ -197,14 +197,21 @@ async def run_shell(ctx: ToolContext, args: dict) -> str:
 
 # --- files ---
 async def read_file(ctx: ToolContext, args: dict) -> str:
+    path = str(args.get("path", ""))
     try:
-        target = _workspace_path(ctx, str(args.get("path", "")))
+        target = _workspace_path(ctx, path)
         # Read one extra character to detect truncation without loading the whole file.
         with target.open(errors="replace") as f:
             text = f.read(MAX_OUTPUT + 1)
         if len(text) > MAX_OUTPUT:
             return text[:MAX_OUTPUT] + "\n... [cut, file continues]"
         return text
+    except FileNotFoundError:
+        shown = path.strip() or "(empty path)"
+        return (
+            f"Error: file not found: {shown}. It is not in the workspace. "
+            "Do not retry this path; answer with what you know or ask Roland."
+        )
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 

@@ -223,3 +223,15 @@ def test_fact_cap_holds_across_connections(tmp_path, monkeypatch, same_fact):
     else:
         assert sum(result.startswith("Remembered") for result in results) == 1
         assert sum(result.startswith(f"Error: {MAX_FACTS} facts") for result in results) == 1
+
+
+@pytest.mark.asyncio
+async def test_read_file_missing_says_do_not_retry(tmp_path):
+    from agent.memory import Memory
+    from agent.tools import ToolContext, call_tool
+
+    ctx = ToolContext(Memory(tmp_path / "db.sqlite"), tmp_path / "ws", "Europe/Helsinki", False)
+    (tmp_path / "ws").mkdir()
+    result = await call_tool(ctx, "read_file", {"path": "notes/agent_info.txt"})
+    assert result.startswith("Error: file not found:")
+    assert "Do not retry this path" in result

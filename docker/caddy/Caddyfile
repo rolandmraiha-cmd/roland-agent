@@ -18,7 +18,11 @@ http://127.0.0.1:8081 {
 
 {$AGENT_HOST} {
 	import tls-{$CADDY_TLS:acme}
-	encode zstd gzip
+	# Never compress the chat SSE endpoint: encode buffers and defeats flush_interval.
+	@not_sse {
+		not path_regexp chat_send ^/api/chats/[0-9]+/send$
+	}
+	encode @not_sse zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		-Server

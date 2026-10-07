@@ -159,6 +159,14 @@ def test_image_pins_and_nonroot_volume_ownership():
     assert "curl git jq" not in core
 
 
+
+def test_caddy_does_not_compress_chat_sse():
+    caddyfile = (ROOT / "docker/caddy/Caddyfile").read_text()
+    assert "flush_interval -1" in caddyfile
+    assert "path_regexp chat_send" in caddyfile
+    assert "encode @not_sse" in caddyfile
+
+
 def test_model_is_pinned_isolated_and_readonly():
     model = COMPOSE["services"]["model"]
     version = dict(line.split("=", 1) for line in (ROOT / "docker/model/VERSION").read_text().splitlines())
@@ -302,3 +310,9 @@ def test_preflight_cli_hides_compose_error_output(monkeypatch, capsys):
     monkeypatch.setattr(preflight.subprocess, "check_output", fail)
     assert preflight.main() == 1
     assert "synthetic-private-value" not in capsys.readouterr().err
+
+
+def test_model_ctx_compose_default_is_5120():
+    raw = (ROOT / "docker-compose.yml").read_text()
+    assert "${MODEL_CTX:-5120}" in raw
+    assert "${MODEL_CTX:-6144}" not in raw

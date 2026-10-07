@@ -248,3 +248,25 @@ async def test_zero_tool_steps_still_allows_a_plain_answer(make_agent):
     events = await collect(agent.chat(agent.memory.new_chat(), "list"))
     assert not any(event["type"] == "tool" for event in events)
     assert events[-1]["type"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_failed_tool_calls_are_not_reexecuted(make_agent, monkeypatch):
+    """Repeated identical failing tools (e.g. missing read_file) must not re-run the handler."""
+    from agent import core
+
+    missing = ("", [call("read_file", '{"path": "notes/agent_info.txt"}')])
+    agent = make_agent([missing, missing, "I do not have that file."], max_tool_steps=4)
+    calls = []
+    original = core.call_tool
+
+    async def spy(ctx, name, args):
+        calls.append((name, dict(args)))
+        return await original(ctx, name, args)
+
+    monkeypatch.setattr(core, "call_tool", spy)
+    events = await collect(agent.chat(agent.memory.new_chat(), "are you shore"))
+    assert calls == [("read_file", {"path": "notes/agent_info.txt"})]
+    assert any(e["type"] == "done" for e in events)
+    tool_events = [e for e in events if e["type"] == "tool"]
+    assert len(tool_events) == 2
