@@ -41,16 +41,13 @@ async def move_file(ctx, args: dict) -> str:
     dst = str(args.get("to", args.get("dst", "")))
     try:
         ws = workspace_from_ctx(ctx)
-        ws.move(src, dst, overwrite=False)
+        run = ctx.run
+        # §9.3 fail-closed: overwrite only when replace was already gate-approved.
+        approved_replace = run is not None and getattr(run, "pending_approval_id", None) is not None
+        ws.move(src, dst, overwrite=approved_replace)
         return f"Moved {src} → {dst}."
     except FileExistsError:
-        # Gate should have caught replace; if approved overwrite path uses trash first.
-        try:
-            ws = workspace_from_ctx(ctx)
-            ws.move(src, dst, overwrite=True)
-            return f"Moved {src} → {dst}."
-        except (WorkspaceError, ValueError, OSError, FileNotFoundError) as error:
-            return f"Error: {error}"
+        return f"Error: destination already exists: {dst}"
     except FileNotFoundError:
         return f"Error: file not found: {src or '(empty path)'}."
     except (WorkspaceError, ValueError, OSError) as error:

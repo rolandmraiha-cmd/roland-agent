@@ -173,3 +173,17 @@ def test_listing_shows_symlinks_unfollowed(client):
     assert any(e["name"].endswith("@") for e in links)
     # Download via symlink path must fail (not followed).
     assert client.get("/api/files/download", params={"path": "link.txt"}).status_code == 400
+
+
+def test_upload_refuses_symlink_dest(client):
+    root = client.agent.config.workspace
+    (root / "link.txt").symlink_to(root / "missing-target")
+    response = client.put(
+        "/api/files/content?path=link.txt",
+        content=b"hijack",
+        headers={"X-Overwrite": "1"},
+    )
+    assert response.status_code == 400, response.text
+    detail = response.json()["detail"].lower()
+    assert "outside" in detail or "symbolic" in detail
+    assert (root / "link.txt").is_symlink()

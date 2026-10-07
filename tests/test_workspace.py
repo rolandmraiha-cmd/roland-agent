@@ -160,3 +160,31 @@ def test_trash_purge_after_days(ws):
     removed = ws.purge_trash(older_than_days=7)
     assert removed >= 1
     assert ws.memory.trash_entry(trash_id) is None
+
+
+def test_exists_true_for_symlink_final(ws):
+    (ws.root / "real.txt").write_text("hi")
+    (ws.root / "link.txt").symlink_to(ws.root / "real.txt")
+    assert ws.exists("link.txt") is True
+    assert ws.exists("missing.txt") is False
+
+
+def test_move_refuses_symlink_dest(ws):
+    ws.write_text("src.txt", "data")
+    (ws.root / "dest.txt").symlink_to(ws.root / "src.txt")
+    with pytest.raises(WorkspaceError) as exc:
+        ws.move("src.txt", "dest.txt", overwrite=False)
+    assert "outside" in str(exc.value)
+    assert (ws.root / "dest.txt").is_symlink()
+    assert (ws.root / "src.txt").read_text() == "data"
+
+
+def test_finalize_upload_refuses_symlink_dest(ws):
+    (ws.root / "dest.txt").symlink_to(ws.root / "elsewhere")
+    tmp_rel, handle, _fd = ws.open_upload_tmp()
+    handle.write(b"payload")
+    handle.close()
+    with pytest.raises(WorkspaceError) as exc:
+        ws.finalize_upload(tmp_rel, "dest.txt", overwrite=True, size=7, sha256="a" * 64)
+    assert "outside" in str(exc.value)
+    assert (ws.root / "dest.txt").is_symlink()

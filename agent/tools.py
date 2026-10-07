@@ -451,10 +451,17 @@ async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
             return "Not done: approved action is missing stored args."
         run_args = outcome.args
         approval_id = outcome.approval_id
+    # Gate clears pending_approval_id in request()'s finally; restore for the tool
+    # so overwrite/trash paths can see that replace was already approved.
+    if approval_id is not None and run is not None:
+        run.pending_approval_id = approval_id
     try:
         result = await TOOLS[name][1](ctx, run_args)
     except Exception as e:  # a broken tool call should never crash the agent
         result = f"Error: {type(e).__name__}: {e}"
+    finally:
+        if approval_id is not None and run is not None:
+            run.pending_approval_id = None
     if approval_id is not None and ctx.gate is not None:
         mark_executed(ctx.memory, ctx.audit, approval_id, result)
     else:

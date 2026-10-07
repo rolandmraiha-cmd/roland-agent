@@ -115,6 +115,10 @@ def build_router(agent) -> APIRouter:
             except ValueError:
                 pass
 
+        try:
+            ws.refuse_symlink_final(path)
+        except WorkspaceError as error:
+            raise _http_for_workspace(error) from error
         if not overwrite and ws.exists(path):
             raise HTTPException(409, "already exists")
 

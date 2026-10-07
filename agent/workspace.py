@@ -308,21 +308,30 @@ class Workspace:
                 os.close(fd)
 
     def exists(self, rel: str) -> bool:
+        """True if the path exists, including a final-component symlink (§6.4).
+
+        Uses lstat so symlink finals are visible to write/upload/move gates.
+        Intermediate symlinks still map to WorkspaceError and count as absent here.
+        """
         components = normalize(rel)
         if not components:
             return True
         try:
-            dir_fd, file_fd = self._open_at(components, os.O_RDONLY)
-        except (FileNotFoundError, WorkspaceError):
-            return False
-        except OSError as error:
-            if error.errno == errno.ENOENT:
-                return False
-            raise
-        else:
-            os.close(file_fd)
-            os.close(dir_fd)
+            self.lstat(rel)
             return True
+        except FileNotFoundError:
+            return False
+        except WorkspaceError:
+            return False
+
+    def refuse_symlink_final(self, rel: str) -> None:
+        """Raise WorkspaceError when the final component is a symlink (never replace)."""
+        try:
+            meta = self.lstat(rel)
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(meta.st_mode):
+            raise WorkspaceError(_SYMLINK_MSG)
 
     def lstat(self, rel: str) -> os.stat_result:
         components = normalize(rel)
@@ -726,6 +735,8 @@ class Workspace:
             raise WorkspaceError("give a file name.")
         if src_c[0] == ".trash" or dst_c[0] == ".trash":
             raise WorkspaceError("Cannot move into or out of .trash with move().")
+        # Never replace a symlink inode (§6.4); refuse before exists/overwrite.
+        self.refuse_symlink_final(dst)
         if self.exists(dst):
             if not overwrite:
                 raise FileExistsError(dst)
@@ -829,6 +840,8 @@ class Workspace:
         size: int = 0,
         deleted_by: str = "roland",
     ) -> dict:
+        # Refuse symlink finals even when overwrite is requested (§6.4).
+        self.refuse_symlink_final(dest_rel)
         if overwrite and self.exists(dest_rel):
             self.move_to_trash(dest_rel, deleted_by=deleted_by)
         elif self.exists(dest_rel):
