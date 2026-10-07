@@ -81,6 +81,7 @@ make compose-config
 make up / down / ps / logs [S=service]
 make preflight-edge       # read-only partial edge checks
 make preflight            # full host preflight (read-only; APPLY=1 only to write AGENT_HOST)
+make memory-report        # read-only browser headroom verdict; WATCH=seconds reports peaks
 make secrets              # create missing secrets/*; never prints values; APPLY=1 to chown 1000
 make hash-password        # writes secrets/agent_password_hash (FORCE=1 to overwrite)
 make firewall             # dry-run rules

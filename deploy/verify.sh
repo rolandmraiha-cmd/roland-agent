@@ -168,7 +168,18 @@ else
     fi
 fi
 
-# 9. Browser/phone/manual checks are human-only
+# 9. Browser health (only when the optional service is running)
+if compose ps --status running --services 2>/dev/null | grep -qx browser; then
+    if compose exec -T browser python -m browserd healthcheck >/dev/null 2>&1; then
+        result PASS "browser healthcheck"
+    else
+        result FAIL "browser healthcheck"
+    fi
+else
+    result SKIP "browser healthcheck (browser not running)"
+fi
+
+# 10. Phone/manual checks are human-only
 result SKIP "manual phone login / chat / approval (human)"
 
 printf '\nverify: %s pass / %s fail / %s skip\n' "$pass" "$fail" "$skip"

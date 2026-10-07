@@ -1,7 +1,7 @@
 .PHONY: lint fmt-check test test-integration test-sandbox build compose-config \
 	preflight-edge preflight \
 	up down ps logs deploy secrets hash-password firewall firewall-install \
-	workspace-fs backup restore restore-test verify \
+	workspace-fs backup restore restore-test verify memory-report \
 	migrate-v1-workspace ship \
 	model-fetch model-install
 
@@ -59,6 +59,9 @@ preflight-edge:
 
 preflight:
 	bash deploy/preflight.sh
+
+memory-report:
+	bash deploy/memory-report.sh
 
 secrets:
 	bash deploy/secrets.sh
