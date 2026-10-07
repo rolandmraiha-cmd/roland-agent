@@ -53,8 +53,6 @@ def build(*, validate: bool = False, config: Config | None = None) -> Agent:
         config.check()  # Refuse unsafe settings before opening the DB or model client.
     else:
         config.check_model()  # Terminal chat and background jobs also stay local.
-    if config.allow_shell and config.shell_backend != "local":
-        raise SystemExit("The sandbox shell backend is not implemented yet; keep ALLOW_SHELL=false")
     if config.browser_enabled or config.screen_enabled:
         raise SystemExit("Browser and screen services are not implemented yet; keep their flags false")
     if config.audit_detail_max_bytes < 64:
@@ -133,13 +131,13 @@ def serve(agent: Agent) -> None:
             "ALLOWED_HOSTS is empty, so the page answers to any hostname. "
             "Set it before putting the agent online."
         )
-    if agent.allow_shell:
+    if agent.allow_shell and agent.config.shell_backend == "local":
         log.warning(
-            "ALLOW_SHELL=true: shell commands run as the agent's own user and can "
-            "write its database. A web page that tricks the model into one command "
-            "could create a login for an attacker or approve its own jobs. Only turn "
-            "this on if you accept that risk."
+            "ALLOW_SHELL=true with SHELL_BACKEND=local: shell commands run as the "
+            "agent's own user and can write its database. Prefer SHELL_BACKEND=sandbox."
         )
+    elif agent.allow_shell:
+        log.info("ALLOW_SHELL=true using sandbox backend at %s", agent.config.sandbox_url)
     import uvicorn
 
     from .web.app import create_app
