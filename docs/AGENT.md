@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-07. Status snapshot **`e872ddb`** (#36). M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
+> Snapshot: 2026-10-07. Docs base **`a27b5ff`** (#37) plus **M6 part 1** (core-side browser code, dormant). M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
 >
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -11,7 +11,7 @@ A private HTTPS agent on Roland's Contabo VPS with:
 1. Password-protected web chat, persistent chats/facts/jobs, streamed replies.
 2. Self-hosted open-weight model only (no third-party inference).
 3. A code-enforced approval gate, an isolated terminal sandbox and a workspace files UI (shipped).
-4. Next: a persistent Chromium the agent drives (M6) and a live screen of that same browser for Roland's own sign-ins (M7).
+4. Next: a persistent Chromium the agent drives (M6; core side merged and dormant, browser service not built) and a live screen of that same browser for Roland's own sign-ins (M7).
 5. Later: persona editing and scrubbed, opt-in training on a **separate** GPU machine, never the VPS (M8), then the 2.0.0 release (M9).
 
 Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a small local model; quality and speed are modest.
@@ -50,13 +50,15 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | M3 gate | Approve risky tools in the UI before they run; Shipper nits | #29, #30 |
 | M4 sandbox | `sandboxd` container, `SHELL_BACKEND=sandbox`, shell classifier | #31 |
 | M5 files | Workspace + Files UI/API, trash and restore (A5.4 is the Contabo smoke; #32 title still says A5.1–A5.3) | #32; docs tip **`5104fb6`** |
+| M6 part 1 (core side, **dormant**) | Click classifier, `browserd` client, 16 browser tools with gate policies, element fingerprint pinned to approvals, screenshot on approval cards; A6.1 and A6.2 green. Not usable: no `browserd` yet | branch `v2-m6-browser` |
 
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with `caddy`, `core`, `model`, `sandbox` healthy.
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).
 
 ## 4. Not done (do not document as available)
 
-- **M6** browser · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
+- **M6** browser (rest of it) · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
+- **M6 still missing:** `browserd/` (launcher, session, server, `snapshot.js`), `docker/browser/` image and Chromium policy, the `browser` compose service and secret, firewall rules, the fixture site and live tests (A6.3, A6.4), the Browser tab, the Contabo memory measurement and smoke (A6.5). Until then `python -m agent` refuses `BROWSER_ENABLED=true` ("not implemented yet").
 - Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit CI already runs `tests/test_no_hosted_llm.py`.
 - `make model-bench`: deferred.
 - Full measured model acceptance table (§6): not yet recorded in the repo.
@@ -150,10 +152,11 @@ Config caps total 5600 MiB. Caps are not measured usage. Secret files under `sec
 - **M3 gate:** per-tool SAFE/GATED/FORBIDDEN policies; untrusted-content tools taint the run; approvals bound to `args_hash` with expiry; extra confirmation for payment/message/public_post/delete; composer locked while pending; chat text never approves; agent-created jobs need Approve.
 - **M4 sandbox:** shell runs only in `sandboxd` (peer + Bearer auth, output cap, timeout, concurrency limit); container-only leftover reap; secret env stripped. Accepted limits in `docs/SECURITY.md`.
 - **M5 files:** workspace path confinement, trash/restore instead of hard delete.
+- **M6 core side (dormant until `browserd` ships):** every browser tool has a policy and taints the run; clicks are classified from a fresh look at the element (keywords in English and Finnish, submit controls, default-deny); typing into password, code or card fields is FORBIDDEN; the element fingerprint is pinned into the stored approval args (`_pin`, which the model can never supply) and re-checked by `browserd`; actions run in `safe` mode unless Roland approved that exact action; a `safe` action that tries to submit a form is reported and gated on retry; approval cards carry a screenshot for Roland; screenshots are never handed to the model; refs and tab ids are validated before they reach a URL; `browserd` answers are size-capped and type-checked.
 
 ### Pending
 
-M6 browser policy/classifier and isolation · M7 screen auth and sign-in locking · M8 capture/scrubber/promotion controls · M9 full §10 security review and `docs/SECURITY.md` write-up.
+M6 `browserd` itself (navigation and POST guards, no cookie/eval/CDP surface, sensitive-field rules in `snapshot.js`) and browser container isolation · M7 screen auth and sign-in locking · M8 capture/scrubber/promotion controls · M9 full §10 security review and `docs/SECURITY.md` write-up.
 
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model.
 
@@ -161,7 +164,7 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 
 1. **Grok bots:** wait for Roland to unpause THE SCAM CALL CENTER before those bots start M6. **External AI:** if Roland already handed you this plan, start when he said — Grok parking does not block you.
 2. Decide MODEL_CTX vs memory (§6) and record host memory under load.
-3. **M6** browser → **M7** screen/sign-in → **M8** persona/training → **M9** release.
+3. **M6 part 2** (`browserd`, image, compose, firewall, fixture site, live tests, Browser tab) → **M7** screen/sign-in → **M8** persona/training → **M9** release.
 
 Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 
@@ -182,6 +185,8 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 - `MODEL_CTX=4096` with `MODEL_MEM_LIMIT=3840m` OOM-killed the model on Contabo.
 - sandboxd leftover reap must run only inside its container; on a host it kills the machine.
 - A chat "yes" must never bypass the approval UI.
+- `_pin` in tool args is reserved for classifiers (`Decision.pinned`). `call_tool` drops a model-supplied one; browser handlers refuse to act without it.
+- Browser tool errors start with `Error:` (nothing happened) and a blocked form submission starts with `Not done:` (ask again to get an approval card). The loop forgets earlier browser failures after a browser call succeeds, so a ref that failed can be retried after a new snapshot.
 - Grammar-valid output is not authorization.
 
 ## 10. Spec vs this document
@@ -197,6 +202,7 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 | `agent/models/` | Local providers (llama.cpp, Ollama), grammar actions, parsing, context budget, `endpoint_guard.py` |
 | `agent/gate.py` | M3 policies, approval lifecycle, run state |
 | `agent/tools.py`, `agent/tools_files.py` | Tool registry and file tools |
+| `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py` | M6 core side: click/key/address classifier, `browserd` HTTP client, browser tools and their gate classifiers (dormant) |
 | `agent/policy_shell.py`, `agent/sandbox_client.py`, `agent/local_shell.py` | Shell classifier and backends |
 | `sandboxd/` | Sandbox exec service |
 | `agent/workspace.py` | Workspace confinement, trash |
@@ -208,4 +214,4 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 
 ## 12. Last verified
 
-Remote `v2` status snapshot **`e872ddb`** (#36; M5 code `98971cc`), deployed on Contabo with caddy/core/model/sandbox healthy and M5 A5.4 green. Re-run `make test` before claiming anything newer. CI's tiny model does not prove Qwen RAM or Contabo speed.
+Remote `v2` at **`a27b5ff`** (#37; M5 code `98971cc`) is what is deployed on Contabo, with caddy/core/model/sandbox healthy and M5 A5.4 green. M6 part 1 was verified off the server only: `make lint`, `pytest` (806 passed) and the frontend tests (31 passed) in a dev container. It changes nothing on Contabo while `BROWSER_ENABLED=false`. Not run for it: `make test-integration` (no Docker where it was written) and any Contabo smoke. `tests/test_sandboxd.py::test_leftover_background_process_is_reaped` fails in that dev container on untouched `v2` as well. Re-run `make test` before claiming anything newer. CI's tiny model does not prove Qwen RAM or Contabo speed.
