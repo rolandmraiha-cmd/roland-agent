@@ -1,7 +1,7 @@
 .PHONY: lint fmt-check test test-integration test-sandbox test-browser build compose-config \
 	preflight-edge preflight \
 	up down ps logs deploy secrets hash-password firewall firewall-install \
-	workspace-fs backup restore restore-test verify \
+	workspace-fs backup restore restore-test verify memory-report \
 	migrate-v1-workspace ship \
 	model-fetch model-install
 
@@ -33,7 +33,7 @@ test-sandbox:
 	test -f secrets/sandbox_api_token || { echo "missing secrets/sandbox_api_token; run make secrets" >&2; exit 2; }
 	docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build sandbox
 	docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm tester
-	bash tests/integration/isolation.sh --ci
+	ISOLATION_COMPOSE_FILES="docker-compose.yml docker-compose.test.yml" bash tests/integration/isolation.sh --ci
 	docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 
 # Live browser stack (A6.3; not run by CI). Needs Docker, a .env and secrets/ (make secrets).
@@ -65,6 +65,9 @@ preflight-edge:
 
 preflight:
 	bash deploy/preflight.sh
+
+memory-report:
+	bash deploy/memory-report.sh
 
 secrets:
 	bash deploy/secrets.sh

@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-07. Docs base **`a27b5ff`** (#37) plus the M6 fixture site (#38), **M6 part 1** (#39: core-side browser code) and **M6 part 2** (#42: the browser service; built, off by default, not deployed). M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
+> Snapshot: 2026-10-07. Docs base **`a27b5ff`** (#37) plus M6: the fixture site (#38), part 1 (#39: core-side browser code), the Browser tab (#40), the server-side checks (#41) and part 2 (#42: the browser service). M6 is built, off by default and not deployed. M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
 >
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -54,13 +54,15 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | M6 part 2 (browser service, **off by default, not deployed**) | `browserd/` (launcher, session, server, `snapshot.js`), `docker/browser/` image and Chromium policy, `browser` compose service behind the `browser` profile, `BROWSER_ENABLED` accepted by `python -m agent`, A6.3 live tests green in Docker (`make test-browser`), Chromium sandbox experiment done | #42 |
 
 - M6.4 fixture site exists at `tests/fixtures/site/server.py` with the `fixture-web` test service (#38). Part 2 added pages to it and drives it with the real browser.
+- M6.7 Browser tab and authenticated status/thumbnail routes exist (#40). They show the browser's mode, address, tabs and a thumbnail on request; with the browser off the tab says so.
+- Server-side checks exist (#41): `tests/integration/isolation.sh` probes from the browser container as well as the sandbox, and `make memory-report` gives the read-only headroom verdict that must come before the browser is switched on. Neither has been run on Contabo with the browser.
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with `caddy`, `core`, `model`, `sandbox` healthy.
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).
 
 ## 4. Not done (do not document as available)
 
 - **M6** browser (the Contabo part) · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
-- **M6 still missing:** everything on the server. The memory measurement that must come first, the deploy with the browser switched on, the smoke and A6.5. Also the isolation checks from the browser container (A6.4, #41) and the Browser tab (#40), which are separate PRs. The browser has never run on Contabo; do not describe it as available. A CI job for the live browser tests needs a workflow edit, which the credentials used so far cannot push; until then they run with `make test-browser`.
+- **M6 still missing:** everything on the server. The memory measurement that must come first (`make memory-report`), the deploy with the browser switched on, the smoke, A6.4 with the firewall and A6.5. The browser has never run on Contabo; do not describe it as available. A CI job for the live browser tests needs a workflow edit, which the credentials used so far cannot push; until then they run with `make test-browser`.
 - `python -m agent` still refuses `SCREEN_ENABLED=true` ("not implemented yet").
 - Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit CI already runs `tests/test_no_hosted_llm.py`.
 - `make model-bench`: deferred.
@@ -84,6 +86,7 @@ make compose-config
 make up / down / ps / logs [S=service]
 make preflight-edge       # read-only partial edge checks
 make preflight            # full host preflight (read-only; APPLY=1 only to write AGENT_HOST)
+make memory-report        # read-only browser headroom verdict; WATCH=seconds reports peaks
 make secrets              # create missing secrets/*; never prints values; APPLY=1 to chown 1000
 make hash-password        # writes secrets/agent_password_hash (FORCE=1 to overwrite)
 make firewall             # dry-run rules
@@ -173,8 +176,8 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 ## 8. Next coding order
 
 1. **Grok bots:** wait for Roland to unpause THE SCAM CALL CENTER before those bots start M6. **External AI:** if Roland already handed you this plan, start when he said — Grok parking does not block you.
-2. Decide MODEL_CTX vs memory (§6) and record host memory under load (`make memory-report` once #41 is in).
-3. **M6 on Contabo** (pre-step measurement, deploy with the browser on, smoke, A6.5; Roland's three browser decisions in NEXT.md §6) → **M7** screen/sign-in → **M8** persona/training → **M9** release.
+2. Decide MODEL_CTX vs memory (§6) and record host memory under load with `make memory-report`.
+3. **M6 on Contabo** (pre-step measurement, deploy with the browser on, smoke, A6.4, A6.5; Roland's three browser decisions in NEXT.md §6) → **M7** screen/sign-in → **M8** persona/training → **M9** release.
 
 Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 

@@ -8,6 +8,7 @@ let csrf = "";
 let chatLoad = 0;
 let pendingApprovalCount = 0;
 let composerLocked = false;
+let activeView = "chat";
 
 function setSending(value) {
   sending = value;
@@ -75,6 +76,7 @@ async function loadStatus() {
     document.title = s.name;
     $("status").textContent = `${s.model} · ${s.calls_left}/${s.daily_limit} calls left today`;
     if (typeof s.pending_approvals === "number") setApprovalBadge(s.pending_approvals);
+    if (activeView === "browser") await loadBrowserStatus();
   } catch (_) {}
 }
 
@@ -478,26 +480,35 @@ async function loadAudit() {
 
 // ---------- jobs ----------
 function showView(name) {
+  if (activeView === "browser" && name !== "browser") resetBrowserView();
+  activeView = name;
   $("chat-view").hidden = name !== "chat";
   $("jobs-view").hidden = name !== "jobs";
   if ($("approvals-view")) $("approvals-view").hidden = name !== "approvals";
   if ($("audit-view")) $("audit-view").hidden = name !== "audit";
   if ($("files-view")) $("files-view").hidden = name !== "files";
+  if ($("browser-view")) $("browser-view").hidden = name !== "browser";
   $("tab-chat").classList.toggle("active", name === "chat");
   $("tab-jobs").classList.toggle("active", name === "jobs");
   if ($("tab-approvals")) $("tab-approvals").classList.toggle("active", name === "approvals");
   if ($("tab-audit")) $("tab-audit").classList.toggle("active", name === "audit");
   if ($("tab-files")) $("tab-files").classList.toggle("active", name === "files");
+  if ($("tab-browser")) $("tab-browser").classList.toggle("active", name === "browser");
   if (name === "jobs") loadJobs();
   if (name === "approvals") loadApprovals();
   if (name === "audit") loadAudit();
   if (name === "files") loadFiles();
+  if (name === "browser") {
+    loadBrowserStatus();
+    if (browserPollTimer === null) browserPollTimer = setInterval(loadBrowserStatus, 5000);
+  }
 }
 $("tab-chat").onclick = () => showView("chat");
 $("tab-jobs").onclick = () => showView("jobs");
 if ($("tab-approvals")) $("tab-approvals").onclick = () => showView("approvals");
 if ($("tab-audit")) $("tab-audit").onclick = () => showView("audit");
 if ($("tab-files")) $("tab-files").onclick = () => showView("files");
+if ($("tab-browser")) $("tab-browser").onclick = () => showView("browser");
 if ($("audit-refresh")) $("audit-refresh").onclick = () => loadAudit();
 if ($("audit-export")) $("audit-export").onclick = async () => {
   const res = await api("/api/audit/export.csv");
@@ -598,6 +609,8 @@ $("job-form").onsubmit = async (e) => {
 };
 
 $("logout").onclick = async () => {
+  activeView = null;
+  resetBrowserView();
   try { await api("/logout", { method: "POST" }); } catch (_) {}
   location.href = "/login";
 };
@@ -801,6 +814,165 @@ if ($("attach-input")) $("attach-input").onchange = (e) => {
   uploadFiles(e.target.files, { intoComposer: true });
   e.target.value = "";
 };
+
+// ---------- browser ----------
+let browserState = null;
+let browserStateKey = "";
+let browserStateVersion = 0;
+let browserStatusLoad = 0;
+let browserShotLoad = 0;
+let browserShotPending = false;
+let browserThumbnailURL = "";
+let browserPollTimer = null;
+
+function browserCanRefresh() {
+  return !!(browserState && browserState.enabled && browserState.reachable && browserState.mode === "agent");
+}
+
+function releaseBrowserThumbnail() {
+  const image = $("browser-thumbnail");
+  if (image) {
+    image.hidden = true;
+    image.onerror = null;
+    image.removeAttribute("src");
+  }
+  if (browserThumbnailURL) URL.revokeObjectURL(browserThumbnailURL);
+  browserThumbnailURL = "";
+}
+
+function invalidateBrowserThumbnail() {
+  ++browserShotLoad;
+  browserShotPending = false;
+  releaseBrowserThumbnail();
+}
+
+function browserError(message) {
+  $("browser-error").textContent = message;
+  $("browser-error").hidden = !message;
+}
+
+function renderBrowserState() {
+  const state = browserState;
+  $("browser-details").hidden = !state || !state.enabled || !state.reachable;
+  $("browser-refresh").disabled = !browserCanRefresh() || browserShotPending;
+  $("browser-refresh").textContent = browserShotPending ? "Refreshing…" : "Refresh";
+  $("browser-status").textContent = !state ? "Loading browser status…"
+    : !state.enabled ? "Browser is off."
+    : !state.reachable ? "Browser is on but unavailable."
+    : "Browser is on.";
+  $("browser-tabs").replaceChildren();
+  $("browser-mode").textContent = "";
+  $("browser-title").textContent = "";
+  $("browser-address").textContent = "";
+  if (!state || !state.enabled || !state.reachable) return;
+  $("browser-mode").textContent = state.mode === "agent" ? "Agent mode" : state.mode === "user" ? "User mode" : "Mode unavailable";
+  $("browser-title").textContent = typeof state.title === "string" && state.title ? state.title : "No active page";
+  $("browser-address").textContent = typeof state.url === "string" && state.url ? state.url : "No address";
+  const tabs = Array.isArray(state.tabs) ? state.tabs : [];
+  for (const tab of tabs) {
+    const row = el("li", "browser-tab-row" + (tab.active ? " active" : ""));
+    if (tab.active) row.append(el("span", "badge", "Active"));
+    row.append(el("strong", "browser-tab-title", typeof tab.title === "string" && tab.title ? tab.title : "Untitled tab"));
+    row.append(el("span", "browser-tab-address", typeof tab.url === "string" ? tab.url : ""));
+    $("browser-tabs").append(row);
+  }
+  if (!tabs.length) $("browser-tabs").append(el("li", "hint", "No tabs open."));
+  $("browser-shot-note").textContent = browserShotPending ? "Getting the current thumbnail…"
+    : state.mode === "user" ? "Thumbnail refresh is paused while you use the browser."
+    : browserThumbnailURL ? "Thumbnail from the latest refresh." : "Choose Refresh to get the current thumbnail.";
+}
+
+function resetBrowserView(stopPolling = true) {
+  if (stopPolling && browserPollTimer !== null) {
+    clearInterval(browserPollTimer);
+    browserPollTimer = null;
+  }
+  ++browserStatusLoad;
+  ++browserStateVersion;
+  browserState = null;
+  browserStateKey = "";
+  invalidateBrowserThumbnail();
+  browserError("");
+  renderBrowserState();
+}
+
+async function loadBrowserStatus() {
+  if (activeView !== "browser") return;
+  const load = ++browserStatusLoad;
+  try {
+    const state = await (await api("/api/browser/status")).json();
+    if (load !== browserStatusLoad || activeView !== "browser") return;
+    const key = JSON.stringify(state);
+    if (key !== browserStateKey) {
+      ++browserStateVersion;
+      invalidateBrowserThumbnail();
+    }
+    browserStateKey = key;
+    browserState = state;
+    browserError("");
+    renderBrowserState();
+  } catch (e) {
+    if (load !== browserStatusLoad || activeView !== "browser") return;
+    resetBrowserView(false);
+    $("browser-status").textContent = "Browser status is unavailable.";
+    browserError(e.message || "Could not load browser status.");
+  }
+}
+
+async function refreshBrowserThumbnail() {
+  if (activeView !== "browser" || !browserCanRefresh() || browserShotPending) return;
+  const load = ++browserShotLoad;
+  const version = browserStateVersion;
+  browserShotPending = true;
+  browserError("");
+  renderBrowserState();
+  try {
+    const blob = await (await api("/api/browser/screenshot", { method: "POST" })).blob();
+    if (load !== browserShotLoad || version !== browserStateVersion || activeView !== "browser") return;
+    if (blob.type !== "image/png") throw new Error("Screenshot response was not a PNG.");
+    const url = URL.createObjectURL(blob);
+    releaseBrowserThumbnail();
+    browserThumbnailURL = url;
+    const image = $("browser-thumbnail");
+    image.onerror = () => {
+      if (browserThumbnailURL !== url) return;
+      releaseBrowserThumbnail();
+      browserError("Could not display the browser thumbnail.");
+      renderBrowserState();
+    };
+    image.src = url;
+    image.hidden = false;
+  } catch (e) {
+    if (load !== browserShotLoad || version !== browserStateVersion || activeView !== "browser") return;
+    releaseBrowserThumbnail();
+    if (e.message === "user_mode") {
+      ++browserStateVersion;
+      invalidateBrowserThumbnail();
+      browserState = { ...browserState, mode: "user" };
+      browserStateKey = JSON.stringify(browserState);
+      renderBrowserState();
+      browserError("Thumbnail refresh is paused while you use the browser.");
+      await loadBrowserStatus();
+      return;
+    }
+    browserError(e.message || "Could not refresh the browser thumbnail.");
+  } finally {
+    if (load === browserShotLoad && version === browserStateVersion && activeView === "browser") {
+      browserShotPending = false;
+      renderBrowserState();
+    }
+  }
+}
+
+if ($("browser-refresh")) $("browser-refresh").onclick = refreshBrowserThumbnail;
+window.addEventListener("pagehide", () => {
+  activeView = null;
+  if (browserPollTimer !== null) clearInterval(browserPollTimer);
+  browserPollTimer = null;
+  ++browserStatusLoad;
+  ++browserStateVersion;
+  invalidateBrowserThumbnail();
+});
 
 // ---------- start ----------
 (async () => {

@@ -121,3 +121,27 @@ code { font-size: .85em; color: var(--muted); }
 .file-card { max-width: 320px; }
 .file-card img { max-width: 100%; border-radius: 8px; margin-top: .4rem; }
 .composer .icon { padding: .35em .55em; font-size: 1.1rem; }
+
+/* browser (M6) */
+.browser-inner { min-width: 0; }
+.browser-inner h3 { font-size: 1rem; margin: .8rem 0 .4rem; }
+.browser-info { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .35rem .8rem; }
+.browser-info dt { color: var(--muted); }
+.browser-info dd { margin: 0; overflow-wrap: anywhere; }
+.browser-tabs { list-style: none; padding: 0; margin: 0; display: grid; gap: .5rem; }
+.browser-tab-row { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem .8rem; min-width: 0; }
+.browser-tab-row.active { border-color: var(--accent); }
+.browser-tab-title { display: block; overflow-wrap: anywhere; }
+.browser-tab-address { display: block; color: var(--muted); font-size: .85rem; overflow-wrap: anywhere; }
+.browser-tab-row .badge { display: inline-block; margin-bottom: .25rem; }
+.browser-preview { margin-top: 1rem; }
+.browser-preview-head { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.browser-preview-head h3 { margin: 0; }
+.browser-thumbnail { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; margin-top: .6rem; }
+.browser-thumbnail[hidden], #browser-details[hidden] { display: none; }
+#browser-error { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .topbar { flex-wrap: wrap; }
+  .tabs { width: 100%; }
+  .tab { flex: 1 0 auto; padding: .35em .6em; }
+}

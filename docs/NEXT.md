@@ -161,7 +161,7 @@ M6 was split into PRs to `v2`.
 - **Part 1, core side (#39): done.** `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py`, the browser policies in `agent/gate.py`, the screenshot on approval cards, and the tests for A6.1 and A6.2.
 - **Part 2, the browser service (#42): done off the server, off by default.** Deliverables 1–3, 5 and 8 below, the browser part of `docker-compose.test.yml`, and A6.3 (`make test-browser`). `agent/__main__.py` now accepts `BROWSER_ENABLED=true` and still refuses `SCREEN_ENABLED`. Nothing changes on Contabo until `.env` there gets **both** `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`.
 - **Fixture site (deliverable 7): done in #38**, extended in #42 with pages for dialogs, new tabs, frames, self-submitting forms, secret field names, uploads and more.
-- **Separate PRs:** the Browser tab (deliverable 9, #40) and the server-side checks (isolation from the browser container for A6.4, `make memory-report`, #41).
+- **Also merged:** the Browser tab (deliverable 9, #40) and the server-side checks (isolation probes from the browser container for A6.4, `make memory-report`, #41).
 - **Not started: everything on Contabo.** The pre-step measurement, the deploy with the browser on, the smoke, A6.5. Nobody has run the browser there.
 
 #### Goal
@@ -175,7 +175,7 @@ The agent can drive one persistent, headed Chromium through a private `browserd`
 
 #### Deliverables
 
-Expected locations per `docs/v2-spec.md`. In the tree after #42: 1–5, 7 and 8. Deliverable 6's firewall rules were already in `deploy/firewall.sh`; its isolation checks are #41. Deliverable 9 is #40.
+Expected locations per `docs/v2-spec.md`. All nine are in the tree after #40, #41 and #42. Deliverable 6's firewall rules were already in `deploy/firewall.sh`.
 
 1. **Image** `docker/browser/Dockerfile`: FROM a digest-pinned `mcr.microsoft.com/playwright/python` image whose Chromium matches the pinned Playwright version; `xvfb`, `x11vnc`, `tini`, fonts; `requirements-browser.lock` (hash-checked); `USER 1000:1000`; `/profile` and `/files` owned by 1000.
 2. **Chromium policy** `docker/browser/chromium-policy.json`: password manager, autofill, sync, sign-in, metrics off; downloads to `/files/downloads`; devtools disabled; `file://`, `chrome://`, `devtools://`, `view-source:`, `chrome-extension://` blocked. If managed policies are not honoured by the bundled Chromium, apply the same settings via launch args and profile preferences and document which worked.
@@ -194,12 +194,14 @@ Expected locations per `docs/v2-spec.md`. In the tree after #42: 1–5, 7 and 8.
    - `MODEL_VISION` stays false. Images are added to the model request only if `MODEL_VISION=true` **and** the active model manifest lists `vision`. Part 1 has no code path that hands an image to the model at all, so `MODEL_VISION=true` changes nothing yet; build that only when a vision model is actually installed.
    - How part 1 does it, so part 2 fits: the classifier looks at the element through `/v1/describe` just before the gate and returns `Decision.pinned = {"fingerprint": …}`. `call_tool` stores that under the reserved `_pin` key with the approval args and drops any `_pin` the model sent. Handlers send `mode="approved"` only while `call_tool` runs them with an approved approval row for that tool; otherwise `mode="safe"`. A `blocked_submission` answer is remembered on the run (`RunState.blocked_submissions`), so the same call is GATED `form_submit` next time. The approval screenshot is taken by `Decision.card_screenshot` inside `Gate.request` and saved as `screenshots/approval-<id>.png`.
 5. **Compose:** `browser` service on `browser_ctl` (10.77.4.40) and `browser_egress`; core joins `browser_ctl` at 10.77.4.10. Planned limits: `mem_limit`/`memswap_limit` 1280m (includes shm), `shm_size: 320m`, tmpfs `/tmp` 256m, cpus 2.0, pids 512, `oom_score_adj: 500`. Named volumes for `/profile` (browser-only) and a downloads location that core can expose as workspace files. New secret `browser_api_token` (add to `deploy/secrets.sh`). `agent/config.py` already refuses `BROWSER_ENABLED=true` without `BROWSER_API_TOKEN`; keep that.
-6. **Firewall** (`deploy/firewall.sh`): browser egress allowed to public internet only; no route from `browser` to core (10.77.1.10:8080, 10.77.4.10:8080), model, sandbox or host. Extend `tests/integration/isolation.sh` (#41).
+6. **Firewall** (`deploy/firewall.sh`): browser egress allowed to public internet only; no route from `browser` to core (10.77.1.10:8080, 10.77.4.10:8080), model, sandbox or host. Extend `tests/integration/isolation.sh`.
+   Browser isolation probes and read-only `make memory-report` are available (#41); live A6.4/A6.5 measurements remain pending. In `--server` mode a probed service that is not running fails the run. Without a host firewall the probes were run once against real core, sandbox and browser containers in the test stack (#42; the model was not running, so its probe was skipped): all blocked, each target confirmed listening from its own side. `make test-browser` repeats the sandbox and browser part every time.
 7. **Fixture site** `tests/fixtures/site/` and `fixture-web` service in `docker-compose.test.yml` (§13.2–13.3): order form, injection page, SPA div-POST, prefilled password, login + `/whoami`, download.
-   The fixture site exists with unit tests and the internal `fixture-web` service; browser integration remains pending.
+   The fixture site exists with unit tests and the internal `fixture-web` service; the live browser tests run against it (#42).
 8. **Chromium sandbox experiment** (`BROWSER_CHROMIUM_SANDBOX`, default `false`): try `true` with a pinned seccomp profile; report the result in the PR. Do not weaken host AppArmor to make it work.
    Result (#42, dev container without AppArmor): with Docker's own seccomp profile Chromium refuses to start sandboxed. With Playwright's published profile it starts only if the container keeps `CAP_SYS_CHROOT`, because the profile allows `chroot` only with that capability. With that one rule changed (`docker/browser/seccomp-chromium.json`) it runs fully sandboxed with `cap_drop: ALL`, `no-new-privileges` and a read-only root, and the whole live suite passes (`CHROMIUM_SANDBOX=1 make test-browser`). Still open: whether Contabo's Ubuntu 24.04 host lets a container create user namespaces. To try there: `BROWSER_CHROMIUM_SANDBOX=true` and `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json` in `.env`; if the browser does not become healthy, set both back. The default stays `false` until Roland decides (§6, decision 3).
 9. **UI:** Browser tab showing status, current URL/title and a thumbnail. Vanilla JS, `textContent` only; keep function names used by `tests/frontend/chat.test.cjs`.
+   The Browser tab and core status/thumbnail routes exist (#40); the live smoke remains pending.
 
 #### Contract between core and browserd (fixed by part 1; part 2 must implement it)
 
@@ -272,7 +274,7 @@ Automated (must pass in CI or `make test-integration`):
 - [x] `test_screenshot_not_sent_to_text_only_model`. *(Part 1, in `tests/test_browser_tools.py`.)*
 - [x] **A6.3** `tests/integration/test_browser_live.py` against the fixture site: place-order needs approval (0 POSTs before, exactly 1 after); injection page cannot trigger delete; SPA div POST blocked in safe mode; password value never in snapshot; profile persists across browser restart; downloads land in workspace; no cookie/eval endpoints; private-IP navigation blocked. *(Part 2: 32 tests, run by `make test-browser` in the compose test stack. **Not in CI yet:** adding a CI job means editing `.github/workflows/ci.yml`, which the credentials used so far cannot push. Whoever has `workflow` scope adds a job that runs `make secrets` and `make test-browser` on a disposable runner.)*
 - [x] Unit tests for the service itself: `tests/test_browserd_guards.py`, `tests/test_browserd_server.py` (exact route table, auth, limits, user mode, no cookie/eval surface) and `tests/frontend/snapshot.test.cjs` (the page script; run by `pytest` and `make test`).
-- [ ] **A6.4** isolation script: from `browser`, 10.77.4.10:8080 and 10.77.1.10:8080 unreachable. *(#41; on Contabo it needs the firewall.)*
+- [ ] **A6.4** isolation script: from `browser`, 10.77.4.10:8080 and 10.77.1.10:8080 unreachable. *(The script is in, #41, and passed in the test stack without a firewall. Open until it passes on Contabo with `make verify`.)*
 - [x] Existing suites still green: `make lint`, `make test`. *(`make test-integration` only runs in GitHub CI.)*
 
 Code Shipper (Grok) smoke on Contabo (after deploy with `BROWSER_ENABLED=true`):
@@ -294,7 +296,7 @@ Code Shipper (Grok) smoke on Contabo (after deploy with `BROWSER_ENABLED=true`):
 1. `make secrets` to create `secrets/browser_api_token` (uid 1000, 0400). Never print it.
 2. `APPLY=1 make firewall-install` to apply the browser rules before starting the service.
 3. To switch the browser on, put both `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true` in `.env`, then deploy. To switch it off again, remove both and deploy; `docker compose --profile browser stop browser` stops the container at once. The `browser-profile` volume keeps Roland's sign-ins; never delete it without him.
-4. Build the browser image when the model is idle (builds need ~1–1.5 GB temporarily). The image is about 2 GB on disk.
+4. Build the browser image when the model is idle (builds need ~1–1.5 GB of memory temporarily). The image takes about 3.8 GB of disk: Playwright's base image is 3.5 GB, and removing the browsers that are not used does not give that space back. Check free disk first (`df -h`).
 5. Keep `MODEL_CTX=3072` and `MODEL_MEM_LIMIT=3840m`. If headroom fails, stop and ask Roland (§6). Do not lower other services' limits silently.
 6. Take a Contabo snapshot before the first browser deploy.
 7. Optional, after the smoke passes: try Chromium's own sandbox (deliverable 8) and report what the host does.

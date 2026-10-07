@@ -37,7 +37,7 @@ tests=(python -m pytest -m integration -q -p no:cacheprovider tests/integration/
 cleanup() {
     status=$?
     if [[ $status != 0 ]]; then
-        "${compose[@]}" logs --no-color --tail 60 browser fixture-web || true
+        "${compose[@]}" logs --no-color --tail 60 browser fixture-web sandbox || true
     fi
     if [[ ${KEEP:-0} != 1 ]]; then
         "${compose[@]}" --profile browser down --volumes --remove-orphans || true
@@ -59,11 +59,11 @@ fi
 
 if [[ ${BUILD:-1} != 0 ]]; then
     printf '==> build\n'
-    "${compose[@]}" build fixture-web browser tester
+    "${compose[@]}" build fixture-web sandbox browser tester
 fi
 
-printf '==> start the fixture site and the browser\n'
-"${compose[@]}" up -d --wait --wait-timeout 180 fixture-web browser
+printf '==> start the fixture site, the sandbox and the browser\n'
+"${compose[@]}" up -d --wait --wait-timeout 180 fixture-web sandbox browser
 
 printf '==> live tests\n'
 "${compose[@]}" run --rm --no-deps -e BROWSER_LIVE_REQUIRED=1 tester "${tests[@]}"
@@ -174,6 +174,11 @@ if problems:
 print(f"ok: one listening socket (browserd), {len(chromium)} Chromium processes as uid 1000, "
       "pipe transport, policy file in place, read-only root")
 PY
+
+# A6.4 without the host firewall: the sandbox can't reach browserd and the browser can't reach
+# sandboxd, while both are up. Core and the model aren't part of this stack, so their probes
+# are skipped here; on the server `make verify` runs them all.
+ISOLATION_COMPOSE_FILES="docker-compose.yml docker-compose.test.yml" bash tests/integration/isolation.sh --ci
 
 # The signed-in profile must be in the browser container and in no other.
 for container in $("${compose[@]}" ps --all --quiet); do
