@@ -56,13 +56,13 @@ def resolved(tmp_path_factory):
 
 
 def test_only_caddy_publishes_expected_ports():
-    assert set(COMPOSE["services"]) == {"core", "caddy", "model"}
+    assert set(COMPOSE["services"]) == {"core", "caddy", "model", "sandbox"}
     assert COMPOSE["services"]["caddy"]["ports"] == ["80:80/tcp", "443:443/tcp", "443:443/udp"]
     assert "ports" not in COMPOSE["services"]["core"]
     assert COMPOSE["name"] == "roland-agent"
 
 
-@pytest.mark.parametrize("name", ["core", "caddy", "model"])
+@pytest.mark.parametrize("name", ["core", "caddy", "model", "sandbox"])
 def test_every_service_has_security_and_resource_limits(name):
     service = COMPOSE["services"][name]
     assert service["user"] == "1000:1000"
@@ -104,7 +104,8 @@ def test_reserved_internal_bridges_and_current_egress_members():
     caddy = COMPOSE["services"]["caddy"]["networks"]
     core = COMPOSE["services"]["core"]["networks"]
     assert set(caddy) == {"public", "edge", "screen"}
-    assert set(core) == {"edge", "model", "core_egress"}
+    assert set(core) == {"edge", "sandbox_ctl", "model", "core_egress"}
+    assert core["sandbox_ctl"]["ipv4_address"] == "10.77.3.10"
     assert caddy["edge"]["ipv4_address"] == "10.77.1.2"
     assert core["edge"]["ipv4_address"] == "10.77.1.10"
     assert core["model"]["ipv4_address"] == "10.77.6.10"
@@ -114,8 +115,10 @@ def test_reserved_internal_bridges_and_current_egress_members():
 def test_unimplemented_features_cannot_be_enabled_by_env_file():
     core = COMPOSE["services"]["core"]
     env = core["environment"]
+    # Shell is on via sandbox in M4; browser/screen/training stay off.
+    assert env["ALLOW_SHELL"] == "true"
+    assert env["SHELL_BACKEND"] == "sandbox"
     for flag in (
-        "ALLOW_SHELL",
         "BROWSER_ENABLED",
         "SCREEN_ENABLED",
         "TRAINING_CAPTURE",
@@ -125,7 +128,7 @@ def test_unimplemented_features_cannot_be_enabled_by_env_file():
     assert env["HOST"] == "10.77.1.10"
     assert env["AGENT_ENV"] == "production" and env["COOKIE_SECURE"] == "true"
     assert env["CORE_ALLOWED_PEERS"] == env["FORWARDED_ALLOW_IPS"] == "10.77.1.2"
-    assert core["secrets"] == ["model_server_token", "agent_password_hash"]
+    assert core["secrets"] == ["model_server_token", "agent_password_hash", "sandbox_api_token"]
     assert "env_file" not in COMPOSE["services"]["caddy"]
     assert core["env_file"] == ".env"
     assert env["AGENT_PASSWORD_HASH_FILE"] == "/run/secrets/agent_password_hash"
@@ -196,7 +199,7 @@ def test_resolved_default_hostname_and_resource_budget(resolved):
     assert services["core"]["environment"]["AGENT_HOST"] == "37-60-226-214.sslip.io"
     assert services["caddy"]["environment"]["AGENT_HOST"] == "37-60-226-214.sslip.io"
     assert preflight.configuration_errors(resolved) == []
-    assert sum(int(service["mem_limit"]) for service in services.values()) == 4576 * 1024 * 1024
+    assert sum(int(service["mem_limit"]) for service in services.values()) == 5600 * 1024 * 1024
 
 
 @pytest.mark.parametrize(
@@ -255,7 +258,7 @@ def test_preflight_refuses_modified_policy_without_printing_secret_values(resolv
     if change == "port":
         core["ports"] = [{"target": 8080, "published": "8080"}]
     elif change == "shell":
-        core["environment"]["ALLOW_SHELL"] = "true"
+        core["environment"]["SHELL_BACKEND"] = "local"
     elif change == "host":
         core["environment"]["AGENT_HOST"] = "agent.test; script-src *"
     elif change == "tls":
@@ -316,3 +319,34 @@ def test_model_ctx_compose_default_is_4096():
     assert "${MODEL_CTX:-4096}" in raw
     assert "${MODEL_CTX:-6144}" not in raw
     assert "${MODEL_CTX:-5120}" not in raw
+
+
+def test_sandbox_service_hardening():
+    sandbox = COMPOSE["services"]["sandbox"]
+    assert sandbox["user"] == "1000:1000"
+    assert sandbox["environment"]["SANDBOXD_HOST"] == "10.77.3.20"
+    assert sandbox["environment"]["SANDBOXD_ALLOWED_PEERS"] == "10.77.3.10"
+    assert sandbox["secrets"] == ["sandbox_api_token"]
+    assert "env_file" not in sandbox
+    assert "ports" not in sandbox
+    assert sandbox["networks"]["sandbox_ctl"]["ipv4_address"] == "10.77.3.20"
+    assert sandbox["networks"]["sandbox_egress"]["ipv4_address"] == "10.77.11.20"
+    assert sandbox["oom_score_adj"] == 800
+    assert sandbox["pids_limit"] == 256
+    assert sandbox["mem_limit"] == "1g"
+    dockerfile = (ROOT / "docker/sandbox/Dockerfile").read_text()
+    assert "USER 1000:1000" in dockerfile
+    assert "tini" in dockerfile
+    assert "sandboxd" in dockerfile
+    # Comment may name forbidden packages; the apt install block must not install them.
+    run_lines: list[str] = []
+    collecting = False
+    for line in dockerfile.splitlines():
+        if line.startswith("RUN apt-get"):
+            collecting = True
+        if collecting:
+            run_lines.append(line)
+            if not line.rstrip().endswith("\\"):
+                break
+    run_block = "\n".join(run_lines)
+    assert "build-essential" not in run_block and "nodejs" not in run_block

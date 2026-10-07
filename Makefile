@@ -24,6 +24,13 @@ test:
 
 test-integration:
 	bash tests/integration/edge.sh
+	@echo "A4.3/A4.4: bring up sandbox test stack when Docker is available:"
+	@echo "  mkdir -p .ci-workspace && make secrets"
+	@echo "  docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --build sandbox"
+	@echo "  docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm tester"
+	@echo "  bash tests/integration/isolation.sh --ci"
+	@echo "  docker compose -f docker-compose.yml -f docker-compose.test.yml down -v"
+	@echo "On Contabo after deploy: make verify (runs isolation.sh --server)."
 
 build:
 	docker compose build

@@ -23,7 +23,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["agent", "agent.web", "agent.models", "agent.migrations"]
+packages = ["agent", "agent.web", "agent.models", "agent.migrations", "sandboxd"]
 
 [tool.setuptools.package-data]
 "agent.web" = ["static/*"]
@@ -33,6 +33,10 @@ packages = ["agent", "agent.web", "agent.models", "agent.migrations"]
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: needs the compose test stack (sandbox/model)",
+]
 
 [tool.ruff]
 target-version = "py311"

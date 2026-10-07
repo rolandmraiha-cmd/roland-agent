@@ -205,10 +205,24 @@ def test_model_refusal_precedes_resource_creation(make_agent, monkeypatch, valid
         cli.build(validate=validate)
 
 
+def test_sandbox_backend_builds(make_agent, monkeypatch):
+    from agent import __main__ as cli
+    from agent.sandbox_client import SandboxShell
+
+    config = replace(
+        make_agent().config,
+        allow_shell=True,
+        shell_backend="sandbox",
+        sandbox_api_token="test-token",
+    )
+    monkeypatch.setattr(cli.Config, "from_env", lambda: config)
+    agent = cli.build(validate=True)
+    assert isinstance(agent.ctx.shell, SandboxShell)
+
+
 @pytest.mark.parametrize(
     "changes",
     [
-        {"allow_shell": True, "shell_backend": "sandbox", "sandbox_api_token": "test-token"},
         {"browser_enabled": True, "browser_api_token": "test-token"},
         {"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "view-test"},
     ],

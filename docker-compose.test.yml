@@ -1,0 +1,78 @@
+# Test overrides (§13.3). Use with:
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d sandbox
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm tester
+name: roland-agent-test
+
+services:
+  caddy:
+    profiles: ["edge-test"]
+
+  core:
+    profiles: ["full-stack"]
+
+  model:
+    profiles: ["with-model"]
+    environment:
+      MODEL_CTX: "2048"
+    mem_limit: ${MODEL_MEM_LIMIT:-1g}
+    memswap_limit: ${MODEL_MEM_LIMIT:-1g}
+
+  sandbox:
+    volumes:
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-./.ci-workspace}
+        target: /workspace
+        bind: { create_host_path: true }
+    environment:
+      SANDBOXD_ALLOWED_PEERS: "10.77.3.10,127.0.0.1"
+
+  tester:
+    build: { context: ., dockerfile: Dockerfile }
+    image: roland-agent/tester:local
+    user: "1000:1000"
+    working_dir: /src
+    environment:
+      AGENT_ENV: development
+      COOKIE_SECURE: "false"
+      HOST: 127.0.0.1
+      PORT: "8080"
+      DATA_DIR: /tmp/data
+      WORKSPACE_DIR: /workspace
+      ALLOW_SHELL: "true"
+      SHELL_BACKEND: sandbox
+      SANDBOX_URL: http://10.77.3.20:7000
+      SANDBOX_API_TOKEN_FILE: /run/secrets/sandbox_api_token
+      BROWSER_ENABLED: "false"
+      SCREEN_ENABLED: "false"
+      TZ: Europe/Helsinki
+      PYTHONPATH: /src
+    secrets: [sandbox_api_token]
+    volumes:
+      - type: bind
+        source: .
+        target: /src
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-./.ci-workspace}
+        target: /workspace
+        bind: { create_host_path: true }
+    tmpfs: ["/tmp:size=256m,mode=1777", "/tmp/data:size=64m,mode=1777"]
+    networks:
+      sandbox_ctl: { ipv4_address: 10.77.3.10 }
+    depends_on:
+      sandbox: { condition: service_healthy }
+    # Install soft-linked package + dev deps then run integration tests.
+    entrypoint: ["bash", "-lc"]
+    command:
+      - |
+        pip install --no-cache-dir --no-deps --no-build-isolation --no-index -e /src >/dev/null
+        pip install --no-cache-dir pytest pytest-asyncio httpx >/dev/null
+        pytest -m integration -q /src/tests/integration
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
