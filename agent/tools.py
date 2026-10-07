@@ -445,7 +445,10 @@ async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
         outcome = await gate.request(ctx, name, args, decision)
         if not outcome.approved:
             return f"Not done: {outcome.message}"
-        run_args = outcome.args if outcome.args is not None else args
+        # Fail closed: never run with freshly supplied/model args when stored args are missing.
+        if outcome.args is None:
+            return "Not done: approved action is missing stored args."
+        run_args = outcome.args
         approval_id = outcome.approval_id
     try:
         result = await TOOLS[name][1](ctx, run_args)

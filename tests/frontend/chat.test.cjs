@@ -520,3 +520,47 @@ test('composer is locked while an approval is pending', async () => {
   f.run('setComposerLocked(false)');
   assert.equal(f.get('composer').classes.has('locked'), false);
 });
+
+
+test('stop unlocks composer even if approval_resolved never arrives', async () => {
+  const f = fixture();
+  f.run('currentChat = 1');
+  f.run('setComposerLocked(true)');
+  f.run('setSending(true)');
+  let stopped = false;
+  f.context.api = async (url) => {
+    if (url.endsWith('/stop')) { stopped = true; return { json: async () => ({ ok: true, stopped: true }) }; }
+    if (url === '/api/status') return { json: async () => ({ csrf: 'x', name: 'T', model: 'm', calls_left: 1, daily_limit: 1, pending_approvals: 0 }) };
+    return { json: async () => ({}) };
+  };
+  f.context.loadStatus = async () => {};
+  await f.get('stop').onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(stopped, true);
+  assert.equal(f.run('composerLocked'), false);
+  assert.equal(f.get('composer').classes.has('locked'), false);
+  assert.equal(f.get('input').disabled, false);
+});
+
+test('send finally unlocks composer after stream ends without approval_resolved', async () => {
+  const f = fixture();
+  f.run('currentChat = 3');
+  f.context.loadStatus = async () => {};
+  // Stream locks on approval_required, then ends without approval_resolved.
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) {
+      return sseStream([
+        { type: 'approval_required', approval: {
+          id: 'a1', category: 'delete', summary: 'x', args_hash: 'c'.repeat(64),
+          status: 'pending', needs_confirm: false, details: {}, args: {}, tainted: false,
+        } },
+        { type: 'done', reply: 'gave up' },
+      ]);
+    }
+    if (url.endsWith('/messages')) return { json: async () => ({ messages: [] }) };
+    return { json: async () => ({}) };
+  };
+  await f.run('send("do it")');
+  assert.equal(f.run('composerLocked'), false);
+  assert.equal(f.get('composer').classes.has('locked'), false);
+});

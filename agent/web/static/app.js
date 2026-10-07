@@ -306,6 +306,8 @@ async function send(text) {
       if (!final || final.startsWith("thinking…")) reply.remove();
     }
     setSending(false);
+    // Safety net: if approval_resolved was missed (stop/expire/cancel), do not leave the composer locked.
+    setComposerLocked(false);
     loadChats().then((chats) => {
       const c = chats.find((x) => x.id === currentChat);
       if (c) $("title").textContent = c.title;
@@ -491,7 +493,12 @@ if ($("audit-export")) $("audit-export").onclick = async () => {
 };
 if ($("stop")) $("stop").onclick = async () => {
   if (currentChat == null) return;
-  try { await api(`/api/chats/${currentChat}/stop`, { method: "POST" }); } catch (e) { addMessage("error", e.message); }
+  try {
+    await api(`/api/chats/${currentChat}/stop`, { method: "POST" });
+    // Stop cancels pending approvals; unlock even if approval_resolved never arrives on the SSE stream.
+    setComposerLocked(false);
+    loadStatus();
+  } catch (e) { addMessage("error", e.message); }
 };
 
 async function loadJobs() {
