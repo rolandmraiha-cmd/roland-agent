@@ -34,6 +34,11 @@ ERROR_TEXT = {
     "bad_key": "that key isn't allowed.",
     "blocked_url": "the browser refused that address.",
     "timeout": "the page took too long to respond.",
+    "load_failed": "the page couldn't be loaded. The address may be wrong, or the site is down.",
+    "not_clickable": "that element is hidden or something covers it. Take a new snapshot.",
+    "no_such_option": "that option isn't in the list. The snapshot shows the options.",
+    "unavailable": "the browser is starting up. Try again in a moment.",
+    "too_large": "the picture was too large to take.",
 }
 
 
@@ -58,6 +63,18 @@ class ElementChanged(BrowserError):
     """HTTP 409: the element no longer matches the fingerprint that was classified or approved."""
 
     code = "element_changed"
+
+
+def _clean(value):
+    """Text from a web page can hold half of a character pair (a lone surrogate), which can't
+    be stored or sent on as UTF-8. Replace those, everywhere in a browserd answer."""
+    if isinstance(value, str):
+        return value if value.isascii() else value.encode("utf-8", "replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_clean(item) for item in value]
+    if isinstance(value, dict):
+        return {_clean(key): _clean(item) for key, item in value.items()}
+    return value
 
 
 def _code(raw: object) -> str:
@@ -120,7 +137,7 @@ class BrowserClient:
             raise BrowserError("the browser sent an answer that couldn't be read.", "bad_answer") from error
         if not isinstance(parsed, (dict, list)):
             raise BrowserError("the browser sent an answer that couldn't be read.", "bad_answer")
-        return parsed
+        return _clean(parsed)
 
     @staticmethod
     def _error(status: int, data: bytes) -> BrowserError:

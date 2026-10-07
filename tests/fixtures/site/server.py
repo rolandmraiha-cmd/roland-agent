@@ -90,6 +90,99 @@ _PAGES = {
     ),
 }
 
+# Pages beyond §13.2, for the live browser tests: things real sites do that the guards and
+# the snapshot must cope with.
+_PAGES.update(
+    {
+        "/extras/alert": _page(
+            "Dialogs",
+            '<button type="button" onclick="document.getElementById(\'out\').textContent = '
+            "'confirm said ' + confirm('Delete everything?')\">Ask me</button><p id=\"out\">not asked</p>",
+        ),
+        "/extras/popup": _page(
+            "New tabs",
+            '<a href="/blog" target="_blank">Blog in a new tab</a> '
+            '<a href="/shop" target="_blank">Shop in a new tab</a>',
+        ),
+        "/extras/frame": _page(
+            "Framed shop",
+            "<p>The order form below is inside a frame.</p>"
+            '<iframe src="/shop" title="Shop frame" width="600" height="300"></iframe>',
+        ),
+        "/extras/autopost": _page(
+            "Posts by itself",
+            '<form id="auto" action="/order" method="post"><input type="hidden" name="item" value="auto"></form>'
+            "<script>setTimeout(function () { document.getElementById('auto').submit(); }, 200);</script>",
+        ),
+        "/extras/delayed": _page(
+            "Delayed order",
+            '<button type="button" onclick="setTimeout(function () { document.getElementById(\'late\').submit(); }, 1500)">'
+            'Show details</button><form id="late" action="/order" method="post">'
+            '<input type="hidden" name="item" value="late"></form>',
+        ),
+        "/extras/link-post": _page(
+            "Link that reports",
+            "<a href=\"/blog\" onclick=\"fetch('/settings', {method: 'POST', body: 'tracked=1', keepalive: true})\">"
+            "Read the blog</a>",
+        ),
+        "/extras/names": _page(
+            "Field names",
+            '<form action="/send" method="post">'
+            '<label>Shipping address <input name="shipping_address" value="Mannerheimintie 1"></label>'
+            '<label>Passenger <input name="passengerName" value="Roland"></label>'
+            '<label>PIN <input name="pin" value="1234-fixture-pin"></label>'
+            '<label>Code from your phone <input name="otp_code" value="987654-fixture-otp"></label>'
+            '<label>Card <input name="field7" autocomplete="cc-number" value="4111-fixture-card"></label>'
+            '<label>Security code <input name="field8" value="321-fixture-cvc"></label>'
+            '<label>Search <input type="search" name="q" value="mugs"></label>'
+            '<button type="submit">Send</button></form>',
+        ),
+        "/extras/shadow": _page(
+            "Shadow parts",
+            '<fixture-box></fixture-box><p id="out">not pressed</p><script>'
+            "customElements.define('fixture-box', class extends HTMLElement { connectedCallback() {"
+            "const root = this.attachShadow({mode: 'open'});"
+            "root.innerHTML = '<button type=\"button\">Shadow button</button>';"
+            "root.querySelector('button').onclick = function () { document.getElementById('out').textContent = 'pressed'; };"
+            "} });</script>",
+        ),
+        "/extras/long": _page(
+            "Long list",
+            "<ul>"
+            + "".join(
+                f'<li style="margin: 40px 0"><a href="/blog/1?item={n}">Item {n}</a></li>'
+                for n in range(1, 151)
+            )
+            + "</ul>",
+        ),
+        "/extras/select": _page(
+            "Choices",
+            '<form action="/blog" method="get"><label>Country <select name="country">'
+            "<option>Finland</option><option>Sweden</option><option>Norway</option></select></label></form>"
+            '<form id="plan" action="/order" method="post"><label>Plan <select name="plan" '
+            "onchange=\"document.getElementById('plan').submit()\">"
+            "<option>Free</option><option>Paid</option></select></label></form>",
+        ),
+        "/extras/title": _page(
+            "Odd title",
+            "<p>The title of this page is set by a script.</p>"
+            "<script>document.title = 'Bad \\ud800 half \\u202egnp.exe';</script>"
+            '<a href="/blog" id="odd">Odd \u202e link</a>'
+            "<script>document.getElementById('odd').setAttribute('aria-label', 'Odd \\udc00 label');</script>",
+        ),
+        "/extras/upload": _page(
+            "Send a file",
+            '<form action="/send" method="post" enctype="multipart/form-data">'
+            '<label>File <input type="file" name="attachment"></label>'
+            '<button type="submit">Upload file</button></form>',
+        ),
+        "/extras/editable": _page(
+            "Notes",
+            '<div contenteditable="true" title="Note text" style="min-height: 40px; border: 1px solid">old note</div>',
+        ),
+    }
+)
+
 _PAGES["/"] = _page(
     "Browser fixture site",
     "<ul>"
@@ -182,6 +275,12 @@ class FixtureHandler(BaseHTTPRequestHandler):
         if path == "/_reset" and self.command == "POST":
             self.server.reset()
             self._respond(HTTPStatus.OK, '{"requests":[]}', "application/json; charset=utf-8")
+            return
+        if self.command in {"GET", "HEAD"} and path == "/extras/redirect-private":
+            # A public page that sends the browser on to a private address.
+            self._respond(
+                HTTPStatus.FOUND, "", "text/plain; charset=utf-8", {"Location": "http://10.77.1.10:8080/"}
+            )
             return
         if self.command in {"GET", "HEAD"}:
             if path in _PAGES:

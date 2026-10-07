@@ -14,6 +14,7 @@ import json
 import secrets
 import struct
 import time
+import unicodedata
 from collections.abc import Awaitable, Callable
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
@@ -59,7 +60,14 @@ def _browser(ctx) -> BrowserClient | None:
 
 
 def _one_line(value: object, limit: int = 200) -> str:
-    text = " ".join(str(value if value is not None else "").split())
+    """Page text as one plain line. Invisible and direction-changing characters are taken out:
+    a page could use them to make an approval card read differently from what it says."""
+    text = str(value if value is not None else "")[: limit * 8]
+    if not text.isascii():
+        text = "".join(
+            char for char in text if unicodedata.category(char) not in {"Cf", "Cs", "Co", "Cn"}
+        )
+    text = " ".join("".join(char if char.isprintable() else " " for char in text).split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
@@ -485,14 +493,31 @@ def _action_result(ctx, tool: str, verb: str, answer: dict, target: object = "")
         return "Error: the browser couldn't do that. Take a new snapshot and look again."
     lines = [f"{verb}."]
     lines.append(("Now at " if answer.get("navigated") else "The page is ") + _page_line(answer))
+    lines += _notes(answer)
+    _audit(ctx, tool, ok=True, url=_one_line(answer.get("url"), 300), navigated=bool(answer.get("navigated")))
+    return "\n".join(lines)
+
+
+def _notes(answer: dict) -> list[str]:
+    """Things browserd did on its own since the last call, in words for the model."""
+    lines = []
     dialogs = answer.get("dialogs")
     if isinstance(dialogs, list):
         for dialog in dialogs[:3]:
             if isinstance(dialog, dict):
                 kind = _one_line(dialog.get("type"), 20) or "dialog"
                 lines.append(f"A {kind} box was dismissed: {_one_line(dialog.get('message'), 160)}")
-    _audit(ctx, tool, ok=True, url=_one_line(answer.get("url"), 300), navigated=bool(answer.get("navigated")))
-    return "\n".join(lines)
+    background = answer.get("blocked_background")
+    if isinstance(background, list) and background and isinstance(background[0], dict):
+        method = _one_line(background[0].get("method"), 10).upper() or "POST"
+        where = _where(background[0].get("url"), path=True)
+        lines.append(f"The page tried to send a form by itself ({method} {where}). That was stopped.")
+    if answer.get("popup_closed") is True:
+        lines.append(
+            "The page tried to open another tab, but too many are open, so it was closed. "
+            "Close a tab with browser_close_tab if you need the new one."
+        )
+    return lines
 
 
 def _label(element: dict) -> str:
@@ -536,7 +561,9 @@ def element_line(element: dict, page_url: str = "") -> str:
     level = element.get("level")
     if isinstance(level, int) and 1 <= level <= 6:
         label += f"({level})"
-    line = f'{indent}{head}{label} "{_one_line(element.get("name"), 80)}"'
+    name = _one_line(element.get("name"), 80)
+    # Headings and page regions have no ref; an unnamed region is just its kind ("main").
+    line = f'{indent}{head}{label} "{name}"' if head or name else f"{indent}{label}"
     href = element.get("href")
     if isinstance(href, str) and href and _label(element) == "link":
         line += f" -> {_short_href(href, page_url)}"
@@ -544,6 +571,13 @@ def element_line(element: dict, page_url: str = "") -> str:
         line += " (sensitive, value hidden)"
     elif isinstance(element.get("value"), str) and element["value"]:
         line += f' value="{_one_line(element["value"], 60)}"'
+    if element.get("checked") is True:
+        line += " (checked)"
+    options = element.get("options")
+    if isinstance(options, list) and options:
+        shown = " | ".join(_one_line(option, 30) for option in options[:12] if isinstance(option, str))
+        more = len(options) - 12 + (element.get("more_options") if isinstance(element.get("more_options"), int) else 0)
+        line += f" options: {_one_line(shown, 240)}" + (f" (+{more} more)" if more > 0 else "")
     if policy_browser.is_submit_control(element):
         form = policy_browser.form_line(element)
         line += f" (submits form {form})" if form else " (submits)"
@@ -563,6 +597,7 @@ def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
             "This page has a sign-in form. Never type a password or code; tell Roland he has "
             "to sign in himself."
         )
+    head += _notes(answer)
     elements = answer.get("elements")
     lines = [element_line(item, page_url) for item in elements if isinstance(item, dict)] \
         if isinstance(elements, list) else []
@@ -643,11 +678,18 @@ async def browser_open(ctx, args: dict) -> str:
     if answer.get("blocked"):
         _audit(ctx, "browser_open", ok=False, url=_one_line(url, 300), blocked=_one_line(answer["blocked"], 40))
         return "Error: the browser refused that address (private, local or not a web page)."
+    if answer.get("download") is True:
+        _audit(ctx, "browser_open", ok=True, url=_one_line(url, 300), download=True)
+        return (
+            "That address is a file, not a page, so the browser is downloading it. "
+            "Use browser_downloads to see it; the tab still shows " + _page_line(answer)
+        )
     _audit(ctx, "browser_open", ok=True, url=_one_line(answer.get("url") or url, 300))
     status = answer.get("status")
     lines = [f"Opened {_page_line(answer)}"]
-    if isinstance(status, int):
+    if isinstance(status, int) and status:
         lines.append(f"HTTP {status}")
+    lines += _notes(answer)
     lines.append("Use browser_snapshot to read the page.")
     return "\n".join(lines)
 
