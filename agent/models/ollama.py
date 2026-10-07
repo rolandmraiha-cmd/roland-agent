@@ -38,7 +38,7 @@ class OllamaBrain:
         max_new_tokens: int = 768,
         timeout: float = 600,
         tool_mode: str = "grammar",
-        ctx: int = 5120,
+        ctx: int = 4096,
     ):
         validate_endpoint(base_url, allowed_hosts)
         del server_token  # Ollama has no API-key auth; accepted for factory parity only.

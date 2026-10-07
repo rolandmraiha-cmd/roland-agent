@@ -121,7 +121,7 @@ Before any real `docker compose up`: uid **1000** / mode **0400** secret files u
 | Catalogue default | `qwen3-4b-q4km` (~2.5 GB); hashes in `deploy/models.lock` |
 | CI-only | `test-tiny` (not an assistant) |
 | Image pin | `docker/model/VERSION` → llama.cpp `server-b11434` digest |
-| Context | `MODEL_CTX` default **5120**, hard-capped at **6144** in `docker/model/run.sh` |
+| Context | `MODEL_CTX` default **4096**, hard-capped at **6144** in `docker/model/run.sh` |
 | Mem limit | Compose default **3840m**; acceptance peak ≤ **3600 MiB** |
 | Isolation | No published port, no egress, digest-pinned, read-only weights |
 
@@ -131,7 +131,7 @@ Before any real `docker compose up`: uid **1000** / mode **0400** secret files u
 |---|---|---|
 | Install size + SHA-256 match catalogue | Pass | Pending |
 | Authenticated reply via **agent** path (after M2.10–13) | Pass | Pending |
-| Peak model memory at ctx 6144 | ≤ 3600 MiB; else `MODEL_CTX=5120` and remeasure | Pending |
+| Peak model memory at ctx 6144 | ≤ 3600 MiB; else `MODEL_CTX=4096` and remeasure | Pending |
 | Prompt tok/s (short and ~4096), generation tok/s, TTFT | Record | Pending |
 | Soak + restart recovery | Healthy | Pending |
 | No model egress / no published model port | Pass | Pending |

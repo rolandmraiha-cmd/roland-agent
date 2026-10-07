@@ -288,7 +288,7 @@ Every service sets `memswap_limit` equal to `mem_limit`, so containers never swa
 
 | Service | mem_limit (MiB) | cpus | pids_limit | other |
 |---|---|---|---|---|
-| model (llama.cpp, 4B Q4_K_M) | 3840 | 3.00 | 128 | `--threads 3`, `--ctx-size 5120` (shipping Contabo default; ceiling 6144), f16 KV cache, flash attention off, `--ubatch-size 256`, weights loaded without mmap, `--parallel 1`; `oom_score_adj: 300` |
+| model (llama.cpp, 4B Q4_K_M) | 3840 | 3.00 | 128 | `--threads 3`, `--ctx-size 4096` (shipping Contabo default; ceiling 6144), f16 KV cache, flash attention off, `--ubatch-size 256`, weights loaded without mmap, `--parallel 1`; `oom_score_adj: 300` |
 | browser | 1280 (includes shm) | 2.00 | 512 | `shm_size: 320m`, tmpfs `/tmp` 256m, `BROWSER_MAX_TABS=2`, `oom_score_adj: 500` |
 | sandbox | 1024 | 1.50 | 256 | tmpfs `/tmp` 384m, `oom_score_adj: 800`, nofile 1024 |
 | core | 640 | 1.00 | 256 | tmpfs `/tmp` 96m |
@@ -320,7 +320,7 @@ Why these settings (each one measured; peak = allocated buffers, not just the pa
 
 Repacking stays on (it's what makes prompts ~11% faster than `--no-repack`); loading without mmap is what stops the double count. Older llama.cpp builds spell `--load-mode none` as `--no-mmap`.
 
-`--ctx-size` MUST NOT be raised above 6144 on this host, and flash attention and a quantised KV cache MUST NOT be turned on here, without re-measuring speed and memory. M2 acceptance records the real `docker stats` peak (A2.8). If the peak is above 3,600 MiB, set `MODEL_CTX=5120` (KV 720 MiB) rather than raising `MODEL_MEM_LIMIT`.
+`--ctx-size` MUST NOT be raised above 6144 on this host, and flash attention and a quantised KV cache MUST NOT be turned on here, without re-measuring speed and memory. M2 acceptance records the real `docker stats` peak (A2.8). If the peak is above 3,600 MiB, set `MODEL_CTX=4096` rather than raising `MODEL_MEM_LIMIT`.
 
 Rules:
 - CPU limits are caps, not reservations. The model gets 3 of the 4 vCPUs while it generates, and the rest share. Builds (`docker compose build`) temporarily need about 1–1.5 GB. `make deploy` builds before restarting services, and the runbook warns not to build the browser image while a long model task is running.
@@ -818,7 +818,7 @@ Vanilla JS only. All dynamic text goes in with `textContent` (never `innerHTML`)
 - **Image:** `ghcr.io/ggml-org/llama.cpp:server-b<build>@sha256:<pin>` (CPU). The build number is pinned and recorded in `docker/model/VERSION`. The same llama.cpp commit is used by the training pipeline's GGUF conversion and quantisation (§6.11.4), so the formats always match.
 - **Entrypoint:** `docker/model/run.sh` (bash, mounted read-only), a small supervisor:
   - It resolves `/models/current/model.gguf` and checks it against `/models/current/model.sha256`. On a mismatch it refuses to start and logs why.
-  - It starts `llama-server --model … --host 10.77.6.60 --port 8080 --api-key-file /run/secrets/model_server_token --ctx-size ${MODEL_CTX:-5120} --parallel 1 --threads ${MODEL_THREADS:-3} --threads-batch ${MODEL_THREADS:-3} --batch-size 512 --ubatch-size 256 --flash-attn off --load-mode none --jinja --no-webui --cache-reuse 256`. No `--mlock`, no `--host 0.0.0.0`, no `--metrics`, no `--slots` endpoint, no `--props` writes. Check each flag against the pinned build's `--help`. If a flag differs, use the equivalent and note it in the PR.
+  - It starts `llama-server --model … --host 10.77.6.60 --port 8080 --api-key-file /run/secrets/model_server_token --ctx-size ${MODEL_CTX:-4096} --parallel 1 --threads ${MODEL_THREADS:-3} --threads-batch ${MODEL_THREADS:-3} --batch-size 512 --ubatch-size 256 --flash-attn off --load-mode none --jinja --no-webui --cache-reuse 256`. No `--mlock`, no `--host 0.0.0.0`, no `--metrics`, no `--slots` endpoint, no `--props` writes. Check each flag against the pinned build's `--help`. If a flag differs, use the equivalent and note it in the PR.
   - Every 15 s it checks whether the `current` symlink target changed (promotion or rollback). If so, it sends SIGTERM to llama-server, waits for exit (≤ 30 s, then SIGKILL) and restarts it on the new target. No Docker socket is needed for model swaps.
 - **Compose:** `user: "1000:1000"`, `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges`, `models:/models:ro`, tmpfs `/tmp:size=64m`, `secrets: [model_server_token]`, network `model` (10.77.6.60) only, `mem_limit: ${MODEL_MEM_LIMIT:-3840m}`, `memswap_limit` the same, `cpus: ${MODEL_CPUS:-3.0}`, `pids_limit: 128`, `oom_score_adj: 300`, `stop_grace_period: 30s`, and `healthcheck: curl -fsS http://10.77.6.60:8080/health` (the image ships `curl`; if it doesn't, use bash `/dev/tcp` plus an HTTP GET in `run.sh healthcheck`), with `start_period: 120s` (loading 2.4 GB from disk).
 - **Ollama alternative:** `docker-compose.ollama.yml` replaces the service with `ollama/ollama:<pin>@sha256:<pin>`, `OLLAMA_HOST=10.77.6.60:11434`, `OLLAMA_MODELS=/models/ollama` (that subtree is read-write), `OLLAMA_NOPRUNE=1` and the same limits and network. The GGUF is imported with a Modelfile (`FROM /models/current/model.gguf`). Ollama has no API-key option, so the internal network and the core peer rules are the protection there. Documented, not default.
@@ -1730,7 +1730,7 @@ No component makes update checks, analytics or telemetry calls.
 | `MODEL_SERVER_TOKEN` / `_FILE` | – | compose: `_FILE=/run/secrets/model_server_token` | Shared by core and llama.cpp `--api-key-file`. Required in production for `llamacpp` |
 | `MODEL_API_KEY` | – | – | **Removed.** Logged as ignored if set |
 | `MODEL_TOOL_MODE` | `grammar` | .env | `grammar` or `native` (§6.9.3) |
-| `MODEL_CTX` | `5120` | .env (also read by the model service) | Context window; Contabo shipping default after OOM at 6144. Ceiling remains 6144; don't raise on this host (§5.5) |
+| `MODEL_CTX` | `4096` | .env (also read by the model service) | Context window; Contabo shipping default after OOM at 6144/5120. Ceiling remains 6144; don't raise on this host (§5.5) |
 | `MODEL_MAX_NEW_TOKENS` | `768` | .env | Per model call |
 | `MODEL_TEMPERATURE` | `0.2` | .env | |
 | `MODEL_TIMEOUT_S` | `600` | .env | Per model call, including queueing |
@@ -1920,7 +1920,7 @@ services:
     user: "1000:1000"
     entrypoint: ["/bin/bash", "/opt/run/run.sh"]
     environment:
-      MODEL_CTX: ${MODEL_CTX:-5120}
+      MODEL_CTX: ${MODEL_CTX:-4096}
       MODEL_THREADS: ${MODEL_THREADS:-3}
     secrets: [model_server_token]
     volumes:
@@ -2096,7 +2096,7 @@ Notes:
 
 ### 11.4 `.env.example` (v2) must contain
 
-Every `.env`-settable variable in §11.1, with a one-line comment each, grouped as in v1. These defaults: `ALLOW_SHELL=true`, `SHELL_APPROVAL=tainted`, `AGENT_DOMAIN=`, `AGENT_FALLBACK_HOST=37-60-226-214.sslip.io`, `CADDY_TLS=acme`, `WORKSPACE_HOST_DIR=/srv/roland-agent/workspace`, `MODEL_PROVIDER=llamacpp`, `MODEL_BASE_URL=http://10.77.6.60:8080`, `MODEL_MEM_LIMIT=3840m`, `MODEL_CPUS=3.0`, `MODEL_CTX=5120`, `MAX_TOOL_STEPS=6`, `BROWSER_MAX_TABS=2`, `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINING_SCHEDULE=0 3 * * 0`, `TRAINING_LAUNCH_MODE=manual`, `COMPOSE_PROFILES=` (empty; `training` turns on the trainer). It must **not** contain secrets: those live in `secrets/`. It must not contain any hosted model URL, even in comments. Add a comment that `AGENT_PASSWORD_HASH` and `MODEL_SERVER_TOKEN` in `.env` still work for local development without Docker (with llama.cpp running on `127.0.0.1:8080`).
+Every `.env`-settable variable in §11.1, with a one-line comment each, grouped as in v1. These defaults: `ALLOW_SHELL=true`, `SHELL_APPROVAL=tainted`, `AGENT_DOMAIN=`, `AGENT_FALLBACK_HOST=37-60-226-214.sslip.io`, `CADDY_TLS=acme`, `WORKSPACE_HOST_DIR=/srv/roland-agent/workspace`, `MODEL_PROVIDER=llamacpp`, `MODEL_BASE_URL=http://10.77.6.60:8080`, `MODEL_MEM_LIMIT=3840m`, `MODEL_CPUS=3.0`, `MODEL_CTX=4096`, `MAX_TOOL_STEPS=6`, `BROWSER_MAX_TABS=2`, `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINING_SCHEDULE=0 3 * * 0`, `TRAINING_LAUNCH_MODE=manual`, `COMPOSE_PROFILES=` (empty; `training` turns on the trainer). It must **not** contain secrets: those live in `secrets/`. It must not contain any hosted model URL, even in comments. Add a comment that `AGENT_PASSWORD_HASH` and `MODEL_SERVER_TOKEN` in `.env` still work for local development without Docker (with llama.cpp running on `127.0.0.1:8080`).
 
 ---
 
@@ -2230,7 +2230,7 @@ Acceptance:
   - `test_context_budget_trims_oldest_first_and_keeps_system_and_last_user`;
   - `test_model_api_key_is_ignored_with_warning`.
 - **A2.7** Integration (CI, `docker-compose.test.yml`): the `model` service runs the pinned llama.cpp image with a tiny test GGUF (`deploy/models.lock` entry `test-tiny`, ≤ 150 MB, permissive licence, cached in CI by SHA-256). `tests/integration/test_model.py::test_chat_round_trip` gets a valid action from the real server; `test_model_has_no_egress` (from inside the model container, `bash -c 'echo > /dev/tcp/1.1.1.1/443'` fails); `test_model_rejects_missing_token` (401).
-- **A2.8** On Contabo: `make model-fetch MODEL=qwen3-4b-q4km` verifies the SHA-256; the model is healthy; a chat reply arrives; `docker stats` peak for `model` is ≤ 3,600 MiB while a prompt fills the 6,144-token context (if it's higher, set `MODEL_CTX=5120`, re-measure and record both in the PR); prompt and generation speed at 0 and 4,096 tokens of context are recorded; `docs/MODEL.md` has the measured `model-bench` numbers. No outbound connection from any container to a model API (checked with `sudo conntrack -L` or `ss` during a chat: only private addresses for the core's model traffic).
+- **A2.8** On Contabo: `make model-fetch MODEL=qwen3-4b-q4km` verifies the SHA-256; the model is healthy; a chat reply arrives; `docker stats` peak for `model` is ≤ 3,600 MiB while a prompt fills the 6,144-token context (if it's higher, set `MODEL_CTX=4096`, re-measure and record both in the PR); prompt and generation speed at 0 and 4,096 tokens of context are recorded; `docs/MODEL.md` has the measured `model-bench` numbers. No outbound connection from any container to a model API (checked with `sudo conntrack -L` or `ss` during a chat: only private addresses for the core's model traffic).
 
 ### M3: Confirmation gate (branch `v2-m3-gate`)
 

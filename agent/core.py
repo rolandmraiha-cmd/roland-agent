@@ -58,6 +58,21 @@ class LimitReached(Exception):
     pass
 
 
+def _has_failed_retry(tool_calls, failed_tool_sigs: dict[str, str], tool_exclude: set[str]) -> bool:
+    """True when any call matches a tool signature that already failed this run."""
+    for call in tool_calls:
+        name = tool_name(call.name)
+        if call.name != name or name in tool_exclude:
+            continue
+        try:
+            args = call.args()
+        except ValueError:
+            continue
+        if tool_signature(name, args) in failed_tool_sigs:
+            return True
+    return False
+
+
 class Agent:
     def __init__(self, config: Config, memory: Memory, brain: Brain):
         self.config = config
@@ -147,6 +162,47 @@ class Agent:
         finally:
             self._streams.release()
 
+    async def _force_text_reply(self, messages: list[dict], reply: str) -> AsyncIterator[dict]:
+        """One tools-disabled model call after a repeated failed tool; ends the run."""
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    "That exact tool call already failed. Do not call tools again. "
+                    "Answer Roland now in plain text with what you know."
+                ),
+            }
+        )
+        try:
+            self._count_call()
+        except LimitReached as e:
+            yield {"type": "error", "message": str(e)}
+            return
+        step = Step()
+        try:
+            async for item in self._stream_step(messages, []):
+                if isinstance(item, Step):
+                    step = item
+                else:
+                    yield item
+        except LimitReached as e:
+            yield {"type": "error", "message": str(e)}
+            return
+        except Exception as e:
+            yield {
+                "type": "error",
+                "message": f"The model didn't answer: {type(e).__name__}: {e}",
+            }
+            return
+        # Tools were disabled; ignore any tool_calls the model still attempted.
+        reply += step.text or ""
+        if not reply.strip():
+            reply = (
+                "A tool I needed failed, and retrying would not help. "
+                "Please try a different request or add the missing file."
+            )
+        yield {"type": "done", "reply": reply}
+
     async def run(self, messages: list[dict], tool_exclude: set[str] = frozenset()) -> AsyncIterator[dict]:
         """Runs the tool loop. Yields events: text, tool, done (with the full reply) or error."""
         if not self.allow_shell:  # don't offer a tool that would only be refused
@@ -207,6 +263,12 @@ class Agent:
             if not step.tool_calls:
                 yield {"type": "done", "reply": reply}
                 return
+            # Same failed signature again: stop the tool loop and force a text answer.
+            # Re-feeding the cached error still lets the model ask until MAX_TOOL_STEPS.
+            if _has_failed_retry(step.tool_calls, failed_tool_sigs, tool_exclude):
+                async for event in self._force_text_reply(messages, reply):
+                    yield event
+                return
             if step_index == self.config.max_tool_steps:
                 break  # The final model call may answer, but cannot run another tool round.
             messages.append(
@@ -241,10 +303,7 @@ class Agent:
                     else:
                         result = await call_tool(self.ctx, name, args)
                         if result.startswith("Error:"):
-                            result = (
-                                f"{result}\n"
-                                "Do not retry this exact tool call with the same arguments."
-                            )
+                            result = f"{result}\nDo not retry this exact tool call with the same arguments."
                             failed_tool_sigs[sig] = result
                     result = f'<tool_output tool="{name}">\n{strip_markers(result)}\n</tool_output>'
                     # Extra model-facing cap after strip_markers (§6.2.3).
