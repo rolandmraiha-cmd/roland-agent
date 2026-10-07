@@ -227,8 +227,8 @@ def test_fact_cap_holds_across_connections(tmp_path, monkeypatch, same_fact):
 
 @pytest.mark.asyncio
 async def test_read_file_missing_says_do_not_retry(tmp_path):
-    from agent.tools import ToolContext, call_tool
     from agent.memory import Memory
+    from agent.tools import ToolContext, call_tool
 
     ctx = ToolContext(Memory(tmp_path / "db.sqlite"), tmp_path / "ws", "Europe/Helsinki", False)
     (tmp_path / "ws").mkdir()

@@ -371,3 +371,84 @@ test('stream disconnect recovers saved assistant reply from history', async () =
   await f.run('send("hi")');
   assert.equal(f.get('messages').children[1].children[0].textContent, "saved after disconnect");
 });
+
+
+test('empty done.reply does not wipe already-streamed text', async () => {
+  const f = fixture();
+  f.run('currentChat = 7');
+  f.context.api = async (url) => url.endsWith('/send')
+    ? sseStream([
+        { type: "text", text: "partial stream" },
+        { type: "done", reply: "" },
+        { type: "end" },
+      ])
+    : { json: async () => ({ messages: [] }) };
+  await f.run('send("go")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "partial stream");
+});
+
+test('error with prior history does not resurrect an older assistant reply', async () => {
+  const f = fixture();
+  f.run('currentChat = 8');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) {
+      return sseStream([
+        { type: "error", message: "RemoteProtocolError: disconnected" },
+        { type: "end" },
+      ]);
+    }
+    if (url.endsWith('/messages')) {
+      // History still only has the previous turn — this turn never saved an assistant.
+      return { json: async () => ({ messages: [
+        { role: "user", content: "earlier" },
+        { role: "assistant", content: "old reply that must not resurface" },
+        { role: "user", content: "new question" },
+      ] }) };
+    }
+    return { json: async () => ({ messages: [] }) };
+  };
+  await f.run('send("new question")');
+  const texts = f.get('messages').children.map((m) => m.textContent || (m.children[0] && m.children[0].textContent) || "");
+  assert.equal(texts.some((t) => t.includes("old reply that must not resurface")), false);
+  assert.equal(texts.some((t) => /RemoteProtocolError/.test(t)), true);
+});
+
+test('soft-recover ignores assistant messages from before this turn', async () => {
+  const f = fixture();
+  f.run('currentChat = 9');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) return finishedStream;
+    if (url.endsWith('/messages')) {
+      // Disconnect before this turn's assistant was saved — only prior assistant exists.
+      return { json: async () => ({ messages: [
+        { role: "user", content: "earlier" },
+        { role: "assistant", content: "stale prior reply" },
+        { role: "user", content: "latest" },
+      ] }) };
+    }
+    return { json: async () => ({ messages: [] }) };
+  };
+  await f.run('send("latest")');
+  const msgs = f.get('messages').children;
+  assert.equal(msgs.length, 1); // user only; thinking removed, stale not resurrected
+  assert.equal(msgs[0].children[0].textContent, "latest");
+});
+
+test('soft-recover still picks assistant that follows this turn\'s user message', async () => {
+  const f = fixture();
+  f.run('currentChat = 10');
+  f.context.api = async (url) => {
+    if (url.endsWith('/send')) return finishedStream;
+    if (url.endsWith('/messages')) {
+      return { json: async () => ({ messages: [
+        { role: "user", content: "earlier" },
+        { role: "assistant", content: "stale prior reply" },
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "fresh reply for this turn" },
+      ] }) };
+    }
+    return { json: async () => ({ messages: [] }) };
+  };
+  await f.run('send("hi")');
+  assert.equal(f.get('messages').children[1].children[0].textContent, "fresh reply for this turn");
+});

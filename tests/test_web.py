@@ -131,6 +131,7 @@ def test_chat_stream_and_history(client):
 def test_chat_stream_sends_keepalive_while_model_thinks(make_agent, monkeypatch):
     """Mobile Safari drops idle SSE; keepalive comments must flow during long waits."""
     import asyncio
+
     from agent.brain import Step
 
     class SlowBrain:

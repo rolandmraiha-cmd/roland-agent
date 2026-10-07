@@ -147,6 +147,7 @@ async function send(text) {
   setSending(true);
   ++chatLoad; // An older history request must not replace this live conversation.
   let reply = null;
+  let sawError = false;
   try {
     if (currentChat === null) {
       const { id } = await (await api("/api/chats", { method: "POST" })).json();
@@ -178,15 +179,20 @@ async function send(text) {
         }
         bubble.textContent += ev.text;
       } else if (ev.type === "done") {
-        // Authoritative final reply. Required when the model never streamed text deltas
-        // (common with JSON/grammar actions) or the idle connection only delivered done.
+        // Authoritative final reply when non-empty. Required when the model never streamed
+        // text deltas (common with JSON/grammar actions). Empty reply must not wipe streamed text.
         clearInterval(thinkTimer);
-        gotText = true;
         reply.classList.remove("typing");
-        if (typeof ev.reply === "string") bubble.textContent = ev.reply;
+        if (typeof ev.reply === "string" && ev.reply) {
+          gotText = true;
+          bubble.textContent = ev.reply;
+        } else if (!gotText) {
+          bubble.textContent = "";
+        }
       } else if (ev.type === "tool") reply.before(el("div", "msg tool", `⚙ ${ev.text}`));
       else if (ev.type === "note") reply.before(el("div", "msg note", ev.text || ev.message || ""));
       else if (ev.type === "error") {
+        sawError = true;
         clearInterval(thinkTimer);
         reply.classList.remove("typing");
         // Clear the thinking placeholder so the error isn't paired with a stuck spinner.
@@ -220,8 +226,10 @@ async function send(text) {
       }
     } finally { clearInterval(thinkTimer); }
   } catch (e) {
-    if (reply) reply.after(el("div", "msg error", e.message));
-    else {
+    if (reply) {
+      sawError = true;
+      reply.after(el("div", "msg error", e.message));
+    } else {
       addMessage("error", e.message);
       // Creation failed before a message was sent. Preserve the draft for retry.
       if (!input.value) { input.value = text; autosize(); }
@@ -230,14 +238,23 @@ async function send(text) {
     if (reply) {
       reply.classList.remove("typing");
       let final = reply.querySelector(".bubble").textContent;
-      // Idle drop / partial SSE: server may still have saved the reply (produce() runs detached).
-      if ((!final || final.startsWith("thinking…")) && currentChat != null) {
+      // Idle drop / partial SSE: server may still have saved THIS turn's reply.
+      // Never recover after an error (would resurrect a prior assistant on chats with history).
+      // Only accept an assistant message that follows the latest user message.
+      if (!sawError && (!final || final.startsWith("thinking…")) && currentChat != null) {
         try {
           const data = await (await api(`/api/chats/${currentChat}/messages`)).json();
-          const last = [...data.messages].reverse().find((m) => m.role === "assistant");
-          if (last && last.content) {
-            reply.querySelector(".bubble").textContent = last.content;
-            final = last.content;
+          const msgs = data.messages || [];
+          let lastUser = -1;
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === "user") { lastUser = i; break; }
+          }
+          const fresh = lastUser >= 0
+            ? msgs.slice(lastUser + 1).filter((m) => m.role === "assistant").pop()
+            : null;
+          if (fresh && fresh.content) {
+            reply.querySelector(".bubble").textContent = fresh.content;
+            final = fresh.content;
           }
         } catch (_) {}
       }
