@@ -64,6 +64,9 @@ CHROMIUM_ARGS = (
     "--no-default-browser-check",
     "--password-store=basic",
     "--disable-features=AutofillServerCommunication,OptimizationHints,MediaRouter",
+    # Not in the spec's list: the page cache lives in the profile volume, so it gets a size.
+    "--disk-cache-size=104857600",
+    "--media-cache-size=33554432",
 )
 # Written into the profile before every start, in case managed policies aren't honoured.
 PROFILE_PREFERENCES = {

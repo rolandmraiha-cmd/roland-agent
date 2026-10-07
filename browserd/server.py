@@ -13,9 +13,9 @@ import logging
 import os
 import sys
 import time
+import urllib.request
 from contextlib import asynccontextmanager
 
-import httpx
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
@@ -307,12 +307,13 @@ def serve() -> None:
 
 
 def healthcheck_cli() -> bool:
+    """The container's health check. Standard library only, and never through a proxy."""
     host = os.environ.get("BROWSERD_HOST", "").strip() or "10.77.4.40"
     port = os.environ.get("BROWSERD_PORT", "").strip() or "7100"
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with httpx.Client(trust_env=False, timeout=3) as client:
-            response = client.get(f"http://{host}:{port}/healthz")
-        payload = response.json()
-        return response.status_code == 200 and payload.get("ok") is True and payload.get("browser") is True
-    except (httpx.HTTPError, ValueError, AttributeError):
+        with opener.open(f"http://{host}:{port}/healthz", timeout=3) as response:  # noqa: S310 -- fixed http address
+            payload = json.loads(response.read(4096))
+        return isinstance(payload, dict) and payload.get("ok") is True and payload.get("browser") is True
+    except (OSError, ValueError):
         return False

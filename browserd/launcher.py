@@ -69,6 +69,8 @@ def run() -> int:
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
+    # HOME is on the container's throwaway /tmp, which starts empty.
+    Path(os.environ.get("HOME") or "/tmp/home").mkdir(parents=True, exist_ok=True)  # noqa: S108
 
     while not stopping:
         now = time.monotonic()

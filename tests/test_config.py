@@ -84,6 +84,7 @@ def test_deprecated_api_key_is_ignored(clean_env, monkeypatch, caplog):
         ({"allow_shell": True, "shell_backend": "local"}, "SHELL_BACKEND=local"),
         ({"shell_backend": "sandbox"}, "SANDBOX_API_TOKEN"),
         ({"browser_enabled": True}, "BROWSER_API_TOKEN"),
+        ({"browser_allow_private_hosts": ("fixture-web",)}, "BROWSER_ALLOW_PRIVATE_HOSTS"),
         ({"screen_enabled": True, "vnc_password": "", "vnc_view_password": "view-test"}, "are required"),
         ({"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": ""}, "are required"),
         (
@@ -220,20 +221,32 @@ def test_sandbox_backend_builds(make_agent, monkeypatch):
     assert isinstance(agent.ctx.shell, SandboxShell)
 
 
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"browser_enabled": True, "browser_api_token": "test-token"},
-        {"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "view-test"},
-    ],
-)
-def test_unimplemented_services_fail_closed(make_agent, monkeypatch, changes):
+def test_screen_service_fails_closed_until_it_exists(make_agent, monkeypatch):
     from agent import __main__ as cli
 
+    changes = {"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "view-test"}
     config = replace(make_agent().config, **changes)
     monkeypatch.setattr(cli.Config, "from_env", lambda: config)
     with pytest.raises(SystemExit, match="not implemented yet"):
         cli.build(validate=True)
+
+
+def test_browser_can_be_switched_on_and_is_off_by_default(make_agent, monkeypatch):
+    """M6: BROWSER_ENABLED=true gives the agent a browser client (and with it the browser
+    tools). Without it there is no client, so the tools aren't offered to the model."""
+    from agent import __main__ as cli
+    from agent.browser_client import BrowserClient
+
+    off = make_agent().config
+    assert off.browser_enabled is False
+    monkeypatch.setattr(cli.Config, "from_env", lambda: off)
+    assert cli.build(validate=True).ctx.browser is None
+
+    on = replace(off, browser_enabled=True, browser_api_token="test-token")
+    monkeypatch.setattr(cli.Config, "from_env", lambda: on)
+    browser = cli.build(validate=True).ctx.browser
+    assert isinstance(browser, BrowserClient)
+    assert browser.url == "http://10.77.4.40:7100" and "test-token" not in repr(browser)
 
 
 def test_shell_uses_validated_config(clean_env, monkeypatch, make_agent):

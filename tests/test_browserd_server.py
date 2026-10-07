@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import httpx
@@ -180,8 +181,14 @@ def test_the_page_script_only_reads_and_only_labels():
                  "outerHTML", ".click(", ".submit(", ".focus(", "import(", "navigator.", "window.open"):
         assert word not in script, word
     assert script.count(".value") == 1  # the one place a field's value is read, after the secret check
-    assert script.count("setAttribute(") == 2 and "removeAttribute" not in script
-    assert all("data-ra-" in line for line in script.splitlines() if "setAttribute(" in line)
+    # It writes two things, both labels of its own: the ref on an element and a marker on the page.
+    writes = [line.strip() for line in script.splitlines() if "setAttr(" in line]
+    assert len(writes) == 2 and all('"data-ra-' in line for line in writes), writes
+    assert script.count('"setAttribute"') == 1 and "removeAttribute" not in script
+    for word in ("appendChild", "insertBefore", ".remove(", "createElement", ".style.", "dispatchEvent", ".href ="):
+        assert word not in script, word
+    # No property of anything on the page is assigned to.
+    assert re.findall(r"\b(?:el|element|node|form|document|window|top|root|active)\.[\w.]+\s*=(?!=)", script) == []
 
 
 # --- who may call ---

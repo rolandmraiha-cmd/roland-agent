@@ -19,6 +19,7 @@ def main():
         secret_dir / "agent_password_hash",
         secret_dir / "model_server_token",
         secret_dir / "sandbox_api_token",
+        secret_dir / "browser_api_token",
     ]
     if any(path.exists() or path.is_symlink() for path in paths):
         raise SystemExit("Refusing to overwrite existing configuration or credentials")
@@ -32,6 +33,8 @@ def main():
         secret_dir / "agent_password_hash": hash_password(password),
         secret_dir / "model_server_token": secrets.token_urlsafe(32),
         secret_dir / "sandbox_api_token": secrets.token_urlsafe(32),
+        # Core mounts this one too, though the browser service itself is not started here.
+        secret_dir / "browser_api_token": secrets.token_urlsafe(32),
         private / "login-password": password,
     }
     for path, value in values.items():

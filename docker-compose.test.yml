@@ -1,6 +1,8 @@
 # Test overrides (§13.3). Use with:
 #   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d sandbox
 #   docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm tester
+# The browser stack has its own script, which also restarts the browser half way through:
+#   make test-browser        (tests/integration/browser.sh)
 name: roland-agent-test
 
 services:
@@ -25,6 +27,19 @@ services:
         bind: { create_host_path: true }
     environment:
       SANDBOXD_ALLOWED_PEERS: "10.77.3.10,127.0.0.1"
+
+  # The real browser service, pointed at the fixture site. The site has a private address,
+  # so its name is let through here and nowhere else (never in docker-compose.yml).
+  browser:
+    environment:
+      BROWSER_ALLOW_PRIVATE_HOSTS: fixture-web
+    volumes:
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-./.ci-workspace}/browser
+        target: /files
+        bind: { create_host_path: true }
+    networks:
+      fixtures: { ipv4_address: 10.77.20.40 }
 
   fixture-web:
     build: { context: ., dockerfile: Dockerfile }
@@ -66,8 +81,10 @@ services:
     cpus: 0.25
     pids_limit: 64
 
+  # Runs the integration tests with core's code in-process, at core's addresses on the
+  # control networks, so sandboxd and browserd see the peer they expect.
   tester:
-    build: { context: ., dockerfile: Dockerfile }
+    build: { context: ., dockerfile: docker/tester/Dockerfile }
     image: roland-agent/tester:local
     user: "1000:1000"
     working_dir: /src
@@ -83,10 +100,14 @@ services:
       SANDBOX_URL: http://10.77.3.20:7000
       SANDBOX_API_TOKEN_FILE: /run/secrets/sandbox_api_token
       BROWSER_ENABLED: "false"
+      BROWSER_URL: http://10.77.4.40:7100
+      BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
+      FIXTURE_URL: http://fixture-web:8080
+      BROWSER_LIVE_REQUIRED: ${BROWSER_LIVE_REQUIRED:-}
+      BROWSER_LIVE_AFTER_RESTART: ${BROWSER_LIVE_AFTER_RESTART:-}
       SCREEN_ENABLED: "false"
       TZ: Europe/Helsinki
-      PYTHONPATH: /src
-    secrets: [sandbox_api_token]
+    secrets: [sandbox_api_token, browser_api_token]
     volumes:
       - type: bind
         source: .
@@ -97,20 +118,16 @@ services:
         source: ${WORKSPACE_HOST_DIR:-./.ci-workspace}
         target: /workspace
         bind: { create_host_path: true }
-    tmpfs: ["/tmp:size=256m,mode=1777", "/tmp/data:size=64m,mode=1777"]
+    tmpfs: ["/tmp:size=256m,mode=1777"]
     networks:
       sandbox_ctl: { ipv4_address: 10.77.3.10 }
+      browser_ctl: { ipv4_address: 10.77.4.10 }
       fixtures: { ipv4_address: 10.77.20.10 }
     depends_on:
       sandbox: { condition: service_healthy }
       fixture-web: { condition: service_healthy }
-    # Install soft-linked package + dev deps then run integration tests.
-    entrypoint: ["bash", "-lc"]
-    command:
-      - |
-        pip install --no-cache-dir --no-deps --no-build-isolation --no-index -e /src >/dev/null
-        pip install --no-cache-dir pytest pytest-asyncio httpx >/dev/null
-        pytest -m integration -q /src/tests/integration
+    # The image already holds pytest and core's dependencies (docker/tester/Dockerfile).
+    command: ["python", "-m", "pytest", "-m", "integration", "-q", "-p", "no:cacheprovider", "tests/integration"]
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

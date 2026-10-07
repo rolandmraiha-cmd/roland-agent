@@ -1,4 +1,7 @@
-"""Read-only checks for the M4 edge/runtime slice; no deployment or firewall changes."""
+"""Read-only checks of the resolved Compose configuration; no deployment or firewall changes.
+
+Covers caddy, core, model and sandbox, and the browser service when its profile is on (M6).
+"""
 
 from __future__ import annotations
 
@@ -32,8 +35,8 @@ def configuration_errors(config: dict) -> list[str]:
     """Inspect resolved Compose JSON without printing environment values."""
     errors = []
     services = config.get("services", {})
-    if set(services) != {"caddy", "core", "model", "sandbox"}:
-        return ["This runtime slice must contain only caddy, core, model and sandbox"]
+    if not {"caddy", "core", "model", "sandbox"} <= set(services) <= {"caddy", "core", "model", "sandbox", "browser"}:
+        return ["The stack must contain caddy, core, model and sandbox, and may add only browser"]
     for name, service in services.items():
         if (
             service.get("user") != "1000:1000"
@@ -98,6 +101,7 @@ def configuration_errors(config: dict) -> list[str]:
         errors.append("Remove direct secret values from sandbox environment; use mounted secret files")
     core = services["core"].get("environment", {})
     caddy = services["caddy"].get("environment", {})
+    errors.extend(browser_errors(config))
     for key, value in {
         "AGENT_ENV": "production",
         "COOKIE_SECURE": "true",
@@ -107,7 +111,6 @@ def configuration_errors(config: dict) -> list[str]:
         "CORE_ALLOWED_PEERS": "10.77.1.2",
         "ALLOW_SHELL": "true",
         "SHELL_BACKEND": "sandbox",
-        "BROWSER_ENABLED": "false",
         "SCREEN_ENABLED": "false",
         "TRAINING_CAPTURE": "false",
         "TRAINING_LOOP_ENABLED": "false",
@@ -147,6 +150,67 @@ def configuration_errors(config: dict) -> list[str]:
     return errors
 
 
+def browser_errors(config: dict) -> list[str]:
+    """The browser is off unless both switches are on: the Compose profile that starts the
+    service, and BROWSER_ENABLED for core. Checks the service's shape when it is there."""
+    errors = []
+    services = config.get("services", {})
+    core = services["core"]
+    enabled = str(core.get("environment", {}).get("BROWSER_ENABLED", "")).lower()
+    browser = services.get("browser")
+    if enabled not in {"true", "false"}:
+        errors.append("Core BROWSER_ENABLED must be true or false")
+    if core.get("environment", {}).get("BROWSER_URL") != "http://10.77.4.40:7100":
+        errors.append("Core must reach the browser at its control address")
+    for name, service in services.items():
+        mounts = service.get("volumes", [])
+        if name != "browser" and any(
+            mount.get("source") == "browser-profile" or mount.get("target") == "/profile" for mount in mounts
+        ):
+            errors.append(f"{name} must not mount the browser profile")
+    if browser is None:
+        if enabled == "true":
+            errors.append("BROWSER_ENABLED=true needs the browser service: set COMPOSE_PROFILES=browser in .env")
+        return errors
+    if browser.get("ports") or set(browser.get("networks", {})) != {"browser_ctl", "browser_egress"}:
+        errors.append("Browser must have only browser_ctl and browser_egress networks and no published ports")
+    if config.get("networks", {}).get("browser_ctl", {}).get("internal") is not True:
+        errors.append("Browser control network must be internal")
+    env = browser.get("environment", {})
+    if env.get("BROWSERD_HOST") != "10.77.4.40" or env.get("BROWSERD_ALLOWED_PEERS") != "10.77.4.10":
+        errors.append("Browser must listen on the control address and allow only core")
+    if env.get("BROWSER_ALLOW_PRIVATE_HOSTS"):
+        errors.append("BROWSER_ALLOW_PRIVATE_HOSTS is for tests only and must not be set here")
+    if any(env.get(name) for name in SECRET_ENV):
+        errors.append("Remove direct secret values from browser environment; use mounted secret files")
+    mounts = {mount.get("target"): mount for mount in browser.get("volumes", [])}
+    workspace = next(
+        (mount.get("source") for mount in core.get("volumes", []) if mount.get("target") == "/workspace"), None
+    )
+    if set(mounts) != {"/profile", "/files"} or mounts["/profile"].get("source") != "browser-profile":
+        errors.append("Browser must mount only its profile volume and its files folder")
+    elif not workspace or mounts["/files"].get("source") != f"{str(workspace).rstrip('/')}/browser":
+        errors.append("Browser files must be the browser folder of the workspace")
+    seccomp = [option for option in browser.get("security_opt", []) if option.startswith("seccomp")]
+    own_profile = ROOT / "docker/browser/seccomp-chromium.json"
+    custom = False
+    for option in seccomp:
+        value = option.partition("=")[2] or option.partition(":")[2]
+        if value == "builtin":
+            continue
+        custom = True
+        try:
+            if (ROOT / value).resolve() != own_profile.resolve():
+                raise ValueError
+        except (OSError, ValueError):
+            errors.append("Browser seccomp profile must be Docker's own or docker/browser/seccomp-chromium.json")
+    if str(env.get("BROWSER_CHROMIUM_SANDBOX", "false")).lower() == "true" and not custom:
+        errors.append(
+            "BROWSER_CHROMIUM_SANDBOX=true also needs BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json"
+        )
+    return errors
+
+
 def private_path_errors(path: Path, *, directory: bool, uid: int = 1000) -> list[str]:
     """Check metadata only. Never read or print a secret value."""
     try:
@@ -169,7 +233,9 @@ def private_path_errors(path: Path, *, directory: bool, uid: int = 1000) -> list
 def path_errors(config: dict) -> list[str]:
     errors = []
     secrets = config.get("secrets", {})
-    for name in ("agent_password_hash", "model_server_token", "sandbox_api_token"):
+    # Every secret a container mounts. Compose can't start a service whose secret file is
+    # missing, so a missing one must stop a deploy here, before anything is recreated.
+    for name in ("agent_password_hash", "model_server_token", "sandbox_api_token", "browser_api_token"):
         filename = secrets.get(name, {}).get("file")
         if not filename:
             errors.append(f"{name}: required file secret is missing")
@@ -228,6 +294,8 @@ def main() -> int:
     print(
         "Edge/runtime policy checks passed. Model-file, firewall and workspace-quota preflight remains pending."
     )
+    if "browser" in config.get("services", {}):
+        print("The browser service is part of this stack (COMPOSE_PROFILES=browser).")
     return 0
 
 
