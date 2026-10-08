@@ -48,8 +48,11 @@
       catch (error) { errorNode.textContent = error.message; }
     };
     clear.onclick = async () => {
-      try { await api(`/api/messages/${id}/feedback`, {method: "DELETE"}); state.textContent = "Vote cleared"; editor.hidden = true; }
-      catch (error) { errorNode.textContent = error.message; }
+      try {
+        await api(`/api/messages/${id}/feedback`, {method: "DELETE"});
+        up.setAttribute("aria-pressed", "false"); down.setAttribute("aria-pressed", "false");
+        state.textContent = "Vote cleared"; editor.hidden = true; errorNode.textContent = "";
+      } catch (error) { errorNode.textContent = error.message; }
     };
     if (saved?.rating) { up.setAttribute("aria-pressed", String(saved.rating === 1)); down.setAttribute("aria-pressed", String(saved.rating === -1)); }
     if (locked) up.disabled = down.disabled = clear.disabled = save.disabled = true;
