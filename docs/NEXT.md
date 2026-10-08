@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: both parts are merged and deployed and the screen is on on Contabo. The sign-in follow-up (#58) is merged and deployed, and Roland's second sign-in try went through. Next: the chat-refresh fix, one clear run of the password check, and Roland's confirmation of A7.4.**
+> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: both parts are merged and deployed and the screen is on on Contabo. The sign-in follow-up (#58) is merged and deployed, and Roland's second sign-in try went through. Next: the chat-refresh fix and Roland's confirmation of A7.4.**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -340,7 +340,7 @@ The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap us
 
 **Spec:** §6.6, §6.7, §6.8, §8.2 (screen/sign-in endpoints), §8.4 (`/v1/user-mode`, `/v1/vnc/disconnect`), M7 in §12.
 
-#### Status: both parts and the sign-in follow-up (#58) merged and deployed; screen on on Contabo; second sign-in try went through; the password check printed 0 and is being repeated with a clearer command; A7.4 awaits that and Roland's word (8 Oct 2026)
+#### Status: both parts and the sign-in follow-up (#58) merged and deployed; screen on on Contabo; second sign-in try went through and the password check found nothing; A7.4 awaits Roland's word (8 Oct 2026)
 
 M7 is split into PRs to `v2`, like M6.
 
@@ -355,8 +355,8 @@ M7 is split into PRs to `v2`, like M6.
 - **Sign-in follow-up: merged (#58) and deployed** after Roland's first try on the server (next list).
 - **Second try, after #58 (22:37–22:39):** the plain "log in to https://www.kotipizza.fi/" produced the card after one model call; Roland opened the sign-in screen, clicked Kirjaudu, signed in and pressed I'm done; the agent was handed the page and answered "Signed in successfully. The page shows the Kotipizza homepage with available menu items and order options."; Close returned him to the chat. The audit log has `signin_requested`, `screen_session_start` / `end` (128 s, `signin_done`) and `signin_resolved`, and nothing typed. The answer names nothing on the page that shows he is signed in, so he then asked "Take a snapshot of the page and tell me whose name is shown in the top bar."; the agent took a snapshot and answered "The name shown in the top bar is 'Roland'." It was done on his PC in a desktop app's browser pane, not on the phone (see the DNS note under "Known issues").
 - **Chat refresh: written** (item 5 of the next list).
-- **After #58:** `make verify` ended 13 / 0 / 1 with 3488 MiB available. The password check over the logs of browser, novnc, core and caddy printed 0. Roland read the silent prompt as the terminal not taking his typing, and runs with nothing typed printed 506 and 418 (every line), so one run with the clearer command in the deploy notes is to confirm it.
-- **Not done:** for A7.4, that confirming run and Roland's confirmation. His first try did not count: he pressed I'm done without signing in.
+- **After #58:** `make verify` ended 13 / 0 / 1 with 3488 MiB available. The password check over the logs of browser, novnc, core and caddy found nothing: with the command in the deploy notes (22:57) his password was received and was in 0 of 527 log lines, and the e-mail address he signed in with was not there either. Earlier runs, with a prompt that showed nothing, printed 0 and, when Enter was pressed with nothing typed, 506: an empty search matches every line.
+- **Not done:** for A7.4, Roland's confirmation. His first try did not count: he pressed I'm done without signing in.
 
 **Found by running the real thing, and fixed in part 2:**
 
@@ -472,7 +472,7 @@ Code Shipper (Grok) smoke on Contabo, then **ping Roland** for the manual part (
 1. Without logging in, `curl -I https://37-60-226-214.sslip.io/screen/novnc/vnc.html` → 401. *(Passed 8 Oct 2026: `make verify` reports the screen routes as 401 / 401.)*
 2. Logged in: open Watch; confirm the visible page is the agent's current tab (same browser). *(Passed 8 Oct 2026; clicks and key presses while watching did nothing.)*
 3. Take control, then ask the agent to snapshot. Expect "Roland is using the browser right now". *(Passed 8 Oct 2026 by calling the Browser tab's screenshot route instead of a chat turn: 423 `user_mode`, and browserd reported mode `user`.)*
-4. **A7.4 (Roland):** *(Second try on 8 Oct 2026 went through on his PC, see Status; the password check printed 0 and is being confirmed; his confirmation is open.)* ask the agent to check something behind a login on a site Roland chooses; sign-in card appears; Roland takes control on the phone, logs in, presses I'm done; agent continues and reads the logged-in page. Audit shows `signin_requested`, `screen_session_start`/`end`, `signin_resolved` and no keystroke data. `docker compose logs browser novnc core caddy | grep -i <password>` finds nothing.
+4. **A7.4 (Roland):** *(Second try on 8 Oct 2026 went through on his PC, see Status; the password check found nothing; his confirmation is open.)* ask the agent to check something behind a login on a site Roland chooses; sign-in card appears; Roland takes control on the phone, logs in, presses I'm done; agent continues and reads the logged-in page. Audit shows `signin_requested`, `screen_session_start`/`end`, `signin_resolved` and no keystroke data. `docker compose logs browser novnc core caddy | grep -i <password>` finds nothing.
 5. `make verify` passes. *(13 / 0 / 1 on 8 Oct 2026, before A7.4.)*
 
 #### Off in the repo; on on Contabo since 8 Oct 2026
@@ -507,7 +507,7 @@ Notes:
 2. Memory: the relay is capped at 64 MiB (13 MiB idle, 32 MiB at its busiest in the test runs). x11vnc runs inside the browser container's existing 1280 MiB cap. Re-measure headroom with a screen session open (`make memory-report`).
 3. On a phone the screen page starts zoomed in: drag to move around, Fit screen to see the whole browser. Typing goes through the Keyboard button.
 4. For A7.4, ask in plain words ("log in to <site>"). The screen opens on the address the agent was given, often the front page: open the site's sign-in form there, sign in, press I'm done. The agent then reports what the page shows.
-5. For A7.4, look for the typed password afterwards, as the acceptance asks. Use this. It keeps the password out of the shell history and off the screen (nothing shows while it is typed), says how many characters it received and how many log lines there are, and searches only if something was typed. An empty search matches every line, which is how runs on 8 Oct 2026 printed 506 and 418. Expect the password's length and `log lines containing it: 0`:
+5. For A7.4, look for the typed password afterwards, as the acceptance asks. Use this. It keeps the password out of the shell history and off the screen (nothing shows while it is typed), says how many characters it received and how many log lines there are, and searches only if something was typed. An empty search matches every line, which is how a run on 8 Oct 2026 printed 506. Expect the password's length and `log lines containing it: 0`:
 
    ```
    cd /opt/roland-agent && read -rsp "Type the password (nothing shows while you type), then press Enter once: " P; echo; L=$(sudo docker compose logs browser novnc core caddy 2>&1); echo "received ${#P} characters; log lines in total: $(printf '%s\n' "$L" | wc -l)"; if [ -n "$P" ]; then echo "log lines containing it: $(printf '%s\n' "$L" | grep -c -F -- "$P")"; else echo "nothing was typed, so nothing was searched"; fi; unset P L
