@@ -344,6 +344,10 @@ $("composer").onsubmit = (e) => {
 
 
 // ---------- approvals ----------
+// Approvals that need confirming take two taps: the second between 1 and 5 seconds after the first.
+const CONFIRM_MIN_GAP_MS = 1000;
+const CONFIRM_WINDOW_MS = 5000;
+
 function renderApprovalCard(approval, { compact } = {}) {
   const card = el("div", "card approval-card");
   card.setAttribute("data-approval-id", approval.id);
@@ -390,16 +394,30 @@ function renderApprovalCard(approval, { compact } = {}) {
   const approveBtn = el("button", "primary", "Approve");
   const rejectBtn = el("button", "ghost danger", "Reject");
   let confirmArmed = false;
+  let confirmArmedAt = 0;
   let confirmTimer = null;
+  const disarm = () => {
+    if (confirmTimer) clearTimeout(confirmTimer);
+    confirmTimer = null;
+    confirmArmed = false;
+    approveBtn.textContent = "Approve";
+  };
   approveBtn.onclick = async () => {
-    if (approval.needs_confirm && !confirmArmed) {
-      confirmArmed = true;
-      approveBtn.textContent = "Tap again to confirm";
-      confirmTimer = setTimeout(() => {
-        confirmArmed = false;
-        approveBtn.textContent = "Approve";
-      }, 5000);
-      return;
+    if (approval.needs_confirm) {
+      const sinceArmed = Date.now() - confirmArmedAt;
+      // The timer that disarms can run late (a background tab, a busy page), so the click
+      // checks the window itself: a tap after it starts over.
+      if (!confirmArmed || sinceArmed > CONFIRM_WINDOW_MS) {
+        if (confirmTimer) clearTimeout(confirmTimer);
+        confirmArmed = true;
+        confirmArmedAt = Date.now();
+        approveBtn.textContent = "Tap again to confirm";
+        confirmTimer = setTimeout(disarm, CONFIRM_WINDOW_MS);
+        return;
+      }
+      // Both clicks of a double-click land within a few hundred milliseconds. The second tap
+      // has to be a separate decision, so it only counts after a pause.
+      if (sinceArmed < CONFIRM_MIN_GAP_MS) return;
     }
     if (confirmTimer) clearTimeout(confirmTimer);
     approveBtn.disabled = true;
@@ -409,11 +427,13 @@ function renderApprovalCard(approval, { compact } = {}) {
         method: "POST",
         body: JSON.stringify({ args_hash: approval.args_hash, confirm: !!approval.needs_confirm }),
       });
+      approveBtn.textContent = "Approved";
       card.append(el("p", "hint", "Approved."));
       setComposerLocked(false);
       loadStatus();
       if ($("approvals-view") && !$("approvals-view").hidden) loadApprovals();
     } catch (e) {
+      disarm();  // a failed approval starts over at the first tap
       approveBtn.disabled = false;
       rejectBtn.disabled = false;
       card.append(el("p", "error", e.message));

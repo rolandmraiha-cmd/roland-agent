@@ -680,14 +680,110 @@ test('needs_confirm requires a second tap', async () => {
     details: {}, args_hash: 'b'.repeat(64), needs_confirm: true, status: 'pending',
     args: { fact_id: 1 }, tainted: false,
   };
+  let clock = 1_000_000;
+  f.context.Date = { now: () => clock };
   const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
   const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
   await approveBtn.onclick();
   assert.equal(approveCalls, 0);
   assert.match(approveBtn.textContent, /Tap again/);
+  clock += 1200;
   await approveBtn.onclick();
   await new Promise((r) => setImmediate(r));
   assert.equal(approveCalls, 1);
+  assert.equal(approveBtn.textContent, 'Approved');
+});
+
+test('a double-click does not count as the confirming second tap', async () => {
+  // Seen on Contabo: the second tap is meant to be a separate decision.
+  const f = fixture();
+  let approveCalls = 0;
+  f.context.api = async (url) => {
+    if (url.includes('/approve')) { approveCalls++; return { json: async () => ({ status: 'approved' }) }; }
+    return { json: async () => [] };
+  };
+  f.context.loadApprovals = async () => {};
+  f.context.loadStatus = async () => {};
+  let clock = 1_000_000;
+  f.context.Date = { now: () => clock };
+  const approval = {
+    id: 'appr3', tool: 'browser_click', category: 'payment', summary: 'Click “Submit order”',
+    details: {}, args_hash: 'c'.repeat(64), needs_confirm: true, status: 'pending', args: { ref: 'e13' }, tainted: true,
+  };
+  const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
+  const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
+  await approveBtn.onclick();
+  clock += 150;  // the second click of a double-click
+  await approveBtn.onclick();
+  clock += 600;
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 0);
+  assert.match(approveBtn.textContent, /Tap again/);
+  assert.equal(approveBtn.disabled, false);
+  clock += 400;  // a full second after the first tap
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 1);
+});
+
+test('a second tap after the window starts over even if the timer ran late', async () => {
+  // The fixture's setTimeout never fires, like a timer held back in a background tab.
+  const f = fixture();
+  let approveCalls = 0;
+  f.context.api = async (url) => {
+    if (url.includes('/approve')) { approveCalls++; return { json: async () => ({ status: 'approved' }) }; }
+    return { json: async () => [] };
+  };
+  f.context.loadApprovals = async () => {};
+  f.context.loadStatus = async () => {};
+  let clock = 1_000_000;
+  f.context.Date = { now: () => clock };
+  const approval = {
+    id: 'appr5', tool: 'browser_click', category: 'payment', summary: 'Click “Pay”',
+    details: {}, args_hash: 'e'.repeat(64), needs_confirm: true, status: 'pending', args: { ref: 'e2' }, tainted: true,
+  };
+  const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
+  const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
+  await approveBtn.onclick();
+  clock += 6000;
+  await approveBtn.onclick();  // too late: arms again
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 0);
+  assert.match(approveBtn.textContent, /Tap again/);
+  clock += 1200;
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 1);
+});
+
+test('a failed confirmed approval starts over at the first tap', async () => {
+  const f = fixture();
+  let approveCalls = 0;
+  f.context.api = async (url) => {
+    if (url.includes('/approve')) { approveCalls++; throw new Error('expired'); }
+    return { json: async () => [] };
+  };
+  f.context.loadApprovals = async () => {};
+  f.context.loadStatus = async () => {};
+  let clock = 1_000_000;
+  f.context.Date = { now: () => clock };
+  const approval = {
+    id: 'appr4', tool: 'forget', category: 'delete', summary: 'Forget fact 2',
+    details: {}, args_hash: 'd'.repeat(64), needs_confirm: true, status: 'pending', args: { fact_id: 2 }, tainted: false,
+  };
+  const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
+  const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
+  await approveBtn.onclick();
+  clock += 1500;
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 1);
+  assert.equal(approveBtn.textContent, 'Approve');
+  clock += 1500;
+  await approveBtn.onclick();  // only arms again
+  assert.equal(approveCalls, 1);
+  assert.match(approveBtn.textContent, /Tap again/);
 });
 
 test('composer is locked while an approval is pending', async () => {
