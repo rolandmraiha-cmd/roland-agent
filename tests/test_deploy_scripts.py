@@ -385,9 +385,18 @@ if command == "docker":
             answer()
         if "exec" in args:
             tail = args[args.index("exec") + 1:]
-            if tail[0] == "-T":
+            interactive = True
+            while tail[0] in {"-T", "--interactive=false"}:
+                if tail[0] == "--interactive=false":
+                    interactive = False
                 tail = tail[1:]
             service, action = tail[0], tail[1:]
+            if state.get("compose_reads_stdin") and interactive:
+                (root / "hung-probe.pid").write_text(str(os.getpid()))
+                # Compose attaches stdin by default even with -T. Reading all
+                # input blocks when the caller keeps its terminal/pipe open.
+                sys.stdin.buffer.read()
+                (root / "stdin-read").touch()
             if state.get("hang_docker_service") == service:
                 hang_until_killed()
             if service == "browser" and "healthcheck" in action:
@@ -776,10 +785,16 @@ def test_memory_report_requires_the_baseline_model_to_be_running(tmp_path, model
     assert "PRE-STEP PASS" not in result.stdout
 
 
-def run_fake_isolation(repo, env, *args):
+def copy_fake_isolation(repo):
     destination = repo / "tests" / "integration" / "isolation.sh"
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes((ROOT / "tests" / "integration" / "isolation.sh").read_bytes())
+    destination.chmod(0o755)
+    return destination
+
+
+def run_fake_isolation(repo, env, *args):
+    destination = copy_fake_isolation(repo)
     return subprocess.run(
         ["bash", str(destination), *args],
         capture_output=True,
@@ -788,6 +803,53 @@ def run_fake_isolation(repo, env, *args):
         cwd=repo,
         timeout=20,
     )
+
+
+def run_fake_with_open_stdin(repo, env, script, *args):
+    command = ["bash", str(script), *args]
+    process = subprocess.Popen(
+        command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, cwd=repo,
+    )
+    try:
+        # Keep stdin open while waiting: communicate() would close it and hide
+        # an unintended Docker attachment to the caller's input.
+        process.wait(timeout=15)
+        stdout, stderr = process.communicate(timeout=5)
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    finally:
+        cleanup_hung_fake_probe(env)
+        if process.poll() is None:
+            if process.stdin:
+                process.stdin.close()
+            process.kill()
+            process.wait(timeout=5)
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream:
+                stream.close()
+
+
+@pytest.mark.parametrize("mode", ["--ci", "--server"])
+def test_isolation_finishes_without_attaching_to_the_callers_open_input(tmp_path, mode):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["compose_reads_stdin"] = True
+    update_fake_state(env, state)
+    result = run_fake_with_open_stdin(repo, env, copy_fake_isolation(repo), mode)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "all checks passed" in result.stdout
+    assert not (Path(env["FAKE_HOST_DIR"]) / "stdin-read").exists()
+
+
+def test_verify_finishes_with_the_callers_input_still_open(tmp_path):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["compose_reads_stdin"] = True
+    update_fake_state(env, state)
+    copy_fake_isolation(repo)
+    result = run_fake_with_open_stdin(repo, env, repo / "deploy" / "verify.sh")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[PASS] isolation.sh --server" in result.stdout
+    assert "[PASS] model healthcheck" in result.stdout
+    assert re.search(r"verify: \d+ pass / 0 fail / \d+ skip", result.stdout)
 
 
 def browser_execs(env):

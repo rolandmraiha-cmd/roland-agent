@@ -2,6 +2,9 @@
 # Server acceptance checklist (§14.8). Prints PASS/FAIL per check.
 # Safe to run read-only; skips checks that need unimplemented sidecars or missing sudo.
 set -euo pipefail
+# This read-only checklist has no interactive prompts. In particular, Docker
+# clients under timeout must not read from a terminal in a background group.
+exec </dev/null
 # shellcheck source=deploy/common.sh
 source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 

@@ -6,6 +6,8 @@
 # The stack probed is the production compose file. A test stack names its own files:
 #   ISOLATION_COMPOSE_FILES="docker-compose.yml docker-compose.test.yml" isolation.sh
 set -euo pipefail
+# Acceptance probes never consume the caller's terminal or piped input.
+exec </dev/null
 
 mode=ci
 if [[ ${1:-} == --server ]]; then
@@ -42,7 +44,7 @@ compose() {
 sandbox_probe() {
     local seconds=$1
     shift
-    timeout --kill-after=2s "$((seconds + 5))s" docker compose "${compose_args[@]}" exec -T sandbox \
+    timeout --kill-after=2s "$((seconds + 5))s" docker compose "${compose_args[@]}" exec -T --interactive=false sandbox \
         timeout --kill-after=1s "${seconds}s" "$@"
 }
 
@@ -79,7 +81,7 @@ must_succeed() {
 browser_must_fail() {
     local label=$1 host=$2 port=$3 status=0
     printf 'check: %s\n' "$label"
-    timeout --kill-after=2s 5s docker compose "${compose_args[@]}" exec -T browser python3 -c '
+    timeout --kill-after=2s 5s docker compose "${compose_args[@]}" exec -T --interactive=false browser python3 -c '
 import socket, sys
 try:
     with socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=3):
@@ -98,7 +100,7 @@ sys.exit(0)
 browser_must_succeed() {
     local label=$1 host=$2 port=$3
     printf 'check: %s\n' "$label"
-    if ! timeout --kill-after=2s 15s docker compose "${compose_args[@]}" exec -T browser python3 -c '
+    if ! timeout --kill-after=2s 15s docker compose "${compose_args[@]}" exec -T --interactive=false browser python3 -c '
 import socket, sys
 with socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=10):
     pass
