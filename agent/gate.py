@@ -36,6 +36,8 @@ def action_key(name: str, args: dict, summary: str) -> tuple[str, str, str]:
 
 
 # Returned instead of a new card when the run asks again for something Roland rejected.
+# The chat loop ends tool use at the first rejection (agent/core.py), so it never gets this
+# far there; the gate keeps the check for any other caller.
 ALREADY_REJECTED = (
     "Roland already rejected this in this conversation turn, so it wasn't asked again. "
     "Don't try it again; tell Roland it wasn't done."
@@ -98,7 +100,8 @@ class RunState:
     # blocked again (§6.5 POST-navigation guard).
     blocked_submissions: set[str] = field(default_factory=set)
     # action_key() of every approval Roland rejected in this run. The same action gets no
-    # new card; a revised one (other content, other text) does.
+    # new card from the gate. The loop goes further: a non-empty set ends tool use for the
+    # turn, so a revised or different action waits for Roland's next message too.
     rejected_actions: set[tuple[str, str, str]] = field(default_factory=set)
 
 

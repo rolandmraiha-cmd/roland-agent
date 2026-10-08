@@ -147,13 +147,12 @@ async def _reject_pending(agent, count):
 
 
 @pytest.mark.asyncio
-async def test_a_rejected_action_is_not_asked_again_in_the_same_run(tmp_path):
+async def test_a_rejection_ends_the_turn_with_one_card_and_a_plain_reply(tmp_path):
     """Seen on Contabo: right after Roland rejected "Submit order", the model asked for the
-    same click again and a second card appeared."""
+    same click again and a second card appeared. A rejection now ends tool use for the turn."""
     agent = _agent_with_script(
         tmp_path,
         [
-            ("", [call("forget", json.dumps({"fact_id": 1}))]),
             ("", [call("forget", json.dumps({"fact_id": 1}))]),
             "I left fact 1 alone.",
             "unused: the run must end before this",
@@ -169,9 +168,57 @@ async def test_a_rejected_action_is_not_asked_again_in_the_same_run(tmp_path):
     assert len(agent.memory.approvals(status="all")) == 1
     assert sum(e.get("type") == "approval_required" for e in events) == 1
     tool_msgs = [m for turn in agent.brain.seen for m in turn if m.get("role") == "tool"]
-    assert any(ALREADY_REJECTED in (m.get("content") or "") for m in tool_msgs)
+    assert any("Not done: Roland rejected this." in (m.get("content") or "") for m in tool_msgs)
     assert events[-1]["type"] == "done" and events[-1]["reply"].strip() == "I left fact 1 alone."
-    assert len(agent.brain.seen) == 3  # no further tool rounds after the refusal
+    # One tool round, then one tools-disabled call for the explanation.
+    assert len(agent.brain.seen) == 2 and agent.brain.tools[-1] == []
+    assert agent.memory.facts()
+
+
+@pytest.mark.asyncio
+async def test_a_model_that_asks_again_after_a_rejection_gets_no_card(tmp_path):
+    """The explanation call has no tools. A tool call the model still makes there is ignored,
+    whether it repeats the rejected action or aims at something else."""
+    agent = _agent_with_script(
+        tmp_path,
+        [
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            "unused: the run must end before this",
+        ],
+    )
+    agent.memory.remember("stay")
+    chat_id = agent.memory.new_chat()
+
+    async def run_chat():
+        return [e async for e in agent.chat(chat_id, "forget it")]
+
+    events, _ = await asyncio.gather(run_chat(), _reject_pending(agent, 1))
+    assert len(agent.memory.approvals(status="all")) == 1
+    assert sum(e.get("type") == "approval_required" for e in events) == 1
+    assert events[-1]["type"] == "done"
+    assert events[-1]["reply"].strip() == "Not done: you rejected an action, so I stopped this turn."
+    assert len(agent.brain.seen) == 2
+    assert agent.memory.facts()
+
+
+@pytest.mark.asyncio
+async def test_gate_refuses_a_repeat_of_a_rejected_action_without_a_new_card(tmp_path):
+    """The gate's own memory of rejections stays as a second line behind the loop: asked for
+    the same action again in one run, it answers ALREADY_REJECTED and shows no card."""
+    agent = _agent_with_script(tmp_path, [])
+    agent.memory.remember("stay")
+    run, run_ctx = agent._begin_run("chat", chat_id=agent.memory.new_chat())
+    try:
+        first, _ = await asyncio.gather(
+            call_tool(run_ctx, "forget", {"fact_id": 1}), _reject_pending(agent, 1),
+        )
+        again = await call_tool(run_ctx, "forget", {"fact_id": 1, "reason": "please"})
+    finally:
+        agent._end_run(run)
+    assert first.startswith("Not done: Roland rejected this.")
+    assert again == f"Not done: {ALREADY_REJECTED}"
+    assert len(agent.memory.approvals(status="all")) == 1
     assert agent.memory.facts()
     assert agent.memory.audit_rows(event="approval_repeat_refused")
 
@@ -198,11 +245,14 @@ def test_rejection_memory_matches_actions_not_card_text():
 
 
 @pytest.mark.asyncio
-async def test_a_different_action_after_a_rejection_still_gets_a_card(tmp_path):
+async def test_a_different_action_after_a_rejection_waits_for_a_new_message(tmp_path):
+    """Seen on Contabo: after Roland rejected a click on the wrong field, the model asked to
+    click another wrong field in the same turn. A different action now needs a new message."""
     agent = _agent_with_script(
         tmp_path,
         [
             ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            ("", [call("forget", json.dumps({"fact_id": 2}))]),  # ignored: tools are off
             ("", [call("forget", json.dumps({"fact_id": 2}))]),
             "Both stay.",
         ],
@@ -211,12 +261,19 @@ async def test_a_different_action_after_a_rejection_still_gets_a_card(tmp_path):
     agent.memory.remember("two")
     chat_id = agent.memory.new_chat()
 
-    async def run_chat():
-        return [e async for e in agent.chat(chat_id, "forget them")]
+    async def run_chat(text):
+        return [e async for e in agent.chat(chat_id, text)]
 
-    events, _ = await asyncio.gather(run_chat(), _reject_pending(agent, 2))
-    assert len(agent.memory.approvals(status="all")) == 2
+    events, _ = await asyncio.gather(run_chat("forget them"), _reject_pending(agent, 1))
+    assert events[-1]["type"] == "done"
+    assert [row["summary"] for row in agent.memory.approvals(status="all")] == ["Forget fact 1"]
+    # In a new message the other action is asked for as usual.
+    events, _ = await asyncio.gather(run_chat("forget fact 2 then"), _reject_pending(agent, 1))
+    assert sorted(row["summary"] for row in agent.memory.approvals(status="all")) == [
+        "Forget fact 1", "Forget fact 2",
+    ]
     assert events[-1]["type"] == "done" and events[-1]["reply"].strip() == "Both stay."
+    assert len(agent.memory.facts()) == 2
 
 
 @pytest.mark.asyncio
