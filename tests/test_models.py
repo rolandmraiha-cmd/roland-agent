@@ -17,7 +17,7 @@ from agent.models.context import estimate_tokens, fit_messages
 from agent.models.endpoint_guard import ModelEndpointRefused, validate_endpoint
 from agent.models.llamacpp import LlamaCppBrain
 from agent.models.ollama import OllamaBrain
-from agent.models.parse import parse_action, repair_action
+from agent.models.parse import CUT_OFF_NOTE, parse_action, repair_action
 from agent.tools import TOOLS, schemas
 from tests.conftest import HASH, make_config
 
@@ -144,6 +144,123 @@ async def test_ollama_request_has_format_schema():
     payload = json.loads(seen[0].content)
     assert isinstance(payload["format"], dict)
     assert "oneOf" in payload["format"]
+
+
+def llamacpp_with(chunks: list[str], finish_reason: str | None, seen: list | None = None) -> LlamaCppBrain:
+    """A llama.cpp brain whose server streams `chunks` and then stops for `finish_reason`."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request.url.path)
+        if request.url.path.endswith("/props"):
+            return httpx.Response(200, json={})
+        if not request.url.path.endswith("/chat/completions"):
+            return httpx.Response(404)
+        events = [{"choices": [{"delta": {"content": chunk}, "finish_reason": None}]} for chunk in chunks]
+        events.append({"choices": [{"delta": {}, "finish_reason": finish_reason}]})
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events) + "data: [DONE]\n\n"
+        return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+
+    brain = LlamaCppBrain("http://127.0.0.1:8080", "current", "secret-token")
+    brain._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://127.0.0.1:8080")
+    return brain
+
+
+async def final_step(brain, tools=()) -> Step:
+    items = [item async for item in brain.stream([{"role": "user", "content": "hi"}], list(tools))]
+    await brain.aclose()
+    assert isinstance(items[-1], Step)
+    return items[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_reply_cut_off_at_the_length_limit_is_kept_with_a_note():
+    brain = llamacpp_with(['{"action": "reply", "text": "Part one ', 'of a long \\"answer\\" and'], "length")
+    step = await final_step(brain)
+    assert step.parse_error is None and not step.tool_calls
+    assert step.text == 'Part one of a long "answer" and' + CUT_OFF_NOTE
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_cut_off_at_the_length_limit_is_still_an_error():
+    brain = llamacpp_with(['{"action": "tool", "tool": "remember", "args": {"fact": "hal'], "length")
+    step = await final_step(brain, schemas())
+    assert step.parse_error == "output truncated at max_tokens"
+    assert not step.tool_calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["stop", "length"])
+async def test_a_reply_written_inside_a_reply_shows_only_the_text(finish_reason):
+    """Seen on Contabo: the model put a whole reply action, escaped, into its reply text."""
+    inner = '{\n  "action": "reply",\n  "text": "A car engine.\\n\\n1. Intake'
+    if finish_reason == "stop":
+        inner += '"\n}'
+    outer = '{"action": "reply", "text": ' + json.dumps(inner)
+    if finish_reason == "stop":
+        outer += "}"
+    else:
+        outer = outer[:-1]  # cut off before the closing quote
+    step = await final_step(llamacpp_with([outer], finish_reason))
+    assert step.parse_error is None
+    expected = "A car engine.\n\n1. Intake"
+    assert step.text == (expected + CUT_OFF_NOTE if finish_reason == "length" else expected)
+
+
+def test_streamer_joins_escaped_surrogate_pairs_even_across_chunks():
+    """An emoji in JSON is two \\u escapes; each half alone can't be sent as UTF-8."""
+    from agent.models.parse import TextFieldStreamer
+
+    streamer = TextFieldStreamer()
+    out = []
+    for chunk in ['{"action":"reply","text":"ok \\ud83d', "\\ude00 \\ud83d x \\ude00", ' end"}']:
+        out.extend(streamer.feed(chunk))
+    assert "".join(out) == streamer.emitted == "ok \U0001f600 � x � end"
+    streamer.emitted.encode("utf-8")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["stop", "length"])
+async def test_an_emoji_in_a_nested_reply_survives(finish_reason):
+    inner = '{"action": "reply", "text": "smile \\ud83d\\ude00 and a lone \\ud83d'
+    if finish_reason == "stop":
+        inner += '"}'
+    outer = '{"action": "reply", "text": ' + json.dumps(inner)
+    outer = outer + "}" if finish_reason == "stop" else outer[:-1]
+    step = await final_step(llamacpp_with([outer], finish_reason))
+    assert step.parse_error is None
+    assert step.text.startswith("smile \U0001f600 and a lone")
+    step.text.encode("utf-8")  # no half pairs left
+
+
+@pytest.mark.asyncio
+async def test_ollama_keeps_a_cut_off_reply_too():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        lines = [
+            {"message": {"content": '{"action":"reply","text":"Half an ans'}, "done": False},
+            {"message": {"content": "wer"}, "done": True, "done_reason": "length"},
+        ]
+        return httpx.Response(200, content="".join(json.dumps(line) + "\n" for line in lines).encode())
+
+    brain = OllamaBrain("http://127.0.0.1:11434", "current")
+    await brain._client.aclose()
+    brain._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="http://127.0.0.1:11434")
+    step = await final_step(brain, schemas()[:1])
+    assert step.parse_error is None
+    assert step.text == "Half an answer" + CUT_OFF_NOTE
+
+
+@pytest.mark.asyncio
+async def test_the_agent_does_not_ask_again_for_a_cut_off_reply(tmp_path):
+    seen: list[str] = []
+    brain = llamacpp_with(['{"action": "reply", "text": "A long answer that stops'], "length", seen)
+    config = make_config(tmp_path, model_parse_retries=2, daily_call_limit=20)
+    agent = Agent(config, Memory(config.db_path), brain)
+    events = [event async for event in agent.chat(agent.memory.new_chat(), "Explain engines in detail")]
+    await brain.aclose()
+    assert seen.count("/v1/chat/completions") == 1
+    assert events[-1]["type"] == "done"
+    assert events[-1]["reply"] == "A long answer that stops" + CUT_OFF_NOTE
 
 
 @pytest.mark.asyncio
