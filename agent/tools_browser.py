@@ -615,10 +615,30 @@ def _compact_control_line(element: dict) -> str:
     return line
 
 
-def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
+# Ends a short view. It names the way back to everything the short view leaves out.
+SHORT_VIEW_NOTE = "[short list; omit max_chars for the full page]"
+# Page text is added to a short view only when at least this much of it fits.
+SHORT_VIEW_MIN_TEXT = 80
+
+
+def _with_page_text(out: str, text: str, limit: int, truncated: object) -> str:
+    cut = text[: max(0, limit - len(out) - 40)]
+    out += "\n--- page text ---\n" + cut
+    if len(cut) < len(text) or truncated:
+        out += "\n[page text cut]"
+    return out
+
+
+def format_snapshot(answer: dict, limit: int, start: int = 0, *, short: bool = False) -> str:
     """The page as text for a text-only model: one line per element, then the visible text.
     Values of sensitive fields are dropped here as well, whatever browserd sent. A long page
-    is read in pieces: `start` is the number of the first element line to show."""
+    is read in pieces: `start` is the number of the first element line to show.
+
+    `short` means the model asked for less than a full-size snapshot (a small max_chars). If
+    the element list would then be cut, every control is listed in a short form instead, when
+    all of them fit: a small form keeps its submit button. A full-size snapshot never does
+    this, because there is no larger view to go back to for the values, link targets and page
+    text the short form leaves out; it keeps the piece-by-piece reading with `start`."""
     page_url = str(answer.get("url") or "")
     head = [f"URL: {_one_line(page_url, 300)}   Title: {_one_line(answer.get('title'), 120)}"]
     if answer.get("login_form_detected"):
@@ -643,13 +663,15 @@ def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
         shown.append(line)
         used += len(line) + 1
     rest = len(lines) - start - len(shown)
-    if rest > 0 and start == 0:
+    if short and rest > 0 and start == 0:
         # A small request can show only the first fields of an otherwise small form.
         # Prefer every control's identity over a rich prefix that hides its submit button.
         compact = [_compact_control_line(item) for item in elements
                    if isinstance(item, dict) and valid_ref(item.get("ref"))]
-        compact_out = "\n".join(head + compact + ["[compact controls; details and page text omitted]"])
+        compact_out = "\n".join(head + compact + [SHORT_VIEW_NOTE])
         if compact and len(compact_out) <= limit:
+            if text and limit - len(compact_out) - 40 >= SHORT_VIEW_MIN_TEXT:
+                return _with_page_text(compact_out, text, limit, answer.get("truncated"))
             return compact_out
     if start:
         head.append(f"(elements from number {start})")
@@ -659,11 +681,7 @@ def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
     parts = head + (shown or ["(no links, buttons or fields found)"])
     out = "\n".join(parts)
     if text:
-        left = max(0, limit - len(out) - 40)
-        cut = text[:left]
-        out += "\n--- page text ---\n" + cut
-        if len(cut) < len(text) or answer.get("truncated"):
-            out += "\n[page text cut]"
+        out = _with_page_text(out, text, limit, answer.get("truncated"))
     return out
 
 
@@ -750,7 +768,8 @@ async def browser_snapshot(ctx, args: dict) -> str:
         answer = await client.snapshot(limit)
     except BrowserError as error:
         return _fail(error)
-    return format_snapshot(answer, limit, start)
+    # Only a request below the full size may get the short view; see format_snapshot.
+    return format_snapshot(answer, limit, start, short=limit < _snapshot_limit(ctx, {}))
 
 
 async def browser_screenshot(ctx, args: dict) -> str:

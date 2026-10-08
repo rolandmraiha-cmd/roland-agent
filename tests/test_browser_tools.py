@@ -20,6 +20,7 @@ from agent.tools import ToolContext, call_tool
 from agent.tools_browser import (
     BROWSER_TOOLS,
     NOT_CHECKED,
+    SHORT_VIEW_NOTE,
     browser_click,
     browser_open,
     browser_upload,
@@ -698,7 +699,8 @@ async def test_snapshot_never_shows_sensitive_values(tmp_path, fake):
     assert SECRET not in text and 'value="roland@example.org"' in text
 
 
-def test_small_snapshot_keeps_all_form_control_refs_when_compacting_fits():
+def pizza_form() -> dict:
+    """The httpbin.org order form as the Contabo retest saw it: 13 controls, submit last."""
     names = ["Customer name:", "Telephone:", "E-mail address:", "Small", "Medium", "Large",
              "Bacon", "Extra Cheese", "Onion", "Mushroom", "Preferred delivery time:",
              "Delivery instructions:", "Submit order"]
@@ -709,16 +711,30 @@ def test_small_snapshot_keeps_all_form_control_refs_when_compacting_fits():
          "value": "Codex M6 Retest" if i == 1 else "", "depth": 2}
         for i, name in enumerate(names, 1)
     ]
-    answer = {"url": "https://httpbin.org/forms/post", "title": "", "text": "Pizza form " * 50,
-              "elements": [{"role": "form", "name": "Pizza", "depth": 0}, *controls]}
-    out = format_snapshot(answer, 500)
+    return {"url": "https://httpbin.org/forms/post", "title": "", "text": "Pizza form " * 50,
+            "elements": [{"role": "form", "name": "Pizza", "depth": 0}, *controls]}
+
+
+def test_small_snapshot_keeps_all_form_control_refs_when_compacting_fits():
+    answer = pizza_form()
+    out = format_snapshot(answer, 500, short=True)
     assert len(out) <= 500
-    assert "compact controls" in out
+    assert out.endswith(SHORT_VIEW_NOTE) and "omit max_chars" in SHORT_VIEW_NOTE
     assert '[e13] button "Submit order" (submits)' in out
     assert all(f"[e{i}] " in out for i in range(1, 14))
     assert "Codex M6 Retest" not in out and "--- page text ---" not in out
     detailed = format_snapshot(answer, 4000)
     assert 'value="Codex M6 Retest"' in detailed and "POST httpbin.org/post" in detailed
+    # With room to spare the short view also carries page text, still inside the budget.
+    roomy = format_snapshot(answer, 700, short=True)
+    assert len(roomy) <= 700 and SHORT_VIEW_NOTE in roomy
+    assert all(f"[e{i}] " in roomy for i in range(1, 14))
+    assert "--- page text ---\nPizza form" in roomy and roomy.endswith("[page text cut]")
+    # Too many controls for the short form: the piece-by-piece reading stays.
+    answer["elements"] += [{"ref": f"e{i}", "tag": "input", "type": "text", "name": f"Extra field {i}"}
+                           for i in range(14, 40)]
+    paged = format_snapshot(answer, 500, short=True)
+    assert SHORT_VIEW_NOTE not in paged and "more elements not shown" in paged
 
 
 def test_compact_snapshot_preserves_sensitive_disabled_and_checked_states():
@@ -728,12 +744,42 @@ def test_compact_snapshot_preserves_sensitive_disabled_and_checked_states():
         {"ref": "e2", "tag": "button", "type": "button", "name": "Next", "disabled": True},
         {"ref": "e3", "tag": "input", "type": "checkbox", "name": "Remember", "checked": True},
     ]}
-    out = format_snapshot(answer, 500)
-    assert len(out) <= 500 and "compact controls" in out
+    out = format_snapshot(answer, 500, short=True)
+    assert len(out) <= 500 and SHORT_VIEW_NOTE in out
     assert SECRET not in out
     assert '[e1] textbox "Password" (sensitive, value hidden)' in out
     assert '[e2] button "Next" (disabled)' in out
     assert '[e3] checkbox "Remember" (checked)' in out
+
+
+def test_full_size_snapshot_never_trades_page_text_for_a_short_list():
+    """A page with a few dozen links is the common case. Its full-size snapshot keeps link
+    targets, the piece-by-piece note and the page text: there is no larger view to ask for."""
+    links = [{"ref": f"e{i}", "tag": "a", "name": f"Related story number {i}",
+              "href": f"{SITE}/stories/2026/10/related-story-{i}"} for i in range(1, 46)]
+    answer = {"url": f"{SITE}/post", "title": "Post", "elements": links,
+              "text": "The article says the answer is 42. " * 80}
+    out = format_snapshot(answer, 2850)
+    assert len(out) <= 2850 and SHORT_VIEW_NOTE not in out
+    assert '[e1] link "Related story number 1" -> /stories/2026/10/related-story-1' in out
+    assert "more elements not shown" in out
+    assert "--- page text ---\nThe article says the answer is 42." in out
+
+
+@pytest.mark.asyncio
+async def test_only_a_reduced_snapshot_request_gets_the_short_view(tmp_path):
+    ctx = tool_ctx(tmp_path, answering(pizza_form()))
+    small = await call_tool(ctx, "browser_snapshot", {"max_chars": 500})
+    assert small.endswith(SHORT_VIEW_NOTE) and '[e13] button "Submit order" (submits)' in small
+    # The default size and a later piece are never shortened.
+    for args in ({}, {"max_chars": 4000}, {"max_chars": 20000}, {"max_chars": 500, "start": 5}):
+        assert SHORT_VIEW_NOTE not in await call_tool(ctx, "browser_snapshot", args)
+    full = await call_tool(ctx, "browser_snapshot", {})
+    assert 'value="Codex M6 Retest"' in full and "--- page text ---" in full
+    # The full size follows MODEL_TOOL_OUTPUT_CHARS, so "reduced" does too.
+    ctx.config = make_config(tmp_path, model_tool_output_chars=1000)
+    assert small == await call_tool(ctx, "browser_snapshot", {"max_chars": 500})
+    assert SHORT_VIEW_NOTE not in await call_tool(ctx, "browser_snapshot", {"max_chars": 4000})
 
 
 def test_snapshot_keeps_room_for_elements_and_says_what_was_cut():
