@@ -209,6 +209,8 @@ def test_model_is_pinned_isolated_and_readonly():
         "--no-webui",
         "--no-agent",
         "--no-slots",
+        # The RAM prompt cache defaults to 8192 MiB and OOM-killed the model on Contabo.
+        "--cache-ram 0",
     ):
         assert setting in script
 

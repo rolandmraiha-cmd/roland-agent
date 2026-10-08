@@ -84,9 +84,36 @@ browser_off_seen=0
 browser_peak=0
 oom_seen=0
 elapsed=0
+# Per service: which start of which container the first sample saw, and its kill counter.
+declare -A first_start=()
+declare -A first_kills=()
+declare -A restart_reported=()
+declare -A kills_reported=()
+cgroup_root=${MEMORY_REPORT_CGROUP_ROOT:-/sys/fs/cgroup}
+
+# Processes the kernel killed for lack of memory inside one container since it started.
+# Docker's OOMKilled flag misses these: it is cleared when the container restarts, and it
+# stays false when the killed process was not the container's first one (llama-server
+# under run.sh, a Chromium renderer, a sandbox job).
+oom_kills() {
+    local full_id=$1 file count
+    for file in "$cgroup_root/system.slice/docker-$full_id.scope/memory.events" \
+        "$cgroup_root/docker/$full_id/memory.events" \
+        "$cgroup_root/memory/system.slice/docker-$full_id.scope/memory.oom_control" \
+        "$cgroup_root/memory/docker/$full_id/memory.oom_control"; do
+        if [[ -r $file ]]; then
+            count=$(awk '$1 == "oom_kill" {print $2}' "$file" 2>/dev/null) || return 1
+            integer "$count" || return 1
+            printf '%s\n' "$((10#$count))"
+            return 0
+        fi
+    done
+    return 1
+}
 
 sample() {
     local free_output available rows row service id state oom stats parsed usage limit projected
+    local inspected full_id restarts started_at start kills
     local sample_browser=0
     local -A usage_by_service=()
     local -A running_services=()
@@ -108,7 +135,8 @@ sample() {
         available=""
     fi
 
-    # Compose supplies only service, container ID and state; inspect reads only the OOM flag.
+    # Compose supplies only service, container ID and state; inspect reads only the full ID,
+    # the OOM flag, the restart count and the start time.
     if ! rows=$(compose ps --all --format '{{.Service}}|{{.ID}}|{{.State}}' 2>/dev/null); then
         failure "Compose container list unavailable"
         return
@@ -131,9 +159,14 @@ sample() {
         if [[ $state == running ]]; then
             running_services[$service]=1
         fi
-        if ! oom=$(docker inspect --format '{{.State.OOMKilled}}' "$id" 2>/dev/null); then
-            failure "OOMKilled unavailable for $service"
-            oom=unknown
+        full_id="" oom=unknown restarts="" started_at=""
+        if inspected=$(docker inspect --format '{{.Id}} {{.State.OOMKilled}} {{.RestartCount}} {{.State.StartedAt}}' \
+            "$id" 2>/dev/null); then
+            read -r full_id oom restarts started_at <<< "$inspected"
+        fi
+        if [[ ! $full_id =~ ^[a-f0-9]{64}$ || ! $restarts =~ ^[0-9]{1,9}$ || ! $started_at =~ ^[0-9][0-9TZ:.+-]{9,40}$ ]]; then
+            failure "container state unavailable for $service"
+            full_id="" restarts="?"
         fi
         case $oom in
             true)
@@ -143,8 +176,40 @@ sample() {
             false) ;;
             *) failure "unknown OOMKilled flag for $service"; oom=unknown ;;
         esac
+        kills="unavailable"
+        if [[ -n $full_id ]]; then
+            start="$full_id $started_at $restarts"
+            if [[ -z ${first_start[$service]:-} ]]; then
+                first_start[$service]=$start
+                if ((restarts > 0)); then
+                    printf '[INFO] %s restarted %s time(s) before this report; docker compose logs %s shows why\n' \
+                        "$service" "$restarts" "$service"
+                fi
+            elif [[ $start != "${first_start[$service]}" && -z ${restart_reported[$service]:-} ]]; then
+                restart_reported[$service]=1
+                failure "$service restarted during the observation (out of memory or a crash); docker compose logs $service shows why"
+            fi
+            if kills=$(oom_kills "$full_id"); then
+                if [[ $start != "${first_start[$service]}" ]]; then
+                    : # A new start has a new counter; the restart is already a failure.
+                elif [[ -z ${first_kills[$service]:-} ]]; then
+                    first_kills[$service]=$kills
+                    if ((kills > 0)); then
+                        oom_seen=1
+                        printf '[INFO] %s: %s process(es) killed for lack of memory since it started\n' "$service" "$kills"
+                    fi
+                elif ((kills > ${first_kills[$service]})) && [[ -z ${kills_reported[$service]:-} ]]; then
+                    kills_reported[$service]=1
+                    oom_seen=1
+                    failure "$service: a process was killed for lack of memory during the observation"
+                fi
+            else
+                kills="unavailable"
+            fi
+        fi
         if [[ $state != running ]]; then
-            printf 'service=%s state=%s memory=unavailable OOMKilled=%s\n' "$service" "$state" "$oom"
+            printf 'service=%s state=%s memory=unavailable OOMKilled=%s restarts=%s oom_kills=%s\n' \
+                "$service" "$state" "$oom" "$restarts" "$kills"
             if [[ $service == browser && $state != exited && $state != created ]]; then
                 failure "browser is not in a measurable running or off state"
             fi
@@ -171,8 +236,8 @@ sample() {
         if [[ $service == browser ]] && ((limit > browser_cap * 1048576)); then
             failure "browser memory limit $(mib "$limit") MiB is above the ${browser_cap} MiB cap"
         fi
-        printf 'service=%s state=running memory=%s MiB limit=%s MiB OOMKilled=%s\n' \
-            "$service" "$(mib "$usage")" "$(mib "$limit")" "$oom"
+        printf 'service=%s state=running memory=%s MiB limit=%s MiB OOMKilled=%s restarts=%s oom_kills=%s\n' \
+            "$service" "$(mib "$usage")" "$(mib "$limit")" "$oom" "$restarts" "$kills"
         if ((usage > 1152921504606846976 - ${usage_by_service[$service]:-0})); then
             failure "memory usage total out of range for $service"
             continue

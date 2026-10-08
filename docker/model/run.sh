@@ -86,12 +86,16 @@ verify_current() {
 start_child() {
     verify_current
     model_active=$model_target
+    # --cache-ram 0: llama-server otherwise copies earlier conversations' KV state into a RAM
+    # cache of up to 8192 MiB, inside this container's 3840 MiB limit. On Contabo that cache
+    # got llama-server OOM-killed under load (2026-10-08). The current conversation's context
+    # is still reused between turns (cache_prompt, --cache-reuse).
     "$MODEL_SERVER_BIN" --model "$model_active/model.gguf" \
         --host 10.77.6.60 --port 8080 --api-key-file "$MODEL_SERVER_TOKEN_FILE" \
         --ctx-size "$MODEL_CTX" --parallel 1 --threads "$MODEL_THREADS" --threads-batch "$MODEL_THREADS" \
         --batch-size 512 --ubatch-size 256 --flash-attn off --load-mode none \
         --cache-type-k f16 --cache-type-v f16 --jinja --no-webui --no-agent --no-ui-mcp-proxy \
-        --no-slots --cache-reuse 256 &
+        --no-slots --cache-reuse 256 --cache-ram 0 &
     model_child=$!
 }
 start_child

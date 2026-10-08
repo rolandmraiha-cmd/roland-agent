@@ -340,7 +340,16 @@ if command == "docker":
     if args[0] == "inspect":
         service = by_id[args[-1]]
         if "OOMKilled" in " ".join(args):
-            answer("true" if sample.get("oom", {}).get(service, False) else "false")
+            full_id = f"{int(args[-1], 16):064x}"
+            # The cgroup counter the script reads next, as the kernel would show it.
+            events = root / "cgroup" / "system.slice" / f"docker-{full_id}.scope"
+            events.mkdir(parents=True, exist_ok=True)
+            kills = sample.get("oom_kills", {}).get(service, 0)
+            (events / "memory.events").write_text(f"low 0\nhigh 0\nmax 3\noom 1\noom_kill {kills}\n")
+            oom = "true" if sample.get("oom", {}).get(service, False) else "false"
+            restarts = sample.get("restarts", {}).get(service, 0)
+            started = sample.get("started", {}).get(service, "2026-10-08T05:00:00.123456789Z")
+            answer(f"{full_id} {oom} {restarts} {started}")
         if "LogConfig" in " ".join(args):
             answer('{"Type":"json-file","Config":{"max-size":"10m","max-file":"3"}}')
     if args[0] == "ps":
@@ -438,6 +447,7 @@ def fake_deploy_host(tmp_path, *, browser=False, samples=None):
         "WORKSPACE_HOST_DIR": str(workspace),
         "APPLY": "0",
         "WATCH": "0",
+        "MEMORY_REPORT_CGROUP_ROOT": str(tmp_path / "cgroup"),
         "BROWSER_CAP_MIB": "1280",
         "MIN_AVAILABLE_MIB": "800",
         "AGENT_ENV": "",
@@ -493,7 +503,7 @@ def test_memory_report_browser_off_projects_cap_before_enabling(tmp_path, availa
         if args[0] == "compose":
             assert "ps" in args and not any(action in args for action in ("up", "down", "exec", "restart"))
         elif args[0] == "inspect":
-            assert args[1:3] == ["--format", "{{.State.OOMKilled}}"]
+            assert args[1:3] == ["--format", "{{.Id}} {{.State.OOMKilled}} {{.RestartCount}} {{.State.StartedAt}}"]
         else:
             assert args[0] == "stats"
 
@@ -564,6 +574,78 @@ def test_memory_report_fails_for_observed_oom_kills(tmp_path, service):
     assert re.search(rf"service={service} state=running .*OOMKilled=true", result.stdout)
     assert "OOMKilled observed during browser runtime report" in result.stdout
     assert "A6.5 FAIL" in result.stdout
+
+
+def restarted_sample(available, service, *, restarts=1, browser_mb=None):
+    sample = memory_sample(available, browser_mb)
+    sample["restarts"] = {service: restarts}
+    sample["started"] = {service: "2026-10-08T05:31:40.000000001Z"}
+    return sample
+
+
+@pytest.mark.parametrize("browser", [False, True])
+def test_memory_report_fails_when_a_service_restarts_during_the_observation(tmp_path, browser):
+    """Seen on Contabo: the model died under load and Docker restarted it between two samples.
+    OOMKilled was false on every sample (Docker clears it on restart), and the report passed."""
+    browser_mb = 700 if browser else None
+    samples = [
+        memory_sample(3400, browser_mb),
+        restarted_sample(7100, "model", browser_mb=browser_mb),
+        restarted_sample(3300, "model", browser_mb=browser_mb),
+    ]
+    repo, env, _ = fake_deploy_host(tmp_path, browser=browser, samples=samples)
+    env["WATCH"] = "10"
+    result = run_fake_script(repo, env, "memory-report.sh")
+    verdict = "A6.5" if browser else "PRE-STEP"
+    assert result.returncode != 0, result.stdout
+    assert f"{verdict} FAIL" in result.stdout
+    assert result.stdout.count("model restarted during the observation") == 1
+    assert re.search(r"service=model state=running .*OOMKilled=false restarts=1 ", result.stdout)
+
+
+def test_memory_report_notes_but_accepts_restarts_from_before_it_started(tmp_path):
+    sample = restarted_sample(3400, "model", restarts=2)
+    repo, env, _ = fake_deploy_host(tmp_path, samples=[sample, sample])
+    env["WATCH"] = "5"
+    result = run_fake_script(repo, env, "memory-report.sh")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[INFO] model restarted 2 time(s) before this report" in result.stdout
+    assert "PRE-STEP PASS" in result.stdout
+
+
+@pytest.mark.parametrize("service", ["browser", "sandbox"])
+def test_memory_report_fails_for_a_process_killed_inside_a_container(tmp_path, service):
+    """A Chromium renderer or a sandbox job killed for lack of memory leaves the container
+    running and OOMKilled false; only the cgroup's oom_kill counter shows it."""
+    later = memory_sample(1800, 700)
+    later["oom_kills"] = {service: 1}
+    samples = [memory_sample(1800, 700), later, later]
+    repo, env, _ = fake_deploy_host(tmp_path, browser=True, samples=samples)
+    env["WATCH"] = "10"
+    result = run_fake_script(repo, env, "memory-report.sh")
+    assert result.returncode != 0, result.stdout
+    assert result.stdout.count(f"{service}: a process was killed for lack of memory during the observation") == 1
+    assert re.search(rf"service={service} state=running .*oom_kills=1", result.stdout)
+    assert "A6.5 FAIL" in result.stdout
+
+
+def test_memory_report_counts_kills_from_before_it_started_against_the_browser(tmp_path):
+    sample = memory_sample(1800, 700)
+    sample["oom_kills"] = {"browser": 2}
+    repo, env, _ = fake_deploy_host(tmp_path, browser=True, samples=[sample])
+    result = run_fake_script(repo, env, "memory-report.sh")
+    assert result.returncode != 0, result.stdout
+    assert "[INFO] browser: 2 process(es) killed for lack of memory since it started" in result.stdout
+    assert "A6.5 FAIL" in result.stdout
+
+
+def test_memory_report_without_a_readable_kill_counter_still_reports(tmp_path):
+    repo, env, _ = fake_deploy_host(tmp_path, samples=[memory_sample(3400)])
+    env["MEMORY_REPORT_CGROUP_ROOT"] = str(tmp_path / "no-such-cgroup")
+    result = run_fake_script(repo, env, "memory-report.sh")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert re.search(r"service=model state=running .*oom_kills=unavailable", result.stdout)
+    assert "PRE-STEP PASS" in result.stdout
 
 
 def test_memory_report_watch_keeps_transient_peaks_and_minimum_headroom(tmp_path):
