@@ -288,7 +288,9 @@ async def test_roland_signs_in_on_the_screen_and_the_agent_carries_on(agent_for)
     assert "request_signin" in agent.brain.tools[0]
     # The agent carried on, signed in.
     outputs = agent.brain.outputs()
-    assert "Roland says he finished signing in" in outputs[2]
+    # It was handed the page as he left it, not just the news that he pressed the button.
+    assert 'Roland pressed "I\'m done" for' in outputs[2] and "This is the page now" in outputs[2]
+    assert f"URL: {FIXTURE_URL}" in outputs[2]
     assert "Signed in as fixture-user" in outputs[4]
     assert raw("GET", "/v1/status").json()["mode"] == "agent"
     # Nothing he typed is anywhere the agent keeps things: not what the model saw, not the

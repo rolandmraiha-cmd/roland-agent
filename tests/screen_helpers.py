@@ -37,6 +37,8 @@ class ScreenBrowserd:
         self.down_paths: set[str] = set()   # only these calls fail to connect
         self.forget_mode_on_status = False  # a browserd that restarted and lost user mode
         self.disconnect_delay = 0.0         # the real one restarts x11vnc, which takes a moment
+        self.signed_in = False              # what the page shows: the account, or the sign-in form
+        self.extra_links = 0                # a long page: this many more links in the snapshot
         self.calls: list[tuple[str, str, dict]] = []
 
     def paths(self, prefix: str = "") -> list[str]:
@@ -76,10 +78,22 @@ class ScreenBrowserd:
             self.url = body["url"]
             return httpx.Response(200, json={"url": self.url, "title": "Sign in", "status": 200})
         if path == "/v1/snapshot":
+            links = [
+                {"ref": f"e{n + 2}", "tag": "a", "role": "link", "name": f"Order number {n}", "href": f"/orders/{n}"}
+                for n in range(self.extra_links)
+            ]
+            if self.signed_in:
+                return httpx.Response(200, json={
+                    "url": self.url, "title": "Your account", "text": "Signed in as roland", "truncated": False,
+                    "login_form_detected": False,
+                    "elements": [{"ref": "e1", "tag": "a", "role": "link", "name": "Sign out", "href": "/logout"}, *links],
+                })
             return httpx.Response(200, json={
                 "url": self.url, "title": "Sign in", "text": "Welcome back", "truncated": False,
                 "login_form_detected": True,
-                "elements": [{"ref": "e1", "tag": "input", "type": "password", "name": "Password", "sensitive": True}],
+                "elements": [
+                    {"ref": "e1", "tag": "input", "type": "password", "name": "Password", "sensitive": True}, *links,
+                ],
             })
         if path == "/v1/screenshot":
             return httpx.Response(200, content=PNG, headers={"content-type": "image/png"})

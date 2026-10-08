@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`50767ec`** (#53). Normal verification passed 11 / 0 / 1 with 3730 MiB available. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: part 1 (core side, #55) is merged and part 2 (the services) is written. Next: merge part 2, deploy with the screen off, switch it on on Contabo, then A7.4 with Roland.**
+> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`4d0f703`** (#57). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: both parts are merged and deployed and the screen is on on Contabo. Next: merge and deploy the sign-in follow-up, then A7.4 with Roland.**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -90,17 +90,17 @@ Before writing any code:
 | Item | Value |
 |---|---|
 | Repository | https://github.com/rolandmraiha-cmd/roland-agent |
-| Integration branch | `v2`; Contabo checkout and app image **`50767ec`** (#53). M6 and fixes #43–#53 are live; verification passed normally. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
+| Integration branch | `v2`; Contabo checkout and app image **`4d0f703`** (#57). M6, fixes #43–#53 and M7 (#55, #57) are live; verification passed normally. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
 | `main` | Untouched since v1; do not push until M9 |
 | Live URL | https://37-60-226-214.sslip.io/ |
 | Host | Contabo VPS, Ubuntu 24.04, ~4 vCPU / ~8 GB RAM, IPv4 `37.60.226.214` |
 | Code path | `/opt/roland-agent` |
 | Workspace | `/srv/roland-agent/workspace` (bind-mounted as `/workspace` in core and sandbox) |
-| Healthy services | `caddy`, `core`, `model`, `sandbox`, `browser` |
-| Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`, `COMPOSE_PROFILES=browser`, `BROWSER_ENABLED=true`, `BROWSER_CHROMIUM_SANDBOX=true`, `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json`, `MAX_TOOL_STEPS=6` |
+| Healthy services | `caddy`, `core`, `model`, `sandbox`, `browser`, and `novnc` (the screen relay, since 8 Oct 2026) |
+| Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`, `COMPOSE_PROFILES=browser,screen`, `BROWSER_ENABLED=true`, `SCREEN_ENABLED=true`, `BROWSER_CHROMIUM_SANDBOX=true`, `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json`, `MAX_TOOL_STEPS=6` |
 | Repo defaults | `docker-compose.yml` and `.env.example` still default `MODEL_CTX` to 4096 |
 | Shell | On, via the sandbox (`ALLOW_SHELL=true`, `SHELL_BACKEND=sandbox`) |
-| On / off | Browser on as Roland's M6 trial; the screen is off until `.env` has `SCREEN_ENABLED=true` and the `screen` profile (M7); training stays off (compose sets those flags to `"false"`) |
+| On / off | Browser on as Roland's M6 trial; the screen on since 8 Oct 2026 (`SCREEN_ENABLED=true` and the `screen` profile; the file before that is kept as `.env.before-screen`); training stays off (compose sets those flags to `"false"`) |
 | Snapshot | `pre-m6-deploy-2026-10-08` |
 | Host commands | Roland runs `sudo env APPLY=1 make deploy`; read-only verification is `sudo make verify`. The deploy user is not uid 1000; secrets stay uid 1000, directory 0700 / files 0400 |
 | App version | `0.1.0` in `pyproject.toml` (bump to `2.0.0` in M9) |
@@ -340,18 +340,20 @@ The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap us
 
 **Spec:** §6.6, §6.7, §6.8, §8.2 (screen/sign-in endpoints), §8.4 (`/v1/user-mode`, `/v1/vnc/disconnect`), M7 in §12.
 
-#### Status: part 1 merged (#55); part 2 (services) written; not switched on anywhere (8 Oct 2026)
+#### Status: both parts merged and deployed; screen on on Contabo; sign-in follow-up written; A7.4 open (8 Oct 2026)
 
 M7 is split into PRs to `v2`, like M6.
 
 - **Part 1, core side: merged (#55).** Deliverables 4, 5, 6 and 7 below, the core half of 2 (the client calls for `/v1/user-mode` and `/v1/vnc/disconnect`), and the tests for A7.1 and A7.2.
-- **Part 2, the services: written.** Deliverables 1, 3 and 8, the browserd half of 2 (a real disconnect, `healthz.vnc`), the compose service and networks, `SCREEN_ENABLED` accepted by `python -m agent`, the Caddy route changes, preflight/verify/isolation, and A7.3. The repo default stays off: `.env.example` has `SCREEN_ENABLED=false` and no `screen` profile.
-- **Verified so far, all off the server:**
+- **Part 2, the services: merged (#57).** Deliverables 1, 3 and 8, the browserd half of 2 (a real disconnect, `healthz.vnc`), the compose service and networks, `SCREEN_ENABLED` accepted by `python -m agent`, the Caddy route changes, preflight/verify/isolation, and A7.3. The repo default stays off: `.env.example` has `SCREEN_ENABLED=false` and no `screen` profile.
+- **Verified off the server:**
   - Lint, the unit suite, the page tests and shellcheck.
   - `make test-browser` in Docker with the real browser image, x11vnc and the relay: 34 browser tests, 7 screen tests (`tests/integration/test_screen_live.py`), the container checks and the isolation probes. The screen tests talk to x11vnc with a small VNC client: the view-only password cannot type, click or paste; a wrong password gets nowhere and a password is always asked; the screen's clipboard is never sent out; one call cuts every viewer and the server is back at once; an address that is not noVNC cannot log in even with the passwords; and a whole sign-in, with the test playing Roland at the screen while the real agent loop waits.
   - A real browser (Chromium, phone and desktop width) against the production compose file with Caddy, core, the relay, the browser container and a scripted stand-in for the model: sign-in card, sign-in screen, typing a user name on the picture and a password through the phone typing box, I'm done, the agent's answer from the signed-in page; then Watch, Take control, Hand back, and logout cutting a watcher. No script or CSP error. The typed password reached the test site and appeared in no container log. Peak memory of the relay: 32 MiB of its 64.
   - The CI edge job runs the screen phase without a browser container (see A7.3).
-- **Not done:** nothing has run on Contabo, and A7.4 needs Roland.
+- **On Contabo (8 Oct 2026):** deployed at `4d0f703` in the two steps below. Screen off: verify 12 / 0 / 2, 3806 MiB available. Screen on: verify 13 / 0 / 1, 3746 MiB available, with the screen server check and the noVNC isolation probes. The smoke test (steps 1 to 3 of the list under "Tests / acceptance") passed in a logged-in desktop browser.
+- **Sign-in follow-up: written** after Roland's first try on the server (next list).
+- **Not done:** A7.4. Roland's first try did not count: he pressed I'm done without signing in.
 
 **Found by running the real thing, and fixed in part 2:**
 
@@ -362,7 +364,20 @@ M7 is split into PRs to `v2`, like M6.
 5. **The screen showed the wrong tab.** A tab browserd cannot see had opened in front of the agent's. browserd now puts the agent's tab in front after every action and whenever core says who has the browser.
 6. **A live M6 test expected `request_signin` among the browser tools** of an agent without the screen. Corrected.
 
-**Known issue (from M6, now visible):** a form that posts into a new tab is refused (by design), but the blank tab it opened stays in the browser window. Playwright never reports it, so browserd cannot count or close it. Roland can close it on the screen; a browser restart also removes it. A fix would answer that first request with an empty page instead of aborting it, so the tab becomes visible to browserd and can be closed. Not done here: it changes an M6 guard and needs its own review.
+**Found on the server by Roland's first sign-in try (8 Oct 2026), and fixed in the sign-in follow-up:**
+
+1. **The model refused "log in to this site https://www.kotipizza.fi/"** with "I can't assist with logging into websites" and no tool call. In grammar mode the prompt lists tools by name and argument types only, so the one sentence about `request_signin` in the browser note was all it had. One line next to the tool list now says what to do when Roland asks to log in (`SIGNIN_HINT`, `agent/models/context.py`); the browser note is plainer too. "use sign in tool for the site" had worked.
+2. **After I'm done the agent said "successfully signed in" without looking**, and Roland had not signed in. The tool result said "Roland says he finished signing in… Take a snapshot to confirm" and the model stopped there. The result now says the button proves nothing and carries the page as it is, read by core once the browser is back (`page_now` in `agent/tools_browser.py`). A sign-in form that is still showing is called out, and the model is told not to ask again unless Roland does. If the page can't be read, the model is told to take a snapshot. The card's end state reads "You pressed I'm done", not "Signed in".
+3. **Close on the screen page shut the tab that held the chat.** In the app pane Roland used, the sign-in screen loaded in the chat's own tab, not a new one. Close now goes back to the chat when the tab has shown another page before (`history.length` above 1) and only shuts a tab opened for the screen.
+4. **The screen showed the site's front page, not its sign-in form.** That is how the tool works: it opens the address it is given and does not look for the form. Finding the form would cost three or four more model calls (about a minute each on Contabo) and often an approval card for the Log in button. Not changed; the card and the screen now say that the sign-in form may have to be opened on the site first. Roland can ask for the other behaviour.
+
+The wording for 1 and 2 was tried against the real model before it was sent: the pinned `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (SHA-256 checked) under the pinned llama.cpp image with the production flags, `MODEL_CTX=3072`, grammar mode and six tool steps, driving the real agent loop with canned browser results. Before: the plain request was refused 2 times out of 2, and once more with only the browser note reworded. After: 12 sign-in requests out of 12 called `request_signin` first ("log in to this site …", "sign in to …", "can you log me into …", "use sign in tool …", "check my order history on …", and one in Finnish). With the sign-in form still showing it answered "You are not signed in yet"; with an account page, that he is signed in; after Cancel, that it was cancelled. Three ordinary requests (open a page and read its heading, list items from a page, a sum) behaved as before and did not ask for a sign-in. This is a small sample on one model file, not a guarantee.
+
+**Known issues:**
+
+- **"This page is blocked" in a new tab and under the address bar** (seen on the server while in control). Chromium's policy blocks its internal pages, and the new-tab page and, most likely, the suggestion box under the address bar are such pages in this Chromium. Typing an address and pressing Enter works. Allowing those two pages would loosen an M6 policy and needs Roland's OK and its own PR.
+- **The phone could not find the server on mobile data** (8 Oct 2026, 21:49): the operator's DNS answered "no such name" for `37-60-226-214.sslip.io` while public DNS resolved it. Nothing on the server is involved. Private DNS on the phone (for example `dns.google`) or Wi-Fi gets round it; a domain name of Roland's own would end the dependence on sslip.io (his decision, see §6).
+- **From M6, now visible:** a form that posts into a new tab is refused (by design), but the blank tab it opened stays in the browser window. Playwright never reports it, so browserd cannot count or close it. Roland can close it on the screen; a browser restart also removes it. A fix would answer that first request with an empty page instead of aborting it, so the tab becomes visible to browserd and can be closed. Not done here: it changes an M6 guard and needs its own review.
 
 #### Contract between core and the services (fixed by part 1; part 2 must implement it)
 
@@ -405,6 +420,9 @@ Each one is stricter than, or an addition to, `docs/v2-spec.md`, except 4 and 12
 10. **browserd reports `vnc` in its health answer without letting it decide `ok`**; `python -m browserd healthcheck screen` asks for both, and `make verify` uses it when the screen is on.
 11. **The test stack lets the tester in to x11vnc** at 10.77.5.31 (`VNC_ALLOWED_PEERS`, a new browser setting). Production has noVNC's address only; preflight checks it.
 12. **The relay's limits are the spec's** (64 MiB, 0.25 CPU, 32 processes). They hold because of 5; without it they don't.
+13. **What the model is told after I'm done** (sign-in follow-up) is not §6.7's "Roland says he finished signing in to {site}. Take a snapshot to confirm." It is that he pressed the button, that this proves nothing, and the page as it is now. Stricter: the model answered from the old line without looking. Because page content now comes back with the answer, `request_signin` taints the run like a snapshot does (the §9.3 table has it as not tainting).
+14. **The prompt has a line about sign-in requests next to the tool list** (sign-in follow-up), which the spec does not mention. It is only there when `request_signin` is offered.
+15. **Close on the screen page** goes back to the chat when the page was loaded in the chat's own tab (sign-in follow-up).
 
 #### Goal
 
@@ -447,19 +465,19 @@ Automated:
 
 Code Shipper (Grok) smoke on Contabo, then **ping Roland** for the manual part (A7.4 is a substantial test with his real credentials):
 
-1. Without logging in, `curl -I https://37-60-226-214.sslip.io/screen/novnc/vnc.html` → 401.
-2. Logged in: open Watch; confirm the visible page is the agent's current tab (same browser).
-3. Take control, then ask the agent to snapshot. Expect "Roland is using the browser right now".
+1. Without logging in, `curl -I https://37-60-226-214.sslip.io/screen/novnc/vnc.html` → 401. *(Passed 8 Oct 2026: `make verify` reports the screen routes as 401 / 401.)*
+2. Logged in: open Watch; confirm the visible page is the agent's current tab (same browser). *(Passed 8 Oct 2026; clicks and key presses while watching did nothing.)*
+3. Take control, then ask the agent to snapshot. Expect "Roland is using the browser right now". *(Passed 8 Oct 2026 by calling the Browser tab's screenshot route instead of a chat turn: 423 `user_mode`, and browserd reported mode `user`.)*
 4. **A7.4 (Roland):** ask the agent to check something behind a login on a site Roland chooses; sign-in card appears; Roland takes control on the phone, logs in, presses I'm done; agent continues and reads the logged-in page. Audit shows `signin_requested`, `screen_session_start`/`end`, `signin_resolved` and no keystroke data. `docker compose logs browser novnc core caddy | grep -i <password>` finds nothing.
-5. `make verify` passes.
+5. `make verify` passes. *(13 / 0 / 1 on 8 Oct 2026, before A7.4.)*
 
-#### Stays OFF until Roland switches it on
+#### Off in the repo; on on Contabo since 8 Oct 2026
 
-`SCREEN_ENABLED`, the `novnc` service (the `screen` profile), x11vnc, `request_signin`. Merging part 2 changes none of them.
+`SCREEN_ENABLED`, the `novnc` service (the `screen` profile), x11vnc, `request_signin`. The repo default is off for all of them; Roland switched them on on Contabo with step 2 below.
 
 #### Contabo deploy notes
 
-Roland runs these himself. Two steps, so that the code is on the server and verified before anything is switched on.
+Roland runs these himself. Two steps, so that the code is on the server and verified before anything is switched on. **Both were done on 8 Oct 2026** at `4d0f703`, with the results each step says to expect (3806 MiB available after step 1, 3746 MiB after step 2). The sign-in follow-up needs only the usual `git pull --ff-only`, deploy and verify; no setting changes.
 
 **Step 1, after part 2 is merged: deploy with the screen still off.** Core mounts the two VNC secret files from this version on, so `make secrets` comes first. It creates what is missing and changes nothing that exists.
 
@@ -484,7 +502,8 @@ Notes:
 1. Firewall: the `vnc` and `screen` networks are internal and nothing new is published. The rule that drops connections from the browser to the relay is already in `deploy/firewall.sh`; deploy applies it. Re-run the external port scan (only 22, 80, 443, 443/udp).
 2. Memory: the relay is capped at 64 MiB (13 MiB idle, 32 MiB at its busiest in the test runs). x11vnc runs inside the browser container's existing 1280 MiB cap. Re-measure headroom with a screen session open (`make memory-report`).
 3. On a phone the screen page starts zoomed in: drag to move around, Fit screen to see the whole browser. Typing goes through the Keyboard button.
-4. For A7.4, look for the typed password afterwards with `docker compose logs browser novnc core caddy | grep -c -F '<password>'` (expect 0), as the acceptance asks.
+4. For A7.4, ask in plain words ("log in to <site>"). The screen opens on the address the agent was given, often the front page: open the site's sign-in form there, sign in, press I'm done. The agent then reports what the page shows.
+5. For A7.4, look for the typed password afterwards with `docker compose logs browser novnc core caddy | grep -c -F '<password>'` (expect 0), as the acceptance asks.
 
 ---
 

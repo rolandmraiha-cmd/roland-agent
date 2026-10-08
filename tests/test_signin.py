@@ -12,12 +12,19 @@ import pytest
 from conftest import call
 from screen_helpers import PNG, VNC_FULL, ScreenBrowserd, screen_agent, web
 
+from agent.core import SIGNIN_ASK, SIGNIN_TELL
 from agent.gate import POLICIES, RunState
-from agent.models.context import estimate_tokens
+from agent.models.context import SIGNIN_HINT, action_prompt, estimate_tokens
 from agent.screen import ScreenError
-from agent.signin import NEEDS_APPROVAL, ONLY_IN_CHAT
-from agent.tools import MAX_FACTS, TOOLS, call_tool
-from agent.tools_browser import BROWSER_TOOLS, SCREEN_TOOLS, SIGNIN_FORM_ASK, SIGNIN_FORM_TELL
+from agent.signin import DONE, DONE_LOOK, DONE_PAGE, NEEDS_APPROVAL, ONLY_IN_CHAT
+from agent.tools import MAX_FACTS, TOOLS, call_tool, schemas
+from agent.tools_browser import (
+    BROWSER_TOOLS,
+    SCREEN_TOOLS,
+    SIGNIN_FORM_ASK,
+    SIGNIN_FORM_STILL,
+    SIGNIN_FORM_TELL,
+)
 
 LOGIN = "https://shop.example/login"
 LOCKED = "Error: Roland is using the browser right now."
@@ -109,7 +116,11 @@ async def test_done_resolves_and_unlocks(tmp_path, fake):
     events = await asyncio.wait_for(task, 5)
     assert events[-1]["type"] == "done" and events[-1]["reply"].strip() == "You have 2 orders."
     results = tool_results(agent)
-    assert "Roland says he finished signing in to shop.example. Take a snapshot to confirm." in results[0]
+    # The button is not taken as proof: the model gets the page as it is now, and here the
+    # sign-in form is still on it. It is not told to ask again.
+    assert DONE.format(site="shop.example") + DONE_PAGE + SIGNIN_FORM_STILL in results[0]
+    assert '[e1] textbox "Password" (sensitive, value hidden)' in results[0]
+    assert SIGNIN_FORM_TELL in results[0] and SIGNIN_FORM_ASK not in results[0]
     # The agent has the browser again and its snapshot went through; no password value in it.
     assert fake.mode == "agent" and not agent.screens.roland_has_browser()
     assert '[e1] textbox "Password" (sensitive, value hidden)' in results[1]
@@ -117,7 +128,8 @@ async def test_done_resolves_and_unlocks(tmp_path, fake):
     assert agent.memory.screen_sessions() == [] and fake.disconnects == before + 1
     # Roland's screen was cut and the browser handed back before the model was told.
     order = [path for path in fake.paths("/v1/") if path in {"/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot"}]
-    assert order[-3:] == ["/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot"]
+    # (Two snapshots: the page handed over with the news, then the one the model asked for.)
+    assert order[-4:] == ["/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot", "/v1/snapshot"]
     assert [(e["type"], e.get("status")) for e in events if e["type"].startswith("signin_")] == [
         ("signin_required", None), ("signin_resolved", "done"),
     ]
@@ -152,7 +164,11 @@ async def test_the_model_is_not_told_before_the_browser_is_back(tmp_path, fake, 
     results = tool_results(agent)
     assert LOCKED not in results[1] and "URL: https://shop.example/login" in results[1]
     order = [path for path in fake.paths("/v1/") if path in {"/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot"}]
-    assert order[-3:] == ["/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot"]
+    # After "I'm done" the page is read once for the news itself, then again for the model's own call.
+    snapshots = ["/v1/snapshot"] * (2 if button == "done" else 1)
+    assert order[-2 - len(snapshots):] == ["/v1/vnc/disconnect", "/v1/user-mode", *snapshots]
+    # That first read found the browser unlocked as well.
+    assert LOCKED not in results[0] and ("This is the page now" in results[0]) == (button == "done")
 
 
 async def test_done_without_opening_the_screen_counts_too(tmp_path, fake):
@@ -259,8 +275,70 @@ async def test_chat_text_done_does_not_resolve(tmp_path, fake):
         assert (await client.get("/api/status")).json()["pending_signins"] == 0
 
 
+async def finished(agent, fake) -> str:
+    """Roland presses I'm done; returns what the model is told."""
+    _, _, task = await chat(agent)
+    row = await waiting(agent)
+    assert await agent.signins.done(row["id"]) == {"status": "done"}
+    await asyncio.wait_for(task, 5)
+    return tool_results(agent)[0]
+
+
+async def test_done_hands_over_the_signed_in_page(tmp_path, fake):
+    """What the model answers from is the page, not the button: here it shows his account."""
+    agent = screen_agent(tmp_path, fake, [("", [ask()]), "You are signed in."])
+    fake.signed_in = True
+    told = await finished(agent, fake)
+    assert DONE.format(site="shop.example") + DONE_PAGE + f"URL: {LOGIN}" in told
+    assert "Signed in as roland" in told and '[e1] link "Sign out"' in told
+    assert SIGNIN_FORM_STILL not in told and "sign-in form" not in told
+    # One snapshot, taken after the browser came back to the agent.
+    assert fake.paths("/v1/snapshot") == ["/v1/snapshot"] and fake.mode == "agent"
+    # Page content reached the model, so the run is marked as having seen untrusted data.
+    assert [bool(row["tainted"]) for row in agent.memory._all("SELECT tainted FROM runs")] == [True]
+
+
+async def test_done_without_a_readable_page_tells_the_model_to_look(tmp_path, fake):
+    agent = screen_agent(tmp_path, fake, [("", [ask()]), "I couldn't read the page."])
+    fake.down_paths = {"/v1/snapshot"}
+    told = await finished(agent, fake)
+    assert DONE.format(site="shop.example") + DONE_LOOK in told and DONE_PAGE not in told
+
+
+async def test_the_page_after_done_fits_the_tool_output_limit(tmp_path, fake):
+    """A long page is cut by the snapshot's own rule, with its note on how to read on, and the
+    lines above it are not pushed out by it."""
+    agent = screen_agent(tmp_path, fake, [("", [ask()]), "ok"], model_tool_output_chars=3000)
+    fake.extra_links = 400
+    told = await finished(agent, fake)
+    assert len(told) <= 3000 and told.endswith("</tool_output>")
+    assert SIGNIN_FORM_STILL in told and "more elements not shown" in told
+
+
+async def test_cancel_and_timeout_hand_over_no_page(tmp_path, fake):
+    agent = screen_agent(tmp_path, fake, [("", [ask()]), "ok"])
+    _, _, task = await chat(agent)
+    row = await waiting(agent)
+    await agent.signins.cancel(row["id"])
+    await asyncio.wait_for(task, 5)
+    assert "Roland cancelled the sign-in." in tool_results(agent)[0]
+    assert fake.paths("/v1/snapshot") == []
+
+
+def test_the_action_prompt_says_what_to_do_with_a_sign_in_request():
+    """The tool list has no descriptions. Without this line next to it the model answered
+    "I can't assist with logging into websites" to "log in to this site" (2026-10-08)."""
+    with_tool = action_prompt(schemas(set()))
+    assert SIGNIN_HINT in with_tool and "do not refuse" in SIGNIN_HINT
+    assert with_tool.index(SIGNIN_HINT) < with_tool.index("fetch_url(")
+    assert SIGNIN_HINT not in action_prompt(schemas({"request_signin"}))
+    assert "request_signin" not in action_prompt(schemas({"request_signin"}))
+    assert "request_signin" not in action_prompt([])
+
+
 async def test_request_signin_not_available_in_jobs(tmp_path, fake):
-    assert POLICIES["request_signin"].in_jobs is False and POLICIES["request_signin"].taints is False
+    # Its answer carries page content since the sign-in follow-up, so it taints like a snapshot.
+    assert POLICIES["request_signin"].in_jobs is False and POLICIES["request_signin"].taints is True
     assert "request_signin" in TOOLS and SCREEN_TOOLS == {"request_signin"} and SCREEN_TOOLS <= BROWSER_TOOLS
     agent = screen_agent(tmp_path, fake, [("", [ask()]), "Needs sign-in to shop.example"])
     job_id = agent.memory.add_job("Orders", "0 7 * * *", "Check my orders at shop.example", 0)
@@ -292,7 +370,7 @@ async def test_the_tool_is_offered_only_with_the_screen_on(tmp_path, fake):
     system = on.brain.seen[0][0]["content"]
     assert "request_signin" in on.brain.tools[0]
     assert "request_signin(url:string, site?:string, reason?:string)" in system
-    assert "call request_signin and Roland signs in himself" in system and "stop and tell Roland" not in system
+    assert SIGNIN_ASK in system and SIGNIN_HINT in system and SIGNIN_TELL not in system
     # Still inside the small model's budget with a full fact store.
     assert estimate_tokens(system) <= on.config.model_system_prompt_budget
     assert len(TOOLS["request_signin"][0]["function"]["description"]) <= 160

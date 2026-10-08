@@ -141,7 +141,11 @@ async function start(nextMode) {
     current.focusOnClick = true;
     applyZoom();
     current.addEventListener("connect", () => {
-      if (rfb === current) say(mode === "control" ? "Connected. The agent is paused." : "Connected. The agent keeps working.");
+      if (rfb !== current) return;
+      if (mode !== "control") say("Connected. The agent keeps working.");
+      // The agent opens the address it was given, which is often the site's front page.
+      else if (signinOpen) say("Connected. Sign in here, then press I'm done. If the sign-in form isn't showing, open it on the site first.");
+      else say("Connected. The agent is paused.");
     });
     current.addEventListener("disconnect", () => {
       closed.add(current);
@@ -172,7 +176,7 @@ $("screen-done").onclick = async () => {
   try {
     await post(`/api/signin/${encodeURIComponent(signinId)}/done`);
     signinOpen = false;
-    finish("Done. The agent has the browser again; you can close this page.");
+    finish("The agent has the browser again and is looking at the page. You can close this one.");
   } catch (e) {
     if (/no longer waiting/.test(e.message)) signinOpen = false;
     fail(e.message);
@@ -190,11 +194,19 @@ $("screen-handback").onclick = async () => {
 $("screen-zoom").onclick = () => { zoomed = !zoomed; applyZoom(); renderButtons(); };
 $("screen-watch").onclick = () => start("watch");
 $("screen-control").onclick = () => start("control");
+// The chat opens this page in a tab of its own, and Close shuts that tab. Some browsers and
+// app panes load it in the chat's own tab instead; shutting that one takes the chat with it
+// (it did, 2026-10-08), so a tab that showed something before this page goes back to the chat.
+function leave() {
+  if (history.length > 1) { location.replace("/"); return; }
+  window.close();
+  location.href = "/";  // a tab the page didn't open itself can't be closed by it
+}
+
 $("screen-close").onclick = async () => {
   ended = true;
   await release();
-  window.close();
-  location.href = "/";  // a tab the page didn't open itself can't be closed by it
+  leave();
 };
 
 // Leaving the page gives the browser back at once instead of after the idle timeout.

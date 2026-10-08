@@ -311,8 +311,9 @@ def _build_policies() -> dict[str, ToolPolicy]:
         "browser_wait": _safe_policy(taints=True),
         "browser_upload": _browser_policy("browser_upload"),
         "browser_downloads": _safe_policy(taints=True),
-        # Screen (M7). Roland signs in himself; nothing from the page comes back with the answer.
-        "request_signin": _safe_policy(taints=False, in_jobs=False),
+        # Screen (M7). Roland signs in himself. The answer carries the page as it is once he is
+        # done, and that is untrusted like any snapshot, so this taints the run as well.
+        "request_signin": _safe_policy(taints=True, in_jobs=False),
     }
 
 
