@@ -79,18 +79,21 @@ services:
       VNC_VIEW_PASSWORD_FILE: /run/secrets/vnc_view_password
       TRAINING_CAPTURE: "false"
       TRAINING_LOOP_ENABLED: "false"
-      TRAINER_URL: ""
+      TRAINER_URL: ${TRAINER_URL:-}
+      TRAINER_API_TOKEN_FILE: /run/secrets/trainer_api_token
+      TRAINING_DATA_DIR: /training-data
       MODEL_PROVIDER: ${MODEL_PROVIDER:-llamacpp}
       MODEL_BASE_URL: ${MODEL_BASE_URL:-http://10.77.6.60:8080}
       MODEL_MAX_CONCURRENCY: "1"
       MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
       AGENT_PASSWORD_HASH_FILE: /run/secrets/agent_password_hash
     # The two screen passwords are handed to Roland's screen page, one per mode (§6.6).
-    secrets: [model_server_token, agent_password_hash, sandbox_api_token, browser_api_token, vnc_password, vnc_view_password]
+    secrets: [model_server_token, agent_password_hash, sandbox_api_token, browser_api_token, vnc_password, vnc_view_password, trainer_api_token]
     volumes:
       - agent-data:/data
       - backups:/backups
       - models:/models:ro
+      - training-data:/training-data
       - type: bind
         source: ${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}
         target: /workspace
@@ -103,6 +106,7 @@ services:
       # browser container finds nothing to connect to here.
       browser_ctl: { ipv4_address: 10.77.4.10 }
       model: { ipv4_address: 10.77.6.10 }
+      trainer_ctl: { ipv4_address: 10.77.7.10 }
       core_egress: { gw_priority: 100 }
     healthcheck:
       test: ["CMD", "python", "-m", "agent", "healthcheck"]
@@ -118,6 +122,37 @@ services:
     depends_on:
       model: { condition: service_started }
       sandbox: { condition: service_healthy }
+
+  trainer:
+    <<: *hardening
+    profiles: [training]
+    build: { context: ., dockerfile: docker/trainer/Dockerfile }
+    image: roland-agent/trainer:local
+    user: "1000:1000"
+    environment:
+      TRAINER_API_TOKEN_FILE: /run/secrets/trainer_api_token
+      TRAINING_LAUNCH_MODE: ${TRAINING_LAUNCH_MODE:-manual}
+      TRAINING_SSH_TARGET: ${TRAINING_SSH_TARGET:-}
+      TRAINING_SSH_KNOWN_HOSTS: ${TRAINING_SSH_KNOWN_HOSTS:-}
+      TRAINING_PROVIDER: ${TRAINING_PROVIDER:-}
+      TRAINING_MAX_HOURS: ${TRAINING_MAX_HOURS:-4}
+      MODEL_IMPORT_MAX_MB: ${MODEL_IMPORT_MAX_MB:-6144}
+    secrets: [trainer_api_token]
+    volumes: ["training-data:/training-data:ro", "training-runs:/training-runs", "models:/models"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    networks:
+      trainer_ctl: { ipv4_address: 10.77.7.70 }
+      trainer_egress: { gw_priority: 100 }
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 150s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('10.77.7.70',7200),3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   model:
     <<: *hardening
@@ -303,11 +338,14 @@ volumes:
   caddy-data:
   caddy-config:
   models:
+  training-data:
+  training-runs:
 
 secrets:
   model_server_token: { file: ./secrets/model_server_token }
   agent_password_hash: { file: ./secrets/agent_password_hash }
   sandbox_api_token: { file: ./secrets/sandbox_api_token }
   browser_api_token: { file: ./secrets/browser_api_token }
+  trainer_api_token: { file: ./secrets/trainer_api_token }
   vnc_password: { file: ./secrets/vnc_password }
   vnc_view_password: { file: ./secrets/vnc_view_password }

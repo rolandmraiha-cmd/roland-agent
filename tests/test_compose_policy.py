@@ -1,5 +1,4 @@
-"""Container policy and resolved-host checks: caddy, core, model, sandbox, (M6) browser and
-(M7) the screen relay, novnc."""
+"""Container policy and resolved-host checks including browser, screen and trainer."""
 
 import copy
 import hashlib
@@ -75,14 +74,14 @@ def resolved_with_screen(tmp_path_factory):
 
 
 def test_only_caddy_publishes_expected_ports():
-    assert set(COMPOSE["services"]) == {"core", "caddy", "model", "sandbox", "browser", "novnc"}
+    assert set(COMPOSE["services"]) == {"core", "caddy", "model", "sandbox", "browser", "novnc", "trainer"}
     assert COMPOSE["services"]["caddy"]["ports"] == ["80:80/tcp", "443:443/tcp", "443:443/udp"]
-    for name in ("core", "model", "sandbox", "browser", "novnc"):
+    for name in ("core", "model", "sandbox", "browser", "novnc", "trainer"):
         assert "ports" not in COMPOSE["services"][name] and "expose" not in COMPOSE["services"][name]
     assert COMPOSE["name"] == "roland-agent"
 
 
-@pytest.mark.parametrize("name", ["core", "caddy", "model", "sandbox", "novnc"])
+@pytest.mark.parametrize("name", ["core", "caddy", "model", "sandbox", "novnc", "trainer"])
 def test_every_service_has_security_and_resource_limits(name):
     service = COMPOSE["services"][name]
     assert service["user"] == "1000:1000"
@@ -124,7 +123,7 @@ def test_reserved_internal_bridges_and_current_egress_members():
     caddy = COMPOSE["services"]["caddy"]["networks"]
     core = COMPOSE["services"]["core"]["networks"]
     assert set(caddy) == {"public", "edge", "screen"}
-    assert set(core) == {"edge", "sandbox_ctl", "browser_ctl", "model", "core_egress"}
+    assert set(core) == {"edge", "sandbox_ctl", "browser_ctl", "model", "core_egress", "trainer_ctl"}
     assert core["sandbox_ctl"]["ipv4_address"] == "10.77.3.10"
     assert core["browser_ctl"]["ipv4_address"] == "10.77.4.10"
     assert caddy["edge"]["ipv4_address"] == "10.77.1.2"
@@ -157,11 +156,11 @@ def test_unimplemented_features_cannot_be_enabled_by_env_file():
     assert env["CORE_ALLOWED_PEERS"] == env["FORWARDED_ALLOW_IPS"] == "10.77.1.2"
     assert core["secrets"] == [
         "model_server_token", "agent_password_hash", "sandbox_api_token", "browser_api_token",
-        "vnc_password", "vnc_view_password",
+        "vnc_password", "vnc_view_password", "trainer_api_token",
     ]
     assert set(COMPOSE["secrets"]) == {
         "model_server_token", "agent_password_hash", "sandbox_api_token", "browser_api_token",
-        "vnc_password", "vnc_view_password",
+        "vnc_password", "vnc_view_password", "trainer_api_token",
     }
     assert "env_file" not in COMPOSE["services"]["caddy"]
     assert core["env_file"] == ".env"
@@ -179,7 +178,7 @@ def test_persistent_private_mounts_and_existing_data_volume():
     assert bind["bind"]["create_host_path"] is False
     assert core["environment"]["BACKUP_DIR"] == "/backups"
     assert set(COMPOSE["volumes"]) == {
-        "agent-data", "backups", "browser-profile", "caddy-data", "caddy-config", "models",
+        "agent-data", "backups", "browser-profile", "caddy-data", "caddy-config", "models", "training-data", "training-runs",
     }
     assert COMPOSE["services"]["caddy"]["volumes"] == ["caddy-data:/data", "caddy-config:/config"]
 
@@ -399,10 +398,11 @@ def test_path_errors_requires_sandbox_api_token(tmp_path):
         # Core mounts the browser token even while the browser is off, so a deploy without
         # the file must stop at preflight, not when Compose recreates core.
         assert any("browser_api_token" in error for error in errors)
+        assert any("trainer_api_token" in error for error in errors)
         # The same goes for the two screen passwords (M7), and the message says how to get them.
         for name in ("vnc_password", "vnc_view_password"):
             assert any(name in error and "make secrets" in error for error in errors)
-        for name in ("sandbox_api_token", "browser_api_token", "vnc_password", "vnc_view_password"):
+        for name in ("sandbox_api_token", "browser_api_token", "vnc_password", "vnc_view_password", "trainer_api_token"):
             assert preflight.path_errors(config) != []
             token = secrets / name
             token.write_text("synthetic-fixture")
@@ -838,6 +838,22 @@ def test_resolved_stack_with_the_screen_switched_on(resolved_with_screen):
     assert novnc.get("command") is None  # the image's own, checked in the Dockerfile test
     for name in ("screen", "vnc"):
         assert resolved_with_screen["networks"][name]["internal"] is True
+
+
+def test_screen_and_trainer_profiles_work_together(tmp_path):
+    config = resolve(
+        tmp_path,
+        "\nCOMPOSE_PROFILES=browser,screen,training\nBROWSER_ENABLED=true\n"
+        "SCREEN_ENABLED=true\nTRAINER_URL=http://10.77.7.70:7200\n",
+    )
+    services = config["services"]
+    assert set(services) == {"caddy", "core", "model", "sandbox", "browser", "novnc", "trainer"}
+    assert preflight.configuration_errors(config) == []
+    assert services["core"]["environment"]["TRAINING_CAPTURE"] == "false"
+    assert services["core"]["environment"]["TRAINING_LOOP_ENABLED"] == "false"
+    assert not services["novnc"].get("secrets")
+    assert preflight._secret_names(services["trainer"]) == {"trainer_api_token"}
+    assert not any(services[name].get("ports") for name in services if name != "caddy")
 
 
 @pytest.mark.parametrize(

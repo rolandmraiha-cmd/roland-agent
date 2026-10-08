@@ -52,7 +52,8 @@ def build_router(agent) -> APIRouter:
     @router.post("/api/approvals/{approval_id}/approve")
     async def approve(approval_id: str, body: ApproveBody):
         try:
-            return await agent.gate.approve(approval_id, body.args_hash, confirm=body.confirm)
+            result = await agent.gate.approve(approval_id, body.args_hash, confirm=body.confirm)
+            return result
         except KeyError:
             raise HTTPException(404, "no such approval") from None
         except PermissionError:
@@ -62,9 +63,14 @@ def build_router(agent) -> APIRouter:
 
     @router.post("/api/approvals/{approval_id}/reject")
     async def reject(approval_id: str, body: RejectBody):
-        # alternative is accepted and ignored for execution (preference capture is M8).
+        from ..training.capture import validate_action
+
         try:
-            return await agent.gate.reject(approval_id, note=body.note, args_hash=body.args_hash)
+            alternative = validate_action(body.alternative) if body.alternative is not None else None
+            result = await agent.gate.reject(approval_id, note=body.note, args_hash=body.args_hash, alternative=alternative)
+            return result
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
         except KeyError:
             raise HTTPException(404, "no such approval") from None
         except LookupError as error:

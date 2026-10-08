@@ -42,6 +42,7 @@ class LlamaCppBrain:
         *,
         allowed_hosts: tuple[str, ...] = DEFAULT_MODEL_HOSTS,
         temperature: float = 0.2,
+        seed: int | None = None,
         max_new_tokens: int = 768,
         timeout: float = 600,
         tool_mode: str = "grammar",
@@ -50,6 +51,7 @@ class LlamaCppBrain:
         validate_endpoint(base_url, allowed_hosts)
         self.model = model
         self.temperature = temperature
+        self.seed = seed
         self.max_new_tokens = max_new_tokens
         self.tool_mode = tool_mode
         self.ctx = ctx
@@ -168,6 +170,8 @@ class LlamaCppBrain:
                 "json_schema": {"name": "action", "schema": schema},
             },
         }
+        if self.seed is not None:
+            payload["seed"] = self.seed
         async with self._client.stream(
             "POST", f"{self.chat_root}/chat/completions", json=payload
         ) as response:
@@ -199,6 +203,8 @@ class LlamaCppBrain:
             body["json_schema"] = json_schema
         if grammar is not None:
             body["grammar"] = grammar
+        if self.seed is not None:
+            body["seed"] = self.seed
         async with self._client.stream("POST", f"{self.server_root}/completion", json=body) as response:
             if json_schema is not None and self._response_format_rejected(response):
                 await response.aread()
@@ -267,6 +273,8 @@ class LlamaCppBrain:
         }
         if tools:
             payload["tools"] = tools
+        if self.seed is not None:
+            payload["seed"] = self.seed
         step = Step()
         calls: dict[int, dict] = {}
         async with self._client.stream(
@@ -314,6 +322,8 @@ class LlamaCppBrain:
         encoded = self._encode_messages(messages, supports_tool_role)
         if self.tool_mode == "native":
             async for item in self._stream_native(encoded, tools):
+                if isinstance(item, Step):
+                    item.model_messages = encoded
                 yield item
             return
 
@@ -348,7 +358,10 @@ class LlamaCppBrain:
                     yield text
 
         raw = "".join(raw_parts)
-        yield finish_step(raw, schema, offered, truncated=truncated, streamed=streamer.emitted)
+        step = finish_step(raw, schema, offered, truncated=truncated, streamed=streamer.emitted)
+        step.raw_action = raw
+        step.model_messages = encoded
+        yield step
 
 
 class _FormatRejected(Exception):

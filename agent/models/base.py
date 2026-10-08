@@ -31,6 +31,8 @@ class Step:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     parse_error: str | None = None
+    raw_action: str | None = None
+    model_messages: list[dict] | None = None
 
 
 class Brain(Protocol):

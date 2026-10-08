@@ -168,3 +168,13 @@ a.button[hidden], .browser-screen[hidden] { display: none; }
 .screen-canvas canvas { margin: 0 auto auto !important; }
 /* Takes what a phone keyboard types and passes it on; nothing is shown or kept in it. */
 .screen-typing { position: fixed; bottom: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; }
+/* Human settings and training review. */
+.training-bar { padding: .5rem 1rem; display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
+.training-bar[hidden] { display: none; }
+.feedback { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
+.feedback-editor { flex-basis: 100%; display: grid; gap: .5rem; }
+.feedback-editor[hidden] { display: none; }
+.correction { width: 100%; min-height: 4rem; }
+.prompt-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow-y: auto; }
+#settings-view label { display: block; margin: .6rem 0; }
+#settings-view select, #settings-view input:not([type=checkbox]), #settings-view textarea { max-width: 100%; }

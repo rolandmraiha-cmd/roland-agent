@@ -143,7 +143,8 @@ class Config:
     training_min_new_pairs: int = 20
     training_seed_ratio: float = 0.3
     training_keep_emails: tuple[str, ...] = ()
-    trainer_url: str = "http://10.77.7.70:7200"
+    trainer_url: str = ""
+    training_data_dir: Path | None = None
     trainer_api_token: str = field(default="", repr=False, metadata={"secret": True})
     password_hash: str = field(
         default="", repr=False, metadata={"env": "AGENT_PASSWORD_HASH", "secret": True}
@@ -283,6 +284,23 @@ class Config:
                 raise SystemExit("SCREEN_ENABLED=true needs BROWSER_ENABLED=true: the screen shows the agent's browser")
         self.check_model()
 
+        from .schedule import valid_cron
+
+        if not .3 <= self.training_seed_ratio < 1:
+            raise SystemExit("TRAINING_SEED_RATIO must be at least 0.3 and below 1")
+        if self.training_launch_mode not in {"manual", "ssh", "hook"}:
+            raise SystemExit("TRAINING_LAUNCH_MODE must be manual, ssh or hook")
+        if not 1 <= self.training_max_hours <= 24 or not valid_cron(self.training_schedule):
+            raise SystemExit("Invalid training time cap or schedule")
+        if self.trainer_url:
+            from .training.client import TrainerClient
+            try:
+                TrainerClient(self)
+            except ValueError as error:
+                raise SystemExit(str(error)) from error
+            if len(self.trainer_api_token) < 32:
+                raise SystemExit("TRAINER_API_TOKEN is required when TRAINER_URL is set")
+
     @classmethod
     def from_env(cls) -> Config:
         load_dotenv()
@@ -290,7 +308,7 @@ class Config:
             log.warning("MODEL_API_KEY is removed and ignored; use MODEL_SERVER_TOKEN for the local server")
         defaults = cls()
         values = {}
-        path_fields = {"data_dir", "workspace_dir", "workspace_host_dir", "backup_dir"}
+        path_fields = {"data_dir", "workspace_dir", "workspace_host_dir", "backup_dir", "training_data_dir"}
         for setting in fields(cls):
             name = setting.metadata.get("env", setting.name.upper())
             default = getattr(defaults, setting.name)

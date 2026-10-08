@@ -103,6 +103,7 @@ class RunState:
     # new card from the gate. The loop goes further: a non-empty set ends tool use for the
     # turn, so a revised or different action waits for Roland's next message too.
     rejected_actions: set[tuple[str, str, str]] = field(default_factory=set)
+    prompt_version_id: int = 1
 
 
 def _safe(_ctx: ToolContext, _args: dict) -> Awaitable[Decision]:
@@ -597,11 +598,14 @@ class Gate:
         )
         stored = json.loads(self.memory.approval(approval_id)["args_json"])  # type: ignore[index]
         outcome = Outcome(True, args=stored, approval_id=approval_id)
+        if callback := getattr(self, "on_decision", None):
+            callback({**row, "status": "approved"})
         self._resolve_waiter(approval_id, outcome)
         await self._emit_resolved(row, "approved")
         return {"status": "approved"}
 
-    async def reject(self, approval_id: str, *, note: str | None = None, args_hash: str | None = None) -> dict:
+    async def reject(self, approval_id: str, *, note: str | None = None, args_hash: str | None = None,
+                     alternative: dict | None = None) -> dict:
         row = self.memory.approval(approval_id)
         if row is None:
             raise KeyError("no such approval")
@@ -623,6 +627,8 @@ class Gate:
         message = "Roland rejected this."
         if note:
             message += f" Roland's note: {note[:500]}"
+        if callback := getattr(self, "on_decision", None):
+            callback({**row, "status": "rejected"}, alternative)
         self._resolve_waiter(approval_id, Outcome(False, message=message, approval_id=approval_id))
         await self._emit_resolved(row, "rejected")
         return {"status": "rejected"}

@@ -23,11 +23,12 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["agent", "agent.web", "agent.models", "agent.migrations", "sandboxd"]
+packages = ["agent", "agent.web", "agent.models", "agent.migrations", "agent.training", "agent.eval", "sandboxd"]
 
 [tool.setuptools.package-data]
 "agent.web" = ["static/*"]
 "agent.models" = ["*.gbnf"]
+"agent.eval" = ["cases/*.jsonl"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

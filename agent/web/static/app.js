@@ -46,7 +46,9 @@ async function api(path, options = {}) {
   if (!res.ok) {
     let msg = res.statusText;
     try { const j = await res.json(); msg = j.detail || j.error || msg; } catch (_) {}
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const error = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    error.status = res.status;
+    throw error;
   }
   return res;
 }
@@ -175,7 +177,11 @@ async function openChat(id) {
   if (load !== chatLoad || sending) return;
   const box = $("messages");
   box.replaceChildren();
-  for (const m of data.messages) addMessage(m.role, m.content);
+  for (const m of data.messages) {
+    const node = addMessage(m.role, m.content);
+    if (m.role === "assistant" && m.id && window.m8) window.m8.feedback(node, m.id, m.feedback);
+  }
+  if (window.m8) window.m8.chatTraining(id);
   let hasPending = false;
   if (Array.isArray(data.pending_approvals)) {
     for (const a of data.pending_approvals) {
@@ -263,6 +269,7 @@ async function send(text) {
         }
         bubble.textContent += ev.text;
       } else if (ev.type === "done") {
+        if (ev.id && window.m8) window.m8.feedback(reply, ev.id);
         // Authoritative final reply when non-empty. Required when the model never streamed
         // text deltas (common with JSON/grammar actions). Empty reply must not wipe streamed text.
         clearInterval(thinkTimer);
@@ -501,7 +508,8 @@ function renderApprovalCard(approval, { compact } = {}) {
     try {
       await api(`/api/approvals/${approval.id}/reject`, {
         method: "POST",
-        body: JSON.stringify({ note: note.value || undefined, args_hash: approval.args_hash }),
+        body: JSON.stringify({ note: note.value || undefined, args_hash: approval.args_hash,
+          alternative: alternative.value.trim() ? JSON.parse(alternative.value) : undefined }),
       });
       card.append(el("p", "hint", "Rejected."));
       setComposerLocked(false);
@@ -514,6 +522,11 @@ function renderApprovalCard(approval, { compact } = {}) {
     }
   };
   actions.append(approveBtn, rejectBtn, note);
+  const alternative = el("textarea", "correction");
+  alternative.maxLength = 8000;
+  alternative.placeholder = 'What should it have done instead? Optional action JSON, e.g. {"action":"reply","text":"…"}';
+  alternative.setAttribute("aria-label", "What should it have done instead?");
+  actions.append(alternative);
   card.append(actions);
   return card;
 }
@@ -655,12 +668,15 @@ function showView(name) {
   if ($("audit-view")) $("audit-view").hidden = name !== "audit";
   if ($("files-view")) $("files-view").hidden = name !== "files";
   if ($("browser-view")) $("browser-view").hidden = name !== "browser";
+  if ($("settings-view")) $("settings-view").hidden = name !== "settings";
+  if (name === "settings" && window.m8) window.m8.settings();
   $("tab-chat").classList.toggle("active", name === "chat");
   $("tab-jobs").classList.toggle("active", name === "jobs");
   if ($("tab-approvals")) $("tab-approvals").classList.toggle("active", name === "approvals");
   if ($("tab-audit")) $("tab-audit").classList.toggle("active", name === "audit");
   if ($("tab-files")) $("tab-files").classList.toggle("active", name === "files");
   if ($("tab-browser")) $("tab-browser").classList.toggle("active", name === "browser");
+  if ($("tab-settings")) $("tab-settings").classList.toggle("active", name === "settings");
   if (name === "jobs") loadJobs();
   if (name === "approvals") loadApprovals();
   if (name === "audit") loadAudit();
@@ -700,6 +716,7 @@ async function loadJobs() {
   $("tz").textContent = data.timezone;
   const list = $("job-list");
   list.replaceChildren();
+  if (window.m8) await window.m8.systemJob(list);
   if (!data.jobs.length) list.append(el("p", "hint", "No jobs yet."));
   for (const j of data.jobs) {
     const waiting = !j.approved;

@@ -1,0 +1,13 @@
+# GPU-only tools; never installed in core/trainer images.
+torch==2.8.0
+transformers==4.57.1
+peft==0.17.1
+trl==0.23.1
+datasets==4.2.0
+accelerate==1.10.1
+bitsandbytes==0.48.1 ; sys_platform == 'linux'
+sentencepiece==0.2.1
+pyyaml==6.0.3
+httpx==0.28.1
+numpy==2.3.3
+# Conversion imports gguf from the exact llama.cpp checkout, without installing it.

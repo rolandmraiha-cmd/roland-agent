@@ -1,0 +1,44 @@
+name: Training CPU and model switch
+on:
+  pull_request:
+  push:
+    branches: [v2, 'v2-*']
+permissions:
+  contents: read
+concurrency:
+  group: training-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  cpu-pipeline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: training/requirements-train-cpu.lock
+      - run: python -m pip install --require-hashes --extra-index-url https://download.pytorch.org/whl/cpu -r training/requirements-train-cpu.lock -r requirements.lock -r requirements-dev.lock
+      - name: Build the reviewed llama.cpp commit for CPU only
+        run: |
+          train_pin=$(sed -n 's/^commit=//p' docker/model/VERSION)
+          git init .ci-llama
+          git -C .ci-llama remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C .ci-llama fetch --depth 1 origin "$train_pin"
+          git -C .ci-llama checkout --detach FETCH_HEAD
+          cmake -S .ci-llama -B .ci-llama/build -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DGGML_NATIVE=OFF
+          cmake --build .ci-llama/build --target llama-server llama-quantize -j 2
+      - name: Train SFT and DPO, merge, quantise and evaluate synthetic tiny weights
+        env:
+          LLAMA_CPP_DIR: ${{ github.workspace }}/.ci-llama
+        run: bash training/run_all.sh --dry-run --current-version ci-tiny-base --out .ci-training
+      - name: Load actual GGUF with the pinned production container and exercise swap/rollback
+        run: python tests/integration/training_probe.py .ci-training/candidate.tar
+      - name: Check loss boundaries and private split
+        run: pytest training/tests -q
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: synthetic-cpu-candidate
+          path: .ci-training/candidate.tar
+          retention-days: 3

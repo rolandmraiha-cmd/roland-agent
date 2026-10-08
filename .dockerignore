@@ -1,6 +1,10 @@
 .env
 secrets/
 .ci-workspace/
+.ci-training/
+.ci-llama/
+.llama.cpp/
+.training-venv/
 .venv
 data
 .git

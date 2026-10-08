@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+echo "No provider is configured. Supply your own provision executable that prints user@host and a pinned SSH host-key line. Credentials must be read from the mounted secret file." >&2
+exit 2

@@ -2,6 +2,10 @@
 secrets/*
 !secrets/.gitkeep
 .ci-workspace/
+.ci-training/
+.ci-llama/
+.llama.cpp/
+.training-venv/
 data/
 __pycache__/
 *.pyc

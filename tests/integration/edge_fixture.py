@@ -20,6 +20,7 @@ def main():
         secret_dir / "model_server_token",
         secret_dir / "sandbox_api_token",
         secret_dir / "browser_api_token",
+        secret_dir / "trainer_api_token",
         secret_dir / "vnc_password",
         secret_dir / "vnc_view_password",
     ]
@@ -37,6 +38,7 @@ def main():
         secret_dir / "sandbox_api_token": secrets.token_urlsafe(32),
         # Core mounts this one too, though the browser service itself is not started here.
         secret_dir / "browser_api_token": secrets.token_urlsafe(32),
+        secret_dir / "trainer_api_token": secrets.token_urlsafe(32),
         # And the two screen passwords (M7), shaped as `make secrets` writes them: eight
         # letters and digits, and different from each other from the first character on.
         secret_dir / "vnc_password": "F" + secrets.token_hex(4)[:7],

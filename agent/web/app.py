@@ -54,6 +54,7 @@ from .routes_browser import browser_status
 from .routes_browser import build_router as build_browser_router
 from .routes_files import build_router as build_files_router
 from .routes_screen import build_router as build_screen_router
+from .routes_training import build_router as build_training_router
 
 STATIC = Path(__file__).parent / "static"
 SCREEN_TICK_S = 10  # how often idle screen sessions are ended and browserd's mode is checked
@@ -104,6 +105,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             log.info("marked %s unfinished job run(s) as failed", n)
         agent.audit.write("system", "startup", detail={"scheduler": run_scheduler})
         loop_task = asyncio.create_task(scheduler_loop(agent)) if run_scheduler else None
+        from ..training.loop import training_loop
+
+        training_task = asyncio.create_task(training_loop(agent)) if run_scheduler else None
         screen_task = None
         if agent.screens.available:
             # Nothing from before the restart is still waiting or watching. Records first;
@@ -119,6 +123,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             pending = list(tasks)
             if loop_task:
                 pending.append(loop_task)
+            if training_task:
+                pending.append(training_task)
             if screen_task:
                 pending.append(screen_task)
             for task in pending:
@@ -163,6 +169,8 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
     for _route in build_files_router(agent).routes:
         app.routes.append(_route)
     for _route in build_browser_router(agent).routes:
+        app.routes.append(_route)
+    for _route in build_training_router(agent).routes:
         app.routes.append(_route)
     # Before the /internal stub below, so the real screen-auth route answers first.
     for _route in build_screen_router(agent, sessions, cookie, STATIC).routes:
@@ -286,14 +294,14 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         info = load_model_info(config.model_provider)
         browser = await browser_status(agent)
         return {
-            "name": config.agent_name,
+            "name": agent.persona.active()["agent_name"],
             "model": config.model_name,
             "model_info": None if info is None else info.public_dict(),
             "csrf": csrf_token(request.cookies.get(cookie, "")),
             "calls_left": agent.calls_left(),
             "daily_limit": config.daily_call_limit,
             "shell": agent.allow_shell,
-            "pending_approvals": agent.memory.count_pending_approvals(),
+            "pending_approvals": agent.memory.count_pending_approvals() + len(agent.memory._all("SELECT id FROM model_promotions WHERE status='pending'")),
             "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
             "last_backup_error": agent.memory.get_meta("last_backup_error"),
             "pending_signins": len(agent.signins.active()),
@@ -319,7 +327,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         timeline = agent.memory.timeline(chat_id)
         events = [row for row in timeline if row["kind"] != "text"]
         return {
-            "messages": agent.memory.messages(chat_id),
+            "messages": [{**row, "feedback": next((dict(f) for f in agent.memory._all("SELECT * FROM feedback WHERE message_id=?", (row["id"],))), None)} for row in timeline if row["kind"] == "text"],
             "events": events,
             "busy": chat_id in busy,
             "pending_approvals": agent.memory.approvals(status="pending", chat_id=chat_id),
@@ -331,6 +339,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         if chat_id in busy:
             raise HTTPException(409, "the agent is still answering in this chat")
         need_chat(chat_id)
+        agent.capture.purge_chat(chat_id)
         agent.memory.delete_chat(chat_id)
         return {"ok": True}
 

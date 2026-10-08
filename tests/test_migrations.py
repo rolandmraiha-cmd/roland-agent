@@ -59,7 +59,7 @@ def test_fresh_db_reaches_latest_version(tmp_path):
     path = tmp_path / "agent.db"
     memory = Memory(path)
     try:
-        assert memory.schema_version == migrations.latest_version() == 2
+        assert memory.schema_version == migrations.latest_version() == 3
         tables = {row[0] for row in memory._all("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {
             "runs",
@@ -126,7 +126,7 @@ def test_pre_approval_db_migrates(tmp_path):
     pre_approval_database(path)
     memory = Memory(path)
     try:
-        assert memory.schema_version == 2
+        assert memory.schema_version == 3
         job = memory.job(1)
         assert job.prompt == "old prompt" and job.origin == "old" and not job.approved
         assert memory.due_jobs(1000) == []
@@ -148,8 +148,8 @@ def test_failed_migration_rolls_back(tmp_path, monkeypatch):
         db.execute("UPDATE facts SET text = 'discard this edit'")
         raise RuntimeError("deliberate failure")
 
-    monkeypatch.setattr(migrations, "MIGRATIONS", [*migrations.MIGRATIONS, (3, broken)])
-    with pytest.raises(SystemExit, match="migration 3 failed: deliberate failure"):
+    monkeypatch.setattr(migrations, "MIGRATIONS", [*migrations.MIGRATIONS, (4, broken)])
+    with pytest.raises(SystemExit, match="migration 4 failed: deliberate failure"):
         Memory(path)
     assert database_state(path) == before
 
@@ -203,7 +203,7 @@ def test_future_schema_version_is_refused_without_data_changes(tmp_path):
     memory._exec("PRAGMA user_version = 99")
     memory.close()
     before = database_state(path)
-    with pytest.raises(SystemExit, match="database version 99 is newer than supported version 2"):
+    with pytest.raises(SystemExit, match="database version 99 is newer than supported version 3"):
         Memory(path)
     assert database_state(path) == before
 
@@ -226,7 +226,7 @@ def test_two_initializers_share_upgrade_safely(tmp_path):
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first, second = pool.submit(start), pool.submit(start)
-        assert first.result(timeout=15) == second.result(timeout=15) == (2, [(1, "Saved fact")])
+        assert first.result(timeout=15) == second.result(timeout=15) == (3, [(1, "Saved fact")])
 
 
 def test_pre_migration_backup_keeps_previous_version(tmp_path):
@@ -237,7 +237,7 @@ def test_pre_migration_backup_keeps_previous_version(tmp_path):
     memory = Memory(path, backup_dir=backups)
     memory.close()
     files = list((backups / "db").iterdir())
-    assert len(files) == 1 and files[0].name.startswith("pre-migrate-v1-to-v2-")
+    assert len(files) == 1 and files[0].name.startswith("pre-migrate-v1-to-v3-")
     assert files[0].stat().st_mode & 0o777 == 0o600
     restored = tmp_path / "snapshot.db"
     restored.write_bytes(gzip.decompress(files[0].read_bytes()))
@@ -245,7 +245,7 @@ def test_pre_migration_backup_keeps_previous_version(tmp_path):
     assert version == 1
     assert "approvals" not in {row[0] for row in schema}
     assert contents["facts"] == [(1, "Saved fact", 150)]
-    assert migrations.inspect_version(path) == 2
+    assert migrations.inspect_version(path) == 3
 
 
 def test_failed_pre_migration_backup_stops_upgrade(tmp_path, monkeypatch):
@@ -269,7 +269,7 @@ def test_failed_pre_migration_backup_stops_upgrade(tmp_path, monkeypatch):
 def test_in_memory_database_migrates_without_wal():
     memory = Memory(":memory:")
     try:
-        assert memory.schema_version == 2
+        assert memory.schema_version == 3
         assert memory._all("PRAGMA journal_mode")[0][0] == "memory"
     finally:
         memory.close()
@@ -301,7 +301,7 @@ def test_migrate_check_does_not_create_or_upgrade_database(tmp_path, exists):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "Database version: 0; target: 2; upgrade pending" in result.stdout
+    assert "Database version: 0; target: 3; upgrade pending" in result.stdout
     if exists:
         assert database_state(path) == before
     else:

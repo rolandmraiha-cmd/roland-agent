@@ -5,9 +5,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from . import m0001_v1_baseline, m0002_v2_core
+from . import m0001_v1_baseline, m0002_v2_core, m0003_model_training
 
-MIGRATIONS = [(1, m0001_v1_baseline.apply), (2, m0002_v2_core.apply)]
+MIGRATIONS = [(1, m0001_v1_baseline.apply), (2, m0002_v2_core.apply), (3, m0003_model_training.apply)]
 
 
 def latest_version() -> int:
