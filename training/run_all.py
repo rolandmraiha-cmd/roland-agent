@@ -70,7 +70,17 @@ async def eval_model(model: Path, source: Path, *, identifier: str, dry_run=Fals
                 await asyncio.sleep(2)
             else:
                 raise ValueError("Model health deadline expired")
-        report = await evaluate(brain, load_cases(ROOT / "agent/eval/cases"), version_id=identifier)
+        try:
+            report = await evaluate(brain, load_cases(ROOT / "agent/eval/cases"), version_id=identifier)
+        except httpx.HTTPStatusError as error:
+            if dry_run:
+                # Only this public synthetic suite is logged, never private eval content.
+                await error.response.aread()
+                raise ValueError(
+                    f"Synthetic public evaluation rejected ({error.response.status_code}): "
+                    f"{error.response.text[:2000]}"
+                ) from error
+            raise
         if private:
             report["private_eval"] = await evaluate(brain, list(private), version_id=identifier)
         return report

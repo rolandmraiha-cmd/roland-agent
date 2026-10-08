@@ -88,7 +88,9 @@ def tiny_base(destination: Path) -> Path:
             num_hidden_layers=1,
             num_attention_heads=4,
             num_key_value_heads=4,
-            max_position_embeddings=512,
+            # The pinned server caps slots at this value, even with --ctx-size 4096.
+            # Public eval cases plus output must fit the same context as production.
+            max_position_embeddings=4096,
             bos_token_id=tokenizer.bos_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
