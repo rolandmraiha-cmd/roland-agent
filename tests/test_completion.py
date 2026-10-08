@@ -191,6 +191,26 @@ async def _wrong_file_result(ctx, name, args):
     return "Saved wrong.txt (1 characters)."
 
 
+@pytest.mark.asyncio
+async def test_save_check_does_not_retry_after_other_tools_or_when_tools_are_disabled(make_agent, monkeypatch):
+    calls = []
+
+    async def result(ctx, name, args):
+        calls.append(name)
+        return "The shell command completed."
+
+    monkeypatch.setattr(core, "call_tool", result)
+    agent = make_agent([("", [call("run_shell", '{"command":"some approved action"}')]), "saved"], allow_shell=True)
+    events = await collect(agent.chat(agent.memory.new_chat(), "Use the shell to create requested.txt."))
+    assert calls == ["run_shell"]
+    assert len(agent.brain.seen) == 2 and events[-1]["reply"] == UNSAVED_REPLY
+
+    agent = make_agent(["saved", "saved"], max_tool_steps=0)
+    events = await collect(agent.chat(agent.memory.new_chat(), "Save a file named requested.txt."))
+    assert len(agent.brain.seen) == 1 and agent.brain.tools[0] == []
+    assert calls == ["run_shell"] and events[-1]["reply"] == UNSAVED_REPLY
+
+
 @pytest.mark.parametrize("prompt,answer", [
     ("What is 2 + 2?", "2 + 2 equals 4."),
     ("Say the word saved.", "saved"),
@@ -258,7 +278,7 @@ async def test_save_repair_still_requires_approval_to_overwrite_a_user_file(make
         collect(agent.chat(chat, "Save a file named requested.txt containing NEW.")), reject_pending(),
     )
     assert target.read_text() == "USER CONTENT"
-    assert len(agent.memory.approvals()) == 1
-    assert agent.memory.approvals()[0]["status"] == "rejected"
+    assert agent.memory.approvals(status="pending") == []
+    assert len(agent.memory.approvals(status="rejected")) == 1
     assert events[-1]["reply"] == UNSAVED_REPLY
     assert not any(event["type"] == "text" for event in events)

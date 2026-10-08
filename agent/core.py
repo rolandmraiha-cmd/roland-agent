@@ -307,7 +307,7 @@ class Agent:
         request = next((str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), "")
         check_save = file_context(request)
         written_paths: set[str] = set()
-        write_attempted = False
+        tool_attempted = False
         save_repair_attempted = False
 
         def finalize(text: str) -> str:
@@ -377,7 +377,7 @@ class Agent:
             if not step.tool_calls:
                 candidate = reply + step.text
                 if unverified_save_claim(candidate, request, written_paths):
-                    if not write_attempted and not save_repair_attempted and step_index < self.config.max_tool_steps:
+                    if not tool_attempted and not save_repair_attempted and step_index < self.config.max_tool_steps:
                         save_repair_attempted = True
                         messages.append({"role": "user", "content": (
                             "No successful file write has happened in this run. If Roland asked to "
@@ -435,6 +435,7 @@ class Agent:
             )
             asked_again_after_reject = False
             for call in step.tool_calls:
+                tool_attempted = True
                 name = tool_name(call.name)
                 try:
                     args = call.args()
@@ -459,8 +460,6 @@ class Agent:
                         if name not in _READ_TOOLS:
                             # Actions, shell commands and browser_wait can change what a read sees.
                             read_results.clear()
-                        if name == "write_file":
-                            write_attempted = True
                         tool_name_ = name
                         tool_args_ = args
 
