@@ -50,6 +50,16 @@ def test_tiny_context_fits_public_eval_and_output(tokenizer):
     assert max(lengths) + 256 < context.max_position_embeddings
 
 
+def test_tiny_tokenizer_preserves_unseen_characters(tokenizer):
+    assert all(
+        tokenizer.convert_tokens_to_ids(f"<0x{value:02X}>") != tokenizer.unk_token_id for value in range(256)
+    )
+    text = "Ω🙂漢字"
+    tokens = tokenizer.encode(text, add_special_tokens=False)
+    assert tokenizer.unk_token_id not in tokens
+    assert tokenizer.decode(tokens, skip_special_tokens=True) == text
+
+
 def test_private_context_with_different_target_is_never_trained(tmp_path, tokenizer):
     dataset = tmp_path / "dataset"
     synthetic_dataset(dataset)

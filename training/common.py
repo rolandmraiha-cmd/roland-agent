@@ -67,9 +67,11 @@ def tiny_base(destination: Path) -> Path:
     spm.SentencePieceTrainer.train(
         input=str(corpus),
         model_prefix=str(destination / "tokenizer"),
-        vocab_size=320,
+        # Keep the original 320 learned/special pieces plus all 256 byte tokens.
+        vocab_size=576,
         model_type="bpe",
-        byte_fallback=False,
+        # llama.cpp's SPM tokenizer needs bytes for newlines and unseen characters.
+        byte_fallback=True,
         character_coverage=1.0,
         shuffle_input_sentence=False,
         num_threads=1,
