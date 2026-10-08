@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .base import Step, ToolCall
+
+# Shown after a reply that reached MODEL_MAX_NEW_TOKENS. Asking the model to start again only
+# produces another reply of the same length, and each attempt takes minutes on a CPU.
+CUT_OFF_NOTE = '\n\n[The answer was cut off at the length limit. Send "continue" for the rest.]'
+
+# A reply action as the schema makes the model write it: "action" first.
+_REPLY_START = re.compile(r'\s*\{\s*"action"\s*:\s*"reply"\s*,')
 
 ESCAPE_MAP = {
     '"': '"',
@@ -214,6 +222,35 @@ def parse_action(
         text="",
         tool_calls=[ToolCall(id=f"call_{call_index}", name=name, arguments=json.dumps(args))],
     )
+
+
+def unwrap_reply_text(text: str) -> str:
+    """The model sometimes writes a whole reply action as its reply text. Keep only the text."""
+    if not _REPLY_START.match(text):
+        return text
+    inner = TextFieldStreamer()
+    inner.feed(text)
+    return inner.emitted if inner.emitted.strip() else text
+
+
+def finish_step(raw: str, schema: dict, offered: set[str], *, truncated: bool, streamed: str) -> Step:
+    """Turn a provider's finished output into a Step.
+
+    `streamed` is the reply text already shown to Roland while the model wrote it. A reply cut
+    off at the length limit is kept, with a note, instead of being thrown away and asked for
+    again. A cut-off tool call is still an error, because its arguments are incomplete.
+    """
+    if truncated:
+        if _REPLY_START.match(strip_fences(raw)) and streamed.strip():
+            return Step(text=unwrap_reply_text(streamed).rstrip() + CUT_OFF_NOTE)
+        return parse_action(raw, schema, offered, truncated=True)
+    step = parse_action(raw, schema, offered)
+    if step.parse_error is None and not step.tool_calls:
+        if streamed:
+            # Prefer streamed text if parse produced the same reply.
+            step.text = streamed
+        step.text = unwrap_reply_text(step.text)
+    return step
 
 
 class TextFieldStreamer:

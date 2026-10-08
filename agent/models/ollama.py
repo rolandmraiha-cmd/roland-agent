@@ -15,7 +15,7 @@ import httpx
 from .action import build_action_schema
 from .base import Step
 from .endpoint_guard import DEFAULT_MODEL_HOSTS, LocalModelTransport, validate_endpoint
-from .parse import TextFieldStreamer, parse_action
+from .parse import TextFieldStreamer, finish_step
 
 
 def _root(base_url: str) -> str:
@@ -166,10 +166,7 @@ class OllamaBrain:
                 yield text
 
         raw = "".join(raw_parts)
-        step = parse_action(raw, schema, offered, truncated=truncated)
-        if step.parse_error is None and not step.tool_calls and streamer.emitted:
-            step.text = streamer.emitted
-        yield step
+        yield finish_step(raw, schema, offered, truncated=truncated, streamed=streamer.emitted)
 
 
 class _FormatRejected(Exception):

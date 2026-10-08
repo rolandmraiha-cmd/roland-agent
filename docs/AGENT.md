@@ -196,6 +196,7 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 ### Gotchas
 
 - `MODEL_CTX=4096` with `MODEL_MEM_LIMIT=3840m` OOM-killed the model on Contabo, and so did 3072 on 2026-10-08. The cause was llama-server's RAM prompt cache (`--cache-ram`, default 8192 MiB), not the context: `run.sh` passes `--cache-ram 0`; keep it there.
+- A reply longer than `MODEL_MAX_NEW_TOKENS` (768, about 500 words) is kept as far as it got, with a note to send "continue" (`finish_step` in `agent/models/parse.py`). Only a cut-off tool call is an invalid action that the loop asks for again. Before this change, every long answer was thrown away and regenerated up to `MODEL_PARSE_RETRIES` times, at 3–4 minutes per attempt on Contabo.
 - Docker clears `OOMKilled` when a container restarts, and it never shows a killed child process (llama-server under `run.sh`, a Chromium renderer). Check `RestartCount`, the cgroup's `oom_kill` counter or `journalctl -k`; `make memory-report` does the first two.
 - sandboxd leftover reap must run only inside its container; on a host it kills the machine.
 - A chat "yes" must never bypass the approval UI.

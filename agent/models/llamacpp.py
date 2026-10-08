@@ -13,7 +13,7 @@ import httpx
 from .action import build_action_schema
 from .base import Step
 from .endpoint_guard import DEFAULT_MODEL_HOSTS, LocalModelTransport, validate_endpoint
-from .parse import TextFieldStreamer, parse_action
+from .parse import TextFieldStreamer, finish_step
 
 
 def _roots(base_url: str) -> tuple[str, str]:
@@ -348,11 +348,7 @@ class LlamaCppBrain:
                     yield text
 
         raw = "".join(raw_parts)
-        step = parse_action(raw, schema, offered, truncated=truncated)
-        if step.parse_error is None and not step.tool_calls and streamer.emitted:
-            # Prefer streamed text if parse produced the same reply.
-            step.text = streamer.emitted
-        yield step
+        yield finish_step(raw, schema, offered, truncated=truncated, streamed=streamer.emitted)
 
 
 class _FormatRejected(Exception):
