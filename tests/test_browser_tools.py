@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import struct
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -21,6 +22,7 @@ from agent.tools_browser import (
     BROWSER_TOOLS,
     NOT_CHECKED,
     SHORT_VIEW_NOTE,
+    _snapshot_limit,
     browser_click,
     browser_open,
     browser_upload,
@@ -700,7 +702,7 @@ async def test_snapshot_never_shows_sensitive_values(tmp_path, fake):
 
 
 def pizza_form() -> dict:
-    """The httpbin.org order form as the Contabo retest saw it: 13 controls, submit last."""
+    """A simplified order form: 13 controls with the submit button last."""
     names = ["Customer name:", "Telephone:", "E-mail address:", "Small", "Medium", "Large",
              "Bacon", "Extra Cheese", "Onion", "Mushroom", "Preferred delivery time:",
              "Delivery instructions:", "Submit order"]
@@ -766,20 +768,110 @@ def test_full_size_snapshot_never_trades_page_text_for_a_short_list():
     assert "--- page text ---\nThe article says the answer is 42." in out
 
 
+def live_pizza_form() -> dict:
+    """httpbin.org/forms/post as browserd reported it on Contabo (8 Oct 2026). The four
+    topping tick boxes come back as sensitive: their field name, "topping", contains "pin"."""
+    fields = [("input", "text", "Customer name:"), ("input", "tel", "Telephone:"),
+              ("input", "email", "E-mail address:"), ("input", "radio", "Small"),
+              ("input", "radio", "Medium"), ("input", "radio", "Large"),
+              ("input", "checkbox", "Bacon"), ("input", "checkbox", "Extra Cheese"),
+              ("input", "checkbox", "Onion"), ("input", "checkbox", "Mushroom"),
+              ("input", "time", "Preferred delivery time:"), ("textarea", "", "Delivery instructions:"),
+              ("button", "submit", "Submit order")]
+    controls = [
+        {"ref": f"e{i}", "tag": tag, "type": kind, "name": name, "in_form": True,
+         "form_method": "post", "form_action": "https://httpbin.org/post",
+         "sensitive": kind == "checkbox", "depth": 1}
+        for i, (tag, kind, name) in enumerate(fields, 1)
+    ]
+    text = ("Customer name:\n\nTelephone:\n\nE-mail address:\n\nPizza Size\n\nSmall\n\nMedium\n\nLarge\n\n"
+            "Pizza Toppings\n\nBacon\n\nExtra Cheese\n\nOnion\n\nMushroom\n\nPreferred delivery time:\n\n"
+            "Delivery instructions:\n\nSubmit order")
+    return {"url": "https://httpbin.org/forms/post", "title": "", "text": text,
+            "elements": [{"role": "form", "name": "", "depth": 0}, *controls]}
+
+
+def test_a_500_character_snapshot_hid_the_live_forms_submit_button():
+    """What the model was shown on Contabo after asking for max_chars=200, then 500 at the
+    least: 8 of 13 controls. It asked to click "Telephone:". Even the short list needs more
+    than 500 characters here, because of the four "(sensitive, value hidden)" notes."""
+    for short in (False, True):
+        out = format_snapshot(live_pizza_form(), 500, short=short)
+        assert len(out) <= 500 and SHORT_VIEW_NOTE not in out
+        assert '[e8] checkbox "Extra Cheese" (sensitive, value hidden)' in out
+        assert "[e9] " not in out and "Submit order" not in out.split("--- page text ---")[0]
+        assert "(5 more elements not shown; call browser_snapshot with start=9 to see them)" in out
+
+
+@pytest.mark.asyncio
+async def test_a_tiny_snapshot_request_is_raised_until_a_small_form_fits(tmp_path):
+    fake, sizes = FakeBrowserd(), []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        sizes.append(json.loads(request.content)["max_chars"])
+        return httpx.Response(200, json=live_pizza_form())
+
+    fake.handle = handle  # type: ignore[method-assign]
+    ctx = tool_ctx(tmp_path, fake)
+    ctx.config = make_config(tmp_path, model_tool_output_chars=3000)  # as on Contabo
+    for asked in (1, 200, 500, 1499):
+        out = await call_tool(ctx, "browser_snapshot", {"max_chars": asked})
+        assert sizes[-1] == 1500
+        assert len(out) <= 1500 and "more elements not shown" not in out
+        assert all(f"[e{i}] " in out for i in range(1, 14))
+        assert '[e13] button "Submit order" (submits form POST httpbin.org/post)' in out
+        assert "--- page text ---" in out
+    await call_tool(ctx, "browser_snapshot", {"max_chars": 2000})
+    assert sizes[-1] == 2000
+    for args in ({}, {"max_chars": 0}, {"max_chars": 20000}):
+        await call_tool(ctx, "browser_snapshot", args)
+        assert sizes[-1] == 2850
+
+
+def test_snapshot_size_limits():
+    def limit(cap, asked=None):
+        ctx = SimpleNamespace(config=SimpleNamespace(model_tool_output_chars=cap)) if cap else SimpleNamespace()
+        return _snapshot_limit(ctx, {} if asked is None else {"max_chars": asked})
+
+    # No MODEL_TOOL_OUTPUT_CHARS: the spec's default and maximum, and the raised minimum.
+    assert [limit(None, n) for n in (None, 200, 1500, 2000, 99999, "x")] == [4000, 1500, 1500, 2000, 20000, 4000]
+    # The loop cuts tool output to the cap, so the full size is the cap less the wrapper.
+    assert [limit(3000, n) for n in (None, 200, 2000, 20000)] == [2850, 1500, 2000, 2850]
+    # A full size below the minimum wins: a snapshot never outgrows what the loop keeps.
+    assert [limit(1500, n) for n in (None, 200, 20000)] == [1350, 1350, 1350]
+    assert [limit(400, n) for n in (None, 200, 20000)] == [500, 500, 500]
+
+
 @pytest.mark.asyncio
 async def test_only_a_reduced_snapshot_request_gets_the_short_view(tmp_path):
-    ctx = tool_ctx(tmp_path, answering(pizza_form()))
+    """31 controls with the submit button last: too many rich lines for a reduced snapshot,
+    few enough for the short list."""
+    fields = [{"ref": f"e{i}", "tag": "input", "type": "text", "name": f"Answer to question {i}",
+               "in_form": True, "form_method": "post", "form_action": f"{SITE}/survey",
+               "value": "Codex M6 Retest" if i == 1 else ""} for i in range(1, 31)]
+    submit = {"ref": "e31", "tag": "button", "type": "submit", "name": "Send answers", "in_form": True,
+              "form_method": "post", "form_action": f"{SITE}/survey"}
+    survey = {"url": f"{SITE}/survey", "title": "Survey", "text": "Thirty questions. " * 40,
+              "elements": [*fields, submit]}
+    ctx = tool_ctx(tmp_path, answering(survey))
     small = await call_tool(ctx, "browser_snapshot", {"max_chars": 500})
-    assert small.endswith(SHORT_VIEW_NOTE) and '[e13] button "Submit order" (submits)' in small
+    assert len(small) <= 1500 and SHORT_VIEW_NOTE in small
+    assert '[e31] button "Send answers" (submits)' in small
+    assert all(f"[e{i}] " in small for i in range(1, 32))
     # The default size and a later piece are never shortened.
     for args in ({}, {"max_chars": 4000}, {"max_chars": 20000}, {"max_chars": 500, "start": 5}):
         assert SHORT_VIEW_NOTE not in await call_tool(ctx, "browser_snapshot", args)
     full = await call_tool(ctx, "browser_snapshot", {})
     assert 'value="Codex M6 Retest"' in full and "--- page text ---" in full
+    assert '[e31] button "Send answers" (submits form POST shop.example/survey)' in full
     # The full size follows MODEL_TOOL_OUTPUT_CHARS, so "reduced" does too.
-    ctx.config = make_config(tmp_path, model_tool_output_chars=1000)
+    ctx.config = make_config(tmp_path, model_tool_output_chars=3000)
     assert small == await call_tool(ctx, "browser_snapshot", {"max_chars": 500})
-    assert SHORT_VIEW_NOTE not in await call_tool(ctx, "browser_snapshot", {"max_chars": 4000})
+    # When the full size is itself small, that is the full view: piece by piece, not short.
+    ctx.config = make_config(tmp_path, model_tool_output_chars=1000)
+    for args in ({}, {"max_chars": 500}, {"max_chars": 4000}):
+        out = await call_tool(ctx, "browser_snapshot", args)
+        assert SHORT_VIEW_NOTE not in out and "more elements not shown" in out
 
 
 def test_snapshot_keeps_room_for_elements_and_says_what_was_cut():

@@ -30,7 +30,11 @@ SELECT_MAX_VALUES = 20
 SELECT_VALUE_MAX = 200
 SNAPSHOT_DEFAULT = 4000     # characters of page the model gets by default (§6.5)
 SNAPSHOT_MAX = 20000
-SNAPSHOT_MIN = 500
+# A smaller max_chars is raised to this (or to the full size, when that is smaller). Seen on
+# Contabo: the model asked for 200 characters, got the first 8 of a form's 13 controls and
+# asked to click a text field instead of the submit button it had not been shown.
+SNAPSHOT_MIN = 1500
+SNAPSHOT_FLOOR = 500        # the least a snapshot gets, however small MODEL_TOOL_OUTPUT_CHARS is
 WAIT_MAX_S = 10
 UPLOAD_MAX_BYTES = 25 * 1024 * 1024  # the file is copied through core's memory
 MAX_LISTED = 50
@@ -690,13 +694,13 @@ def _snapshot_limit(ctx, args: dict) -> int:
         wanted = int(args.get("max_chars") or SNAPSHOT_DEFAULT)
     except (TypeError, ValueError):
         wanted = SNAPSHOT_DEFAULT
-    wanted = max(SNAPSHOT_MIN, min(wanted, SNAPSHOT_MAX))
     # The loop cuts every tool output to MODEL_TOOL_OUTPUT_CHARS; plan for that, so the
     # element list is cut cleanly instead of losing its tail.
+    full = SNAPSHOT_MAX
     cap = getattr(getattr(ctx, "config", None), "model_tool_output_chars", None)
     if isinstance(cap, int) and cap > 0:
-        wanted = max(SNAPSHOT_MIN, min(wanted, cap - 150))
-    return wanted
+        full = max(SNAPSHOT_FLOOR, min(full, cap - 150))
+    return max(min(SNAPSHOT_MIN, full), min(wanted, full))
 
 
 async def _share_file(ctx, path: str, size: int, note: str) -> None:
