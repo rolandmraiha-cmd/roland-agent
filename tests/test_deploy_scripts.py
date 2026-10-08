@@ -409,7 +409,9 @@ while True:
     time.sleep(60)
 ''']
                     prefix = action[:action.index("curl")]
-                    status = subprocess.call(prefix + child)
+                    wait_status = subprocess.call(prefix + child)
+                    # Docker exec reports 128 + signal; Python wait uses -signal.
+                    status = 128 - wait_status if wait_status < 0 else wait_status
                     (root / "probe-exited").write_text(str(status))
                     answer(code=status)
                 answer(code=state.get("sandbox_egress_rc", 0) if any("example.com" in arg for arg in action)
