@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A4.4/A6.4: lateral targets must be blocked from the sandbox and browser.
+# A4.4/A6.4/A7.3: lateral targets must be blocked from the sandbox and browser.
 # Usage:
 #   isolation.sh            # CI / local compose stack (no host firewall checks)
 #   isolation.sh --server   # Contabo after firewall (§14.8): also blocks SSH and checks egress
@@ -153,8 +153,15 @@ if is_running browser; then
 else
     printf 'SKIP sandbox to browserd: browser service is not running\n'
 fi
-# Nothing listens on the screen address until M7; this probe starts to mean something then.
+# The screen server (M7) listens here while the screen is switched on. The sandbox is on
+# neither screen network, so it must not get to it or to the relay in front of it.
 must_fail "curl x11vnc" curl -fsS --connect-timeout 3 http://10.77.5.40:5900
+if is_running novnc; then
+    must_fail "curl noVNC from the sandbox" curl -fsS --connect-timeout 3 http://10.77.2.30:6080/
+    must_fail "curl noVNC vnc address from the sandbox" curl -fsS --connect-timeout 3 http://10.77.5.30:6080/
+else
+    printf 'SKIP sandbox to noVNC: novnc service is not running\n'
+fi
 
 if [[ $mode == server ]]; then
     must_fail "curl link-local metadata" curl -fsS --connect-timeout 3 http://169.254.169.254/
@@ -171,6 +178,12 @@ if is_running browser; then
     browser_must_fail "browser to sandboxd" 10.77.3.20 7000
     if target_up model; then
         browser_must_fail "browser to model" 10.77.6.60 8080
+    fi
+    # The browser shares the vnc network with the relay, but connections only go one way:
+    # the relay listens on its other address only, and the firewall drops browser -> relay.
+    if is_running novnc; then
+        browser_must_fail "browser to noVNC on the vnc network" 10.77.5.30 6080
+        browser_must_fail "browser to noVNC on the screen network" 10.77.2.30 6080
     fi
     if [[ $mode == server ]]; then
         browser_must_fail "browser to link-local metadata" 169.254.169.254 80

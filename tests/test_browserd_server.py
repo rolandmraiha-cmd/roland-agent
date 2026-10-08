@@ -246,7 +246,7 @@ async def test_every_action_is_locked_while_roland_has_the_browser():
         assert fake.calls == [("user_mode", True)]
         assert (await http.get("/v1/status")).json()["mode"] == "user"
         assert (await http.get("/healthz")).status_code == 200
-        assert (await http.post("/v1/vnc/disconnect")).json() == {"ok": True}
+        assert (await http.post("/v1/vnc/disconnect")).json() == {"ok": True, "vnc": False}
         assert (await http.post("/v1/user-mode", json={"on": False})).json() == {"mode": "agent"}
         for method, path, body in ACTIONS:
             assert (await send(http, method, path, body)).status_code == 200, path
@@ -766,9 +766,12 @@ def test_processes_that_die_are_started_again_more_slowly_each_time():
     assert launcher.MAX_BACKOFF_S == 30
 
 
-def test_the_screen_takes_no_network_connections_and_m7_adds_nothing_yet():
+def test_the_virtual_screen_takes_no_network_connections(monkeypatch):
     child = launcher.xvfb_child(":99", 1280, 800)
     assert child.argv[:5] == ["Xvfb", ":99", "-screen", "0", "1280x800x24"]
     assert child.argv[child.argv.index("-nolisten") + 1] == "tcp"
-    assert launcher.extra_children(":99") == []
     assert launcher.screen_socket(":99") == Path("/tmp/.X11-unix/X99")
+    # Without SCREEN_ENABLED there is no screen server next to it (tests/test_browserd_vnc.py
+    # covers the case where there is).
+    monkeypatch.delenv("SCREEN_ENABLED", raising=False)
+    assert launcher.extra_children(":99") == []

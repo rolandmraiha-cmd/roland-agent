@@ -182,7 +182,39 @@ else
     result SKIP "browser healthcheck (browser not running)"
 fi
 
-# 10. Phone/manual checks are human-only
+# 10. Screen (M7). Without a login nobody gets to the screen routes, whether the screen is
+# on (401) or off (403). Anything else here (a page, a websocket, an error from the relay)
+# means a request got past core.
+if [[ -n $agent_host ]] && command -v curl >/dev/null 2>&1; then
+    screen_codes=""
+    for screen_path in /screen/novnc/core/rfb.js /screen/websockify; do
+        code=$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 "https://${agent_host}${screen_path}" 2>/dev/null || true)
+        screen_codes+="${code:-none} "
+    done
+    case $screen_codes in
+        "401 401 " | "403 403 ") result PASS "screen routes refuse a visitor without a login (${screen_codes% })" ;;
+        *) result FAIL "screen routes answered a visitor without a login: ${screen_codes% } (expected 401 or 403)" ;;
+    esac
+else
+    result SKIP "screen routes check (no AGENT_HOST or curl)"
+fi
+# The screen server itself, only when the optional relay is running and the screen is on.
+if compose ps --status running --services 2>/dev/null | grep -qx novnc; then
+    screen_on=$(compose exec -T browser printenv SCREEN_ENABLED 2>/dev/null || true)
+    if [[ ${screen_on,,} == true ]]; then
+        if compose exec -T browser python -m browserd healthcheck screen >/dev/null 2>&1; then
+            result PASS "screen server (x11vnc) listening in the browser container"
+        else
+            result FAIL "screen server (x11vnc) is not listening; see: docker compose logs browser"
+        fi
+    else
+        result SKIP "screen server (novnc runs, but SCREEN_ENABLED is not true for the browser)"
+    fi
+else
+    result SKIP "screen server (novnc not running)"
+fi
+
+# 11. Phone/manual checks are human-only
 result SKIP "manual phone login / chat / approval (human)"
 
 printf '\nverify: %s pass / %s fail / %s skip\n' "$pass" "$fail" "$skip"

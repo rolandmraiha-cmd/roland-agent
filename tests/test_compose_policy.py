@@ -1,4 +1,5 @@
-"""Container policy and resolved-host checks: caddy, core, model, sandbox and (M6) browser."""
+"""Container policy and resolved-host checks: caddy, core, model, sandbox, (M6) browser and
+(M7) the screen relay, novnc."""
 
 import copy
 import hashlib
@@ -45,7 +46,7 @@ def resolve(folder: Path, extra_env: str = "", files: tuple[str, ...] = ("docker
             for key, value in os.environ.items()
             if key
             not in {"AGENT_DOMAIN", "AGENT_FALLBACK_HOST", "CADDY_TLS", "COMPOSE_PROFILES", "COMPOSE_FILE"}
-            and not key.startswith("BROWSER_")
+            and not key.startswith(("BROWSER_", "SCREEN_"))
         },
     )
     return json.loads(result.stdout)
@@ -64,15 +65,24 @@ def resolved_with_browser(tmp_path_factory):
     )
 
 
+SCREEN_ON = "\nCOMPOSE_PROFILES=browser,screen\nBROWSER_ENABLED=true\nSCREEN_ENABLED=true\n"
+
+
+@pytest.fixture(scope="module")
+def resolved_with_screen(tmp_path_factory):
+    """The stack once Roland also switches the screen on (M7)."""
+    return resolve(tmp_path_factory.mktemp("screen-compose"), SCREEN_ON)
+
+
 def test_only_caddy_publishes_expected_ports():
-    assert set(COMPOSE["services"]) == {"core", "caddy", "model", "sandbox", "browser"}
+    assert set(COMPOSE["services"]) == {"core", "caddy", "model", "sandbox", "browser", "novnc"}
     assert COMPOSE["services"]["caddy"]["ports"] == ["80:80/tcp", "443:443/tcp", "443:443/udp"]
-    for name in ("core", "model", "sandbox", "browser"):
+    for name in ("core", "model", "sandbox", "browser", "novnc"):
         assert "ports" not in COMPOSE["services"][name] and "expose" not in COMPOSE["services"][name]
     assert COMPOSE["name"] == "roland-agent"
 
 
-@pytest.mark.parametrize("name", ["core", "caddy", "model", "sandbox"])
+@pytest.mark.parametrize("name", ["core", "caddy", "model", "sandbox", "novnc"])
 def test_every_service_has_security_and_resource_limits(name):
     service = COMPOSE["services"][name]
     assert service["user"] == "1000:1000"
@@ -126,15 +136,18 @@ def test_reserved_internal_bridges_and_current_egress_members():
 def test_unimplemented_features_cannot_be_enabled_by_env_file():
     core = COMPOSE["services"]["core"]
     env = core["environment"]
-    # Shell is on via sandbox in M4. The browser is off unless .env turns it on (M6);
-    # screen and training can't be turned on from .env at all.
+    # Shell is on via sandbox in M4. The browser (M6) and the screen (M7) are off unless
+    # .env turns them on; training can't be turned on from .env at all.
     assert env["ALLOW_SHELL"] == "true"
     assert env["SHELL_BACKEND"] == "sandbox"
     assert env["BROWSER_ENABLED"] == "${BROWSER_ENABLED:-false}"
     assert env["BROWSER_URL"] == "http://10.77.4.40:7100"
     assert env["BROWSER_API_TOKEN_FILE"] == "/run/secrets/browser_api_token"
+    assert env["SCREEN_ENABLED"] == "${SCREEN_ENABLED:-false}"
+    assert env["VNC_PASSWORD_FILE"] == "/run/secrets/vnc_password"
+    assert env["VNC_VIEW_PASSWORD_FILE"] == "/run/secrets/vnc_view_password"
+    assert not {"VNC_PASSWORD", "VNC_VIEW_PASSWORD"} & set(env)  # files only, never values
     for flag in (
-        "SCREEN_ENABLED",
         "TRAINING_CAPTURE",
         "TRAINING_LOOP_ENABLED",
     ):
@@ -142,7 +155,14 @@ def test_unimplemented_features_cannot_be_enabled_by_env_file():
     assert env["HOST"] == "10.77.1.10"
     assert env["AGENT_ENV"] == "production" and env["COOKIE_SECURE"] == "true"
     assert env["CORE_ALLOWED_PEERS"] == env["FORWARDED_ALLOW_IPS"] == "10.77.1.2"
-    assert core["secrets"] == ["model_server_token", "agent_password_hash", "sandbox_api_token", "browser_api_token"]
+    assert core["secrets"] == [
+        "model_server_token", "agent_password_hash", "sandbox_api_token", "browser_api_token",
+        "vnc_password", "vnc_view_password",
+    ]
+    assert set(COMPOSE["secrets"]) == {
+        "model_server_token", "agent_password_hash", "sandbox_api_token", "browser_api_token",
+        "vnc_password", "vnc_view_password",
+    }
     assert "env_file" not in COMPOSE["services"]["caddy"]
     assert core["env_file"] == ".env"
     assert env["AGENT_PASSWORD_HASH_FILE"] == "/run/secrets/agent_password_hash"
@@ -220,9 +240,11 @@ def test_resolved_default_hostname_and_resource_budget(resolved):
     assert services["core"]["environment"]["AGENT_HOST"] == "37-60-226-214.sslip.io"
     assert services["caddy"]["environment"]["AGENT_HOST"] == "37-60-226-214.sslip.io"
     assert preflight.configuration_errors(resolved) == []
-    # .env.example leaves the browser off: the service isn't part of the stack at all.
+    # .env.example leaves the browser and the screen off: those services aren't part of the
+    # stack at all.
     assert set(services) == {"caddy", "core", "model", "sandbox"}
     assert services["core"]["environment"]["BROWSER_ENABLED"] == "false"
+    assert services["core"]["environment"]["SCREEN_ENABLED"] == "false"
     assert sum(int(service["mem_limit"]) for service in services.values()) == 5600 * 1024 * 1024
 
 
@@ -377,7 +399,10 @@ def test_path_errors_requires_sandbox_api_token(tmp_path):
         # Core mounts the browser token even while the browser is off, so a deploy without
         # the file must stop at preflight, not when Compose recreates core.
         assert any("browser_api_token" in error for error in errors)
-        for name in ("sandbox_api_token", "browser_api_token"):
+        # The same goes for the two screen passwords (M7), and the message says how to get them.
+        for name in ("vnc_password", "vnc_view_password"):
+            assert any(name in error and "make secrets" in error for error in errors)
+        for name in ("sandbox_api_token", "browser_api_token", "vnc_password", "vnc_view_password"):
             assert preflight.path_errors(config) != []
             token = secrets / name
             token.write_text("synthetic-fixture")
@@ -431,8 +456,9 @@ def test_browser_service_is_off_by_default_and_hardened():
     assert "unconfined" not in json.dumps(browser) and "docker.sock" not in json.dumps(browser)
     assert browser["networks"] == {
         "browser_ctl": {"ipv4_address": "10.77.4.40"},
+        "vnc": {"ipv4_address": "10.77.5.40"},  # x11vnc listens here, only while the screen is on
         "browser_egress": {"ipv4_address": "10.77.12.40", "gw_priority": 100},
-    }  # the screen network joins in M7
+    }
     env = browser["environment"]
     assert env["BROWSERD_HOST"] == "10.77.4.40" and env["BROWSERD_PORT"] == "7100"
     assert env["BROWSERD_ALLOWED_PEERS"] == "10.77.4.10"
@@ -442,8 +468,14 @@ def test_browser_service_is_off_by_default_and_hardened():
     assert env["BROWSER_BLOCK_BACKGROUND_POSTS"] == "${BROWSER_BLOCK_BACKGROUND_POSTS:-false}"
     assert env["BROWSER_MAX_DOWNLOAD_MB"] == "${BROWSER_MAX_DOWNLOAD_MB:-200}"
     assert env["DISPLAY"] == ":99" and env["HOME"] == "/tmp/home"
-    assert "BROWSER_ALLOW_PRIVATE_HOSTS" not in env and not any(key.startswith("VNC") for key in env)
-    assert browser["secrets"] == ["browser_api_token"]
+    assert "BROWSER_ALLOW_PRIVATE_HOSTS" not in env
+    # The screen server (M7): off unless .env says so, on the vnc network only, noVNC only.
+    assert env["SCREEN_ENABLED"] == "${SCREEN_ENABLED:-false}"
+    assert env["VNC_LISTEN"] == "10.77.5.40" and env["VNC_ALLOWED_PEERS"] == "10.77.5.30"
+    assert env["VNC_PASSWORD_FILE"] == "/run/secrets/vnc_password"
+    assert env["VNC_VIEW_PASSWORD_FILE"] == "/run/secrets/vnc_view_password"
+    assert not {"VNC_PASSWORD", "VNC_VIEW_PASSWORD"} & set(env)
+    assert browser["secrets"] == ["browser_api_token", "vnc_password", "vnc_view_password"]
     assert browser["healthcheck"]["test"] == ["CMD", "python", "-m", "browserd", "healthcheck"]
     assert (browser["mem_limit"], browser["memswap_limit"], browser["shm_size"]) == ("1280m", "1280m", "320m")
     assert (browser["cpus"], browser["pids_limit"], browser["oom_score_adj"]) == (2.0, 512, 500)
@@ -474,11 +506,20 @@ def test_private_addresses_are_only_let_through_in_the_test_stack():
     assert "BROWSER_ALLOW_PRIVATE_HOSTS" not in production
     test_stack = yaml.safe_load((ROOT / "docker-compose.test.yml").read_text())
     browser = test_stack["services"]["browser"]
-    assert browser["environment"] == {"BROWSER_ALLOW_PRIVATE_HOSTS": "fixture-web", "BROWSER_MAX_DOWNLOAD_MB": "4"}
+    assert browser["environment"] == {
+        "BROWSER_ALLOW_PRIVATE_HOSTS": "fixture-web", "BROWSER_MAX_DOWNLOAD_MB": "4",
+        # The screen server runs in the test stack and also lets the tester in (see below).
+        "SCREEN_ENABLED": "true", "VNC_ALLOWED_PEERS": "10.77.5.30,10.77.5.31",
+    }
+    assert "VNC_ALLOWED_PEERS: 10.77.5.30\n" in production and "10.77.5.31" not in production
     assert browser["networks"] == {"fixtures": {"ipv4_address": "10.77.20.40"}}
     assert test_stack["networks"]["fixtures"]["internal"] is True
     tester = test_stack["services"]["tester"]
     assert tester["networks"]["browser_ctl"] == {"ipv4_address": "10.77.4.10"}  # stands in for core
+    # On the vnc network next to the real noVNC, never in its place, and not on the network
+    # Caddy uses to reach noVNC: the test that nothing gets to noVNC around Caddy relies on it.
+    assert tester["networks"]["vnc"] == {"ipv4_address": "10.77.5.31"} and "screen" not in tester["networks"]
+    assert "novnc" not in test_stack["services"]  # the production definition, unchanged
     assert tester["read_only"] is True and tester["cap_drop"] == ["ALL"]
 
 
@@ -500,7 +541,7 @@ def test_browser_image_is_pinned_and_runs_as_a_normal_user():
     assert "chown 1000:1000 /profile /files" in dockerfile and "chmod 0700 /profile" in dockerfile
     assert "/etc/opt/chrome_for_testing/policies/managed/" in dockerfile
     assert "COPY browserd ./browserd" in dockerfile and "COPY agent" not in dockerfile  # no core code in it
-    for word in ("remote-debugging", "curl ", "sudo", "ssh", "--no-sandbox", "novnc"):
+    for word in ("remote-debugging", "curl ", "sudo", "ssh", "--no-sandbox", "novnc", "websockify"):
         assert word not in dockerfile, word
     tester = (ROOT / "docker/tester/Dockerfile").read_text()
     assert re.search(r"^FROM python:3\.12-slim@sha256:[a-f0-9]{64}$", tester, re.M)
@@ -619,5 +660,255 @@ def test_preflight_refuses_a_loosened_browser_service(resolved_with_browser, cha
         del browser["mem_limit"]
     else:
         config["services"]["core"]["environment"]["BROWSER_URL"] = "http://browser.example:7100"
+    errors = preflight.configuration_errors(config)
+    assert errors and "synthetic-value-must-not-be-printed" not in " ".join(errors)
+
+
+# --- M7: the screen relay (novnc), the screen server's settings and the Caddy routes ---
+
+def test_novnc_service_is_off_by_default_and_holds_nothing():
+    novnc = COMPOSE["services"]["novnc"]
+    assert novnc["profiles"] == ["screen"]  # not started unless .env has the screen profile
+    assert novnc["user"] == "1000:1000" and novnc["read_only"] is True and novnc["cap_drop"] == ["ALL"]
+    assert novnc["security_opt"] == ["no-new-privileges:true"]
+    assert novnc["networks"] == {
+        "screen": {"ipv4_address": "10.77.2.30"},  # Caddy reaches it here, after asking core
+        "vnc": {"ipv4_address": "10.77.5.30"},     # it reaches x11vnc here
+    }
+    for name in ("screen", "vnc"):
+        assert COMPOSE["networks"][name]["internal"] is True
+    # A relay and nothing more: no secret, no settings, no volume, no command of its own.
+    assert not set(novnc) & {"secrets", "environment", "env_file", "volumes", "command", "entrypoint", "ports", "expose", "depends_on"}
+    assert novnc["tmpfs"] == ["/tmp:size=8m,mode=1777"]
+    assert (novnc["mem_limit"], novnc["memswap_limit"], novnc["cpus"], novnc["pids_limit"]) == ("64m", "64m", 0.25, 32)
+    assert novnc["healthcheck"]["test"][:3] == ["CMD", "python", "-c"] and "10.77.2.30" in novnc["healthcheck"]["test"][3]
+    assert novnc["build"] == {"context": ".", "dockerfile": "docker/novnc/Dockerfile"}
+    # Nobody else is on the vnc network, and only Caddy shares the screen network with it.
+    members = {
+        network: {name for name, service in COMPOSE["services"].items() if network in service.get("networks", {})}
+        for network in ("screen", "vnc")
+    }
+    assert members == {"screen": {"caddy", "novnc"}, "vnc": {"browser", "novnc"}}
+    # The screen passwords go to core and the browser, never to the relay or anything else.
+    holders = {name for name, service in COMPOSE["services"].items() if "vnc_password" in service.get("secrets", [])}
+    assert holders == {"core", "browser"}
+
+
+def test_novnc_image_is_pinned_down_to_the_release_tarball():
+    dockerfile = (ROOT / "docker/novnc/Dockerfile").read_text()
+    core_base = re.search(r"^FROM (python:3\.12-slim@sha256:[a-f0-9]{64})$", (ROOT / "Dockerfile").read_text(), re.M)
+    assert core_base and f"FROM {core_base.group(1)}\n" in dockerfile  # the same base as core
+    assert "pip install --no-cache-dir --require-hashes --no-deps -r requirements-novnc.lock" in dockerfile
+    lock = (ROOT / "requirements-novnc.lock").read_text()
+    packages = [line for line in lock.splitlines() if line and not line.startswith(("#", " "))]
+    assert packages == ["websockify==0.13.0 \\"]  # websockify alone, by design
+    assert len(re.findall(r"--hash=sha256:[a-f0-9]{64}", lock)) >= 1
+    assert "websockify==0.13.0" in (ROOT / "requirements-novnc.in").read_text()
+    # The noVNC release: fetched from GitHub by tag, refused unless its SHA-256 matches.
+    fetched = re.search(
+        r"RUN python /tmp/fetch\.py \\\n\s+https://github\.com/novnc/noVNC/archive/refs/tags/v(\d+\.\d+\.\d+)\.tar\.gz \\\n"
+        r"\s+([a-f0-9]{64}) \\\n\s+/opt/novnc", dockerfile,
+    )
+    assert fetched, "the noVNC tarball must be named by tag and pinned by SHA-256"
+    assert "ARG " not in dockerfile  # the pin can't be overridden from the build command
+    assert "USER 1000:1000" in dockerfile
+    command = re.search(r"^CMD (\[.*\])$", dockerfile, re.M)
+    assert command and json.loads(command.group(1)) == preflight.NOVNC_COMMAND
+    instructions = "\n".join(line for line in dockerfile.splitlines() if not line.lstrip().startswith("#"))
+    for word in ("--traffic", "--record", "--verbose", "--token", "--cert", "--web-auth", "--ssl", "curl ", "wget ", "apt-get"):
+        assert word not in instructions, word
+    for banned in ("--traffic", "--record", "--verbose", "-v"):
+        assert banned not in preflight.NOVNC_COMMAND
+
+
+def _fetch_module():
+    module_spec = importlib.util.spec_from_file_location("novnc_fetch", ROOT / "docker/novnc/fetch.py")
+    module = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(module)
+    return module
+
+
+def _release_tarball(members: dict, links: dict | None = None) -> bytes:
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        for name, target in (links or {}).items():
+            info = tarfile.TarInfo(name)
+            info.type = tarfile.SYMTYPE
+            info.linkname = target
+            archive.addfile(info)
+    return buffer.getvalue()
+
+
+def test_novnc_fetch_checks_the_hash_and_unpacks_only_the_library(tmp_path):
+    fetch = _fetch_module()
+    release = _release_tarball({
+        "noVNC-9.9.9/core/rfb.js": b"export default class RFB {}\n",
+        "noVNC-9.9.9/core/input/keysym.js": b"export default {};\n",
+        "noVNC-9.9.9/vendor/pako/lib/zlib/inflate.js": b"// pako\n",
+        "noVNC-9.9.9/LICENSE.txt": b"MPL 2.0\n",
+        "noVNC-9.9.9/docs/LICENSE.MPL-2.0": b"MPL 2.0 text\n",
+        "noVNC-9.9.9/docs/API.md": b"# API\n",
+        "noVNC-9.9.9/vnc.html": b"<html>takes ?password= from the address</html>",
+        "noVNC-9.9.9/app/ui.js": b"// the stand-alone app\n",
+        "noVNC-9.9.9/package.json": b"{}",
+        "noVNC-9.9.9/../outside.js": b"escape",
+        "/absolute.js": b"escape",
+    })
+    source = tmp_path / "release.tar.gz"
+    source.write_bytes(release)
+    digest = hashlib.sha256(release).hexdigest()
+    dest = tmp_path / "novnc"
+
+    # A wrong hash: nothing is unpacked at all.
+    with pytest.raises(SystemExit, match="SHA-256 mismatch"):
+        fetch.main([str(source), "0" * 64, str(dest)])
+    assert not dest.exists()
+    # Only https or a file on disk.
+    with pytest.raises(SystemExit, match="https"):
+        fetch.read_source("http://example.com/novnc.tar.gz")
+
+    assert fetch.main([str(source), digest.upper(), str(dest)]) == 0
+    unpacked = sorted(str(path.relative_to(dest)) for path in dest.rglob("*") if path.is_file())
+    assert unpacked == [
+        "LICENSE.txt", "core/input/keysym.js", "core/rfb.js", "docs/LICENSE.MPL-2.0", "vendor/pako/lib/zlib/inflate.js",
+    ]
+    assert not (tmp_path / "outside.js").exists() and not Path("/absolute.js").exists()
+    assert (dest / "core/rfb.js").read_bytes() == b"export default class RFB {}\n"
+
+    # A release that hides a link among the library files is refused outright.
+    tricky = _release_tarball({"noVNC-9.9.9/core/rfb.js": b"x"}, links={"noVNC-9.9.9/core/evil.js": "/etc/passwd"})
+    (tmp_path / "tricky.tar.gz").write_bytes(tricky)
+    with pytest.raises(SystemExit, match="unexpected entry"):
+        fetch.main([str(tmp_path / "tricky.tar.gz"), hashlib.sha256(tricky).hexdigest(), str(tmp_path / "second")])
+    # And one without the library is no release.
+    empty = _release_tarball({"noVNC-9.9.9/README.md": b"x"})
+    (tmp_path / "empty.tar.gz").write_bytes(empty)
+    with pytest.raises(SystemExit, match="core/rfb.js"):
+        fetch.main([str(tmp_path / "empty.tar.gz"), hashlib.sha256(empty).hexdigest(), str(tmp_path / "third")])
+
+
+def test_caddy_screen_routes_ask_core_first_and_log_nothing():
+    caddyfile = (ROOT / "docker/caddy/Caddyfile").read_text()
+    websocket = caddyfile[caddyfile.index("handle /screen/websockify {"):caddyfile.index("handle /screen/novnc/* {")]
+    static = caddyfile[caddyfile.index("handle /screen/novnc/* {"):caddyfile.index("\t\thandle {\n")]
+    for block, kind in ((websocket, "ws"), (static, "static")):
+        # Inside "route" Caddy keeps the written order (it sorts the steps of a bare "handle"),
+        # so the order checked here is the order things happen in.
+        assert block.split("\n")[1].strip().startswith(("route {", "#")) and "\t\t\troute {\n" in block
+        assert f"forward_auth 10.77.1.10:8080 {{\n\t\t\t\t\turi /internal/screen-auth?kind={kind}\n" in block
+        assert block.index("forward_auth") < block.index("reverse_proxy 10.77.2.30:6080")  # asked before anything is passed on
+        assert "header_up X-Forwarded-For {remote_host}" in block
+    # Core must get the websocket question as a plain request (it refuses anything else),
+    # with the Cookie and Origin it judges by left alone.
+    assert "header_up -Upgrade" in websocket and "header_up -Connection" in websocket
+    assert "-Cookie" not in caddyfile and "-Origin" not in caddyfile
+    assert "rewrite * /websockify" in websocket
+    # The script route carries scripts only: no websocket around the Origin check.
+    assert "@notget not method GET HEAD\n\t\t\t\trespond @notget 405" in static
+    assert "@upgrade header Upgrade *\n\t\t\t\trespond @upgrade 403" in static
+    assert static.index("respond @upgrade 403") < static.index("forward_auth")
+    assert "uri strip_prefix /screen/novnc" in static
+    assert 'header Cache-Control "no-store"' in static and 'header X-Content-Type-Options "nosniff"' in static
+    assert "default-src 'self'; object-src 'none'; base-uri 'none'" in static
+    assert "keepalive off" in static and "max_conns_per_host 8" in static  # see the comment in the file
+    # The screen connection isn't cut off by the request-size cap.
+    assert "@notupload not path /api/files/content /screen/websockify" in caddyfile
+    # No access log anywhere, so no record of screen requests either (§6.6).
+    assert not re.search(r"^\s*log\b", caddyfile, re.M)
+    # Core's own /internal paths stay unreachable from outside.
+    assert "@blocked path /internal /internal/* /healthz /healthz/*" in caddyfile
+
+
+def test_resolved_stack_with_the_screen_switched_on(resolved_with_screen):
+    services = resolved_with_screen["services"]
+    assert set(services) == {"caddy", "core", "model", "sandbox", "browser", "novnc"}
+    assert services["core"]["environment"]["SCREEN_ENABLED"] == "true"
+    assert services["browser"]["environment"]["SCREEN_ENABLED"] == "true"
+    assert preflight.configuration_errors(resolved_with_screen) == []
+    assert sum(int(service["mem_limit"]) for service in services.values()) == (5600 + 1280 + 64) * 1024 * 1024
+    novnc = services["novnc"]
+    assert not novnc.get("ports") and not novnc.get("secrets") and not novnc.get("environment")
+    assert novnc.get("command") is None  # the image's own, checked in the Dockerfile test
+    for name in ("screen", "vnc"):
+        assert resolved_with_screen["networks"][name]["internal"] is True
+
+
+@pytest.mark.parametrize(
+    "extra,message",
+    [
+        ("\nSCREEN_ENABLED=true\n", "COMPOSE_PROFILES=browser,screen"),
+        ("\nCOMPOSE_PROFILES=browser\nBROWSER_ENABLED=true\nSCREEN_ENABLED=true\n", "COMPOSE_PROFILES=browser,screen"),
+        ("\nCOMPOSE_PROFILES=screen\nSCREEN_ENABLED=true\n", "needs the browser"),
+        ("\nCOMPOSE_PROFILES=browser,screen\nSCREEN_ENABLED=true\n", "needs the browser"),
+    ],
+)
+def test_screen_flag_without_its_services_is_refused(tmp_path, extra, message):
+    errors = preflight.configuration_errors(resolve(tmp_path, extra))
+    assert any(message in error for error in errors), errors
+
+
+def test_screen_profile_alone_changes_nothing_for_the_agent(tmp_path):
+    """The relay may be started ahead of the switch: with SCREEN_ENABLED=false no x11vnc
+    runs behind it and core refuses every screen request."""
+    config = resolve(tmp_path, "\nCOMPOSE_PROFILES=browser,screen\nBROWSER_ENABLED=true\n")
+    assert "novnc" in config["services"]
+    assert config["services"]["core"]["environment"]["SCREEN_ENABLED"] == "false"
+    assert config["services"]["browser"]["environment"]["SCREEN_ENABLED"] == "false"
+    assert preflight.configuration_errors(config) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["port", "network", "address", "traffic", "token_plugin", "entrypoint", "secret", "env_secret", "mount",
+     "passwords_elsewhere", "wider_peers", "listen_everywhere", "core_on_vnc", "open_network", "disagree",
+     "root", "limits", "caddy_off_screen"],
+)
+def test_preflight_refuses_a_loosened_screen(resolved_with_screen, change):
+    config = copy.deepcopy(resolved_with_screen)
+    services = config["services"]
+    novnc, browser = services["novnc"], services["browser"]
+    if change == "port":
+        novnc["ports"] = [{"target": 6080, "published": "6080"}]
+    elif change == "network":
+        novnc["networks"]["edge"] = {"ipv4_address": "10.77.1.30"}
+    elif change == "address":
+        novnc["networks"]["vnc"]["ipv4_address"] = "10.77.5.31"
+    elif change == "traffic":
+        novnc["command"] = [*preflight.NOVNC_COMMAND[:1], "--traffic", *preflight.NOVNC_COMMAND[1:]]
+    elif change == "token_plugin":
+        novnc["command"] = ["websockify", "--token-plugin", "TokenFile", "10.77.2.30:6080"]
+    elif change == "entrypoint":
+        novnc["entrypoint"] = ["sh", "-c", "websockify 0.0.0.0:6080 10.77.5.40:5900"]
+    elif change == "secret":
+        novnc["secrets"] = [{"source": "vnc_password", "target": "/run/secrets/vnc_password"}]
+    elif change == "env_secret":
+        novnc["environment"] = {"VNC_PASSWORD": "synthetic-value-must-not-be-printed"}
+    elif change == "mount":
+        novnc["volumes"] = [{"type": "bind", "source": "/srv", "target": "/srv"}]
+    elif change == "passwords_elsewhere":
+        services["sandbox"].setdefault("secrets", []).append({"source": "vnc_view_password", "target": "/run/secrets/x"})
+    elif change == "wider_peers":
+        browser["environment"]["VNC_ALLOWED_PEERS"] = "10.77.5.30,10.77.5.31"
+    elif change == "listen_everywhere":
+        browser["environment"]["VNC_LISTEN"] = "0.0.0.0"
+    elif change == "core_on_vnc":
+        services["core"]["networks"]["vnc"] = {"ipv4_address": "10.77.5.10"}
+    elif change == "open_network":
+        config["networks"]["vnc"]["internal"] = False
+    elif change == "disagree":
+        browser["environment"]["SCREEN_ENABLED"] = "false"
+    elif change == "root":
+        novnc["user"] = "0:0"
+    elif change == "limits":
+        del novnc["pids_limit"]
+    else:
+        del services["caddy"]["networks"]["screen"]
     errors = preflight.configuration_errors(config)
     assert errors and "synthetic-value-must-not-be-printed" not in " ".join(errors)

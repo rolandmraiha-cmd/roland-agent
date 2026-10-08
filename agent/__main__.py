@@ -53,8 +53,9 @@ def build(*, validate: bool = False, config: Config | None = None) -> Agent:
         config.check()  # Refuse unsafe settings before opening the DB or model client.
     else:
         config.check_model()  # Terminal chat and background jobs also stay local.
-    if config.screen_enabled:  # the browser service exists since M6; the screen arrives in M7
-        raise SystemExit("The screen service is not implemented yet; keep SCREEN_ENABLED false")
+    if config.screen_enabled and not config.browser_enabled:
+        # Also refused by check(); said here too for the commands that skip the full check.
+        raise SystemExit("SCREEN_ENABLED=true needs BROWSER_ENABLED=true: the screen shows the agent's browser")
     if config.audit_detail_max_bytes < 64:
         raise SystemExit("AUDIT_DETAIL_MAX_BYTES must be at least 64")
     if config.backup_dir is not None:

@@ -1,0 +1,7 @@
+# The noVNC image (docker/novnc/Dockerfile). Remake the lock with:
+#   uv pip compile requirements-novnc.in --no-deps --generate-hashes --python-version 3.12 --python-platform linux -o requirements-novnc.lock
+# websockify alone, on purpose (--no-deps here, and pip --no-deps in the Dockerfile). Its
+# declared extras are numpy, requests, jwcrypto and redis: the last three serve its token
+# plug-ins, which this image never loads, and numpy only speeds up unmasking of what a viewer
+# sends, which for a screen is a trickle of key and pointer events.
+websockify==0.13.0

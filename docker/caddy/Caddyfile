@@ -37,30 +37,67 @@ http://127.0.0.1:8081 {
 		request_body @upload {
 			max_size {$UPLOAD_MAX_MB:100}MB
 		}
-		@notupload not path /api/files/content
+		# The screen connection is a long-lived stream, not a request with a body to cap.
+		@notupload not path /api/files/content /screen/websockify
 		request_body @notupload {
 			max_size 2MB
 		}
 
-		# The core stub refuses these until M7; no noVNC service is enabled here.
+		# The screen (M7). Both routes ask core first (forward_auth). Core says yes only to
+		# Roland's logged-in browser, only while he has a screen session open, and for the
+		# connection itself only from this site's own page. Without the noVNC service
+		# (COMPOSE_PROFILES without "screen") core refuses and nothing listens behind these.
 		handle /screen/websockify {
-			forward_auth 10.77.1.10:8080 {
-				uri /internal/screen-auth?kind=ws
-				header_up X-Forwarded-For {remote_host}
-				header_up X-Forwarded-Proto {scheme}
+			# "route" keeps these steps in the order written: Caddy would otherwise sort them.
+			route {
+				forward_auth 10.77.1.10:8080 {
+					uri /internal/screen-auth?kind=ws
+					header_up X-Forwarded-For {remote_host}
+					header_up X-Forwarded-Proto {scheme}
+					# The question to core is a plain request. With the browser's upgrade
+					# headers left on, core would take the question itself for a websocket
+					# and refuse it. Cookie and Origin, which core judges by, stay.
+					header_up -Upgrade
+					header_up -Connection
+					header_up -Sec-WebSocket-Key
+					header_up -Sec-WebSocket-Version
+					header_up -Sec-WebSocket-Extensions
+					header_up -Sec-WebSocket-Protocol
+				}
+				rewrite * /websockify
+				reverse_proxy 10.77.2.30:6080
 			}
-			rewrite * /websockify
-			reverse_proxy 10.77.2.30:6080
 		}
 		handle /screen/novnc/* {
-			forward_auth 10.77.1.10:8080 {
-				uri /internal/screen-auth?kind=static
-				header_up X-Forwarded-For {remote_host}
-				header_up X-Forwarded-Proto {scheme}
+			route {
+				# Script files only. A websocket must come through /screen/websockify, where
+				# core also checks which page is asking (Origin); websockify itself would
+				# carry one on any path.
+				@notget not method GET HEAD
+				respond @notget 405
+				@upgrade header Upgrade *
+				respond @upgrade 403
+				forward_auth 10.77.1.10:8080 {
+					uri /internal/screen-auth?kind=static
+					header_up X-Forwarded-For {remote_host}
+					header_up X-Forwarded-Proto {scheme}
+				}
+				uri strip_prefix /screen/novnc
+				header Content-Security-Policy "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+				header X-Content-Type-Options "nosniff"
+				header Cache-Control "no-store"
+				reverse_proxy 10.77.2.30:6080 {
+					# websockify gives every connection its own process for as long as the
+					# connection stays open. The screen page asks for about fifty script
+					# files at once: with kept-alive connections that is fifty idle processes,
+					# more than the container's 64 MB. So: one request per connection, eight
+					# at a time.
+					transport http {
+						keepalive off
+						max_conns_per_host 8
+					}
+				}
 			}
-			uri strip_prefix /screen/novnc
-			header Cache-Control "no-store"
-			reverse_proxy 10.77.2.30:6080
 		}
 		handle {
 			reverse_proxy 10.77.1.10:8080 {

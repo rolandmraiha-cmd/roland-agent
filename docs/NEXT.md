@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`50767ec`** (#53). Normal verification passed 11 / 0 / 1 with 3730 MiB available. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: part 1 (core side) is written and dormant; part 2 (the services) is next.**
+> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`50767ec`** (#53). Normal verification passed 11 / 0 / 1 with 3730 MiB available. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: part 1 (core side, #55) is merged and part 2 (the services) is written. Next: merge part 2, deploy with the screen off, switch it on on Contabo, then A7.4 with Roland.**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -100,7 +100,7 @@ Before writing any code:
 | Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`, `COMPOSE_PROFILES=browser`, `BROWSER_ENABLED=true`, `BROWSER_CHROMIUM_SANDBOX=true`, `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json`, `MAX_TOOL_STEPS=6` |
 | Repo defaults | `docker-compose.yml` and `.env.example` still default `MODEL_CTX` to 4096 |
 | Shell | On, via the sandbox (`ALLOW_SHELL=true`, `SHELL_BACKEND=sandbox`) |
-| On / off | Browser on as Roland's M6 trial; screen and training stay off (compose sets those flags to `"false"`) |
+| On / off | Browser on as Roland's M6 trial; the screen is off until `.env` has `SCREEN_ENABLED=true` and the `screen` profile (M7); training stays off (compose sets those flags to `"false"`) |
 | Snapshot | `pre-m6-deploy-2026-10-08` |
 | Host commands | Roland runs `sudo env APPLY=1 make deploy`; read-only verification is `sudo make verify`. The deploy user is not uid 1000; secrets stay uid 1000, directory 0700 / files 0400 |
 | App version | `0.1.0` in `pyproject.toml` (bump to `2.0.0` in M9) |
@@ -117,7 +117,7 @@ Shipped milestones on `v2`: v1 (#1–#6), M0, M1a, M1, M2 web/edge/model/provide
 
 | Service | Role | Networks (IP) | mem_limit |
 |---|---|---|---|
-| `caddy` | Only service with published ports: 80/tcp, 443/tcp, 443/udp. TLS (ACME), reverse proxy to core. Screen routes (`/screen/websockify`, `/screen/novnc/*` with forward-auth to `/internal/screen-auth`) already exist in `docker/caddy/Caddyfile` but have no backend yet. | `public` 10.77.0.2, `edge` 10.77.1.2, `screen` 10.77.2.2 | 96m |
+| `caddy` | Only service with published ports: 80/tcp, 443/tcp, 443/udp. TLS (ACME), reverse proxy to core. Screen routes (`/screen/websockify`, `/screen/novnc/*` with forward-auth to `/internal/screen-auth`) lead to the `novnc` relay, which only runs with the `screen` profile (M7; off on Contabo so far). | `public` 10.77.0.2, `edge` 10.77.1.2, `screen` 10.77.2.2 | 96m |
 | `core` | FastAPI app, agent loop, gate, tools, SQLite (`/data`), backups (`/backups`), workspace (`/workspace`). Only accepts peer 10.77.1.2. | `edge` 10.77.1.10, `sandbox_ctl` 10.77.3.10, `model` 10.77.6.10, `core_egress` | 640m |
 | `model` | llama.cpp server (digest-pinned, `docker/model/VERSION`), read-only weights, bearer `model_server_token`, no egress, no published port. | `model` 10.77.6.60 | `${MODEL_MEM_LIMIT:-3840m}` |
 | `sandbox` | `sandboxd` on 10.77.3.20:7000; peer 10.77.3.10 + Bearer `sandbox_api_token`; output cap 64 KiB, timeout ≤ 300 s, concurrency 2; container-gated leftover reap. | `sandbox_ctl` 10.77.3.20, `sandbox_egress` 10.77.11.20 | 1g |
@@ -163,7 +163,7 @@ Work strictly in order: M6 → M7 → M8 → M9. M7 depends on M6's browser proc
 M6 was split into PRs to `v2`.
 
 - **Part 1, core side (#39): done.** `agent/policy_browser.py`, `agent/browser_client.py`, `agent/tools_browser.py`, the browser policies in `agent/gate.py`, the screenshot on approval cards, and the tests for A6.1 and A6.2.
-- **Part 2, the browser service (#42): deployed on Contabo, off by default in the repo.** Deliverables 1–3, 5 and 8 below, the browser part of `docker-compose.test.yml`, and A6.3 (`make test-browser`). `agent/__main__.py` now accepts `BROWSER_ENABLED=true` and still refuses `SCREEN_ENABLED`. Roland's host `.env` now has **both** `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`.
+- **Part 2, the browser service (#42): deployed on Contabo, off by default in the repo.** Deliverables 1–3, 5 and 8 below, the browser part of `docker-compose.test.yml`, and A6.3 (`make test-browser`). `agent/__main__.py` accepts `BROWSER_ENABLED=true` (and, since M7 part 2, `SCREEN_ENABLED=true` with it). Roland's host `.env` now has **both** `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`.
 - **Fixture site (deliverable 7): done in #38**, extended in #42 with pages for dialogs, new tabs, frames, self-submitting forms, secret field names, uploads and more.
 - **Also merged:** the Browser tab (deliverable 9, #40) and the server-side checks (isolation probes from the browser container for A6.4, `make memory-report`, #41).
 - **Contabo evidence:** pre-step memory PASS after #43, browser smoke, then the `WATCH=600` report with **A6.5 PASS**. Roland rebuilt/deployed #51 at `60974e6`; ordinary verification passed **11 / 0 / 1**, including every sandbox/browser isolation probe (A6.4), with 3698 MiB available at the idle check; only the human checklist was skipped. Live retest passed ordinary chat, one existing-file read/final answer, an actual requested note, truthful missing-file handling, browser navigation, the first rejection/final answer, double-click protection and phone-sized controls. The deliberate-submission attempt then selected wrong fields from a short snapshot and asked at another field after rejection; both cards were rejected and that run stopped. Roland then rebuilt/deployed #52 at `7b09b90`: verification **11 / 0 / 1**, 3633 MiB available. Live retest at `7b09b90` (8 Oct 2026, signed-in session): asked to fill and submit the httpbin.org dummy form, the model requested `browser_snapshot` with `max_chars` 200, received the 500-character minimum showing 8 of 13 controls with a “5 more elements not shown” note, typed the dummy name, then asked to click “Telephone:”. That card was rejected: the turn ended with one truthful final answer, no second card, an unlocked composer and nothing submitted. A follow-up message in the same chat was answered from the chat history without a tool call. In a new chat that named the Submit order button and asked for the whole page, the model took a full-size snapshot and asked for “Click “Submit order” (button) on httpbin.org”; after the two-tap approval the audit recorded one click that navigated to `https://httpbin.org/post`, the echo page showed `custname` “Claude M6 Retest”, and the model reported the submission.
@@ -265,7 +265,7 @@ Stricter or an addition unless marked **cannot be done as written**; those need 
 7. **`DeveloperToolsAvailability=2`: cannot be done as written.** That policy also switches off the pipe Playwright drives Chromium through; the browser never starts. It is left out. The agent has no key or address that opens developer tools.
 8. **Policy folder: differs from the spec.** Playwright's Chromium is "Chrome for Testing" and reads `/etc/opt/chrome_for_testing/policies/managed/`. The file is copied to both that folder and `/etc/chromium/policies/managed/`. Checked by hand: with the file only in the spec's folder nothing is applied.
 9. **Not built from the spec's element list:** `rect` (core has no use for coordinates) and lists/tables in the outline (headings, page regions, frames and the page text are there).
-10. **Not in M6:** the browser container does not join the `vnc` network and nothing starts x11vnc (the package is in the image). Both are M7.
+10. **Not in M6:** the browser container did not join the `vnc` network and nothing started x11vnc (the package is in the image). Both came with M7 part 2.
 11. **Compose:** the service sits behind the `browser` profile, so an ordinary deploy does not start it. Its seccomp profile comes from `BROWSER_SECCOMP` (default: Docker's own).
 12. **The `tester` service has its own image now** (`docker/tester/Dockerfile`, test tools installed at build time). As it was written it installed pytest when the container started, with a read-only root and only internal networks; in the dev container that ended in "pytest: command not found", so `make test-sandbox` did not get as far as the tests there.
 13. **Downloads** arrive in `browser/.incoming` and are moved to `browser/downloads` under a plain, unique file name; a name from a website is never used as a path. A download that grows past the limit (`BROWSER_MAX_DOWNLOAD_MB`, 200 by default) is stopped while it arrives, not after.
@@ -321,7 +321,7 @@ The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap us
 
 #### Production flags
 
-`BROWSER_ENABLED=true` is live on Contabo. Until M7: `SCREEN_ENABLED`, x11vnc listening, `novnc`, `request_signin` remain off/unavailable. Training stays off. **Roland confirmed M6 on 8 Oct 2026; M7 may be built, with its flags off in production until it is merged and smoked.**
+`BROWSER_ENABLED=true` is live on Contabo. `SCREEN_ENABLED`, x11vnc listening, `novnc` and `request_signin` remain off there until Roland switches the screen on (M7, "Contabo deploy notes"). Training stays off. **Roland confirmed M6 on 8 Oct 2026; M7 may be built, with its flags off in production until it is merged and smoked.**
 
 #### Contabo deploy notes
 
@@ -340,13 +340,29 @@ The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap us
 
 **Spec:** §6.6, §6.7, §6.8, §8.2 (screen/sign-in endpoints), §8.4 (`/v1/user-mode`, `/v1/vnc/disconnect`), M7 in §12.
 
-#### Status: part 1 (core side) written and dormant; part 2 (services) not built (8 Oct 2026)
+#### Status: part 1 merged (#55); part 2 (services) written; not switched on anywhere (8 Oct 2026)
 
 M7 is split into PRs to `v2`, like M6.
 
-- **Part 1, core side: written, dormant.** Deliverables 4, 5, 6 and 7 below, the core half of 2 (the client calls for `/v1/user-mode` and `/v1/vnc/disconnect`), and the tests for A7.1 and A7.2. `python -m agent` still refuses `SCREEN_ENABLED=true` and compose still sets it to `"false"`, so nothing changes on a deployed server.
-- **Part 2, the services: not built.** Deliverables 1, 3 and 8, the browserd half of 2 (a real disconnect, `healthz.vnc`), the compose service and networks, the firewall rule, `SCREEN_ENABLED` accepted by `python -m agent`, and A7.3.
-- **Verified so far (part 1):** lint, the unit suite and the page tests, plus one run of the real pages in a headless browser against a fake browserd and a stand-in for noVNC's `RFB` (phone and desktop width, no script or CSP errors). No VNC server, noVNC or Caddy has been run against this code yet.
+- **Part 1, core side: merged (#55).** Deliverables 4, 5, 6 and 7 below, the core half of 2 (the client calls for `/v1/user-mode` and `/v1/vnc/disconnect`), and the tests for A7.1 and A7.2.
+- **Part 2, the services: written.** Deliverables 1, 3 and 8, the browserd half of 2 (a real disconnect, `healthz.vnc`), the compose service and networks, `SCREEN_ENABLED` accepted by `python -m agent`, the Caddy route changes, preflight/verify/isolation, and A7.3. The repo default stays off: `.env.example` has `SCREEN_ENABLED=false` and no `screen` profile.
+- **Verified so far, all off the server:**
+  - Lint, the unit suite, the page tests and shellcheck.
+  - `make test-browser` in Docker with the real browser image, x11vnc and the relay: 34 browser tests, 7 screen tests (`tests/integration/test_screen_live.py`), the container checks and the isolation probes. The screen tests talk to x11vnc with a small VNC client: the view-only password cannot type, click or paste; a wrong password gets nowhere and a password is always asked; the screen's clipboard is never sent out; one call cuts every viewer and the server is back at once; an address that is not noVNC cannot log in even with the passwords; and a whole sign-in, with the test playing Roland at the screen while the real agent loop waits.
+  - A real browser (Chromium, phone and desktop width) against the production compose file with Caddy, core, the relay, the browser container and a scripted stand-in for the model: sign-in card, sign-in screen, typing a user name on the picture and a password through the phone typing box, I'm done, the agent's answer from the signed-in page; then Watch, Take control, Hand back, and logout cutting a watcher. No script or CSP error. The typed password reached the test site and appeared in no container log. Peak memory of the relay: 32 MiB of its 64.
+  - The CI edge job runs the screen phase without a browser container (see A7.3).
+- **Not done:** nothing has run on Contabo, and A7.4 needs Roland.
+
+**Found by running the real thing, and fixed in part 2:**
+
+1. **The agent was told "Roland finished" before it had the browser back** (part 1). The tool returned on the stored status while core was still cutting the screen; the next call came back "Roland is using the browser right now". The tool now waits for the hand-over (`agent/signin.py`, test in `tests/test_signin.py`).
+2. **Core refused Caddy's question about the websocket**, because the question carried the browser's upgrade headers. Caddy now strips them from the question only.
+3. **The relay ran out of memory** when the page asked for noVNC's fifty files at once over kept-alive connections. Caddy now uses one connection per request, eight at a time, on that route.
+4. **Pasting into the screen did nothing for 45 seconds** after connecting (an x11vnc default meant for login screens). Switched off with `X11VNC_AVOID_WINDOWS=never`.
+5. **The screen showed the wrong tab.** A tab browserd cannot see had opened in front of the agent's. browserd now puts the agent's tab in front after every action and whenever core says who has the browser.
+6. **A live M6 test expected `request_signin` among the browser tools** of an agent without the screen. Corrected.
+
+**Known issue (from M6, now visible):** a form that posts into a new tab is refused (by design), but the blank tab it opened stays in the browser window. Playwright never reports it, so browserd cannot count or close it. Roland can close it on the screen; a browser restart also removes it. A fix would answer that first request with an empty page instead of aborting it, so the tab becomes visible to browserd and can be closed. Not done here: it changes an M6 guard and needs its own review.
 
 #### Contract between core and the services (fixed by part 1; part 2 must implement it)
 
@@ -372,6 +388,23 @@ Each one is stricter than, or an addition to, `docs/v2-spec.md`; none loosens a 
 9. **The screen page has three extra controls:** Take control (from watching), Keyboard (a phone needs a text box to show its keyboard) and Zoom in / Fit screen. It also gives the browser back when the page is left or the connection drops, instead of waiting for the idle timeout.
 10. **Jobs:** `request_signin` is not offered; the job is told to answer "Needs sign-in to <site>". There is no separate notice on the Approvals tab.
 11. **`GET /api/signin?status=pending`** lists sign-ins that are waiting or under way; no other status is served.
+
+#### Where part 2 differs from the spec (for the reviewer)
+
+Each one is stricter than, or an addition to, `docs/v2-spec.md`, except 4 and 12, which are choices Roland can reverse.
+
+1. **x11vnc has five more flags and one environment setting** than §6.5 lists: `-no6` (this build also listens on IPv6 unless told not to), `-allow` (noVNC's address only), `-safer` and `-nocmds` (no remote control, no reverse connections, no external commands), `-norc`, and `X11VNC_AVOID_WINDOWS=never` (fix 4 above). Every flag was checked against x11vnc 0.9.16 in the image.
+2. **Disconnecting replaces x11vnc** instead of `x11vnc -R disconnect:all` (the spec allows either). The service signals the launcher, which ends x11vnc and starts a new one; the route answers once the new one listens, about a tenth of a second. A process that has ended holds no connections, and remote control can stay closed.
+3. **websockify is installed alone** (`pip --no-deps`): numpy, requests, jwcrypto and redis, which it declares, are for its token plug-ins and for speed that a screen's key and pointer traffic doesn't need. It runs with `--file-only` (no folder listings) and `--heartbeat=30` (a ping every 30 seconds, so a phone network doesn't drop an idle screen).
+4. **Only noVNC's `core/` and `vendor/` are in the image**, not its own pages. So `/screen/novnc/vnc.html` is 401 without a login and 403 without a screen session as the spec asks, and 404 for someone who has both. noVNC is **1.7.0**; its SHA-256 pin was made by rebuilding the release tarball from the tag and matching Gentoo's published checksum for the same file (GitHub's tarball download was blocked where this was written). The CI edge job builds the image from GitHub, which checks the pin again.
+5. **Caddy:** the upgrade headers are stripped from the websocket question to core; the script route refuses anything but GET and any websocket; keep-alive is off and at most eight connections go to the relay for scripts; the websocket is exempt from the 2 MB request-size cap; `X-Content-Type-Options: nosniff` is added; both routes are wrapped in `route { }` so their steps run in the written order.
+6. **Core checks the VNC passwords more closely:** they must differ in their first eight characters and be one plain line x11vnc can read. `SCREEN_ENABLED=true` without `BROWSER_ENABLED=true` is refused.
+7. **Core mounts the two VNC secrets whether or not the screen is on** (as in §11.3). Preflight therefore asks for the files always and says how to create them.
+8. **Housekeeping only talks to browserd when something is open or owed**, not every 10 seconds all day.
+9. **The screen page starts zoomed in on a phone** (fitted, a 1280-wide screen is unreadable there) and shows the picture at the top instead of centred.
+10. **browserd reports `vnc` in its health answer without letting it decide `ok`**; `python -m browserd healthcheck screen` asks for both, and `make verify` uses it when the screen is on.
+11. **The test stack lets the tester in to x11vnc** at 10.77.5.31 (`VNC_ALLOWED_PEERS`, a new browser setting). Production has noVNC's address only; preflight checks it.
+12. **The relay's limits are the spec's** (64 MiB, 0.25 CPU, 32 processes). They hold because of 5; without it they don't.
 
 #### Goal
 
@@ -409,8 +442,8 @@ Automated:
 
 - [x] **A7.1** `tests/test_screen_auth.py`: requires session; requires active screen session; WS origin must match; peer must be Caddy; only one screen session; logout ends screen and disconnects; VNC password not in logs or audit. *(Part 1: the seven named tests plus the screen switched off, refused requests, a failed hand-over, the core-side lock and restart clean-up.)*
 - [x] **A7.2** `tests/test_signin.py`: request sets user mode and waits; Done resolves and unlocks; cancel and timeout messages; agent browser tools locked during sign-in; chat text "done" does not resolve; `request_signin` not available in jobs. *(Part 1: the six named tests plus Stop, restart, refused addresses, the `browser_open` approval rule and the prompt staying within budget.)*
-- [ ] **A7.3** integration: view-only password cannot send input; novnc unreachable from tester without forward-auth; `/screen/novnc/vnc.html` without a session → 401 via Caddy.
-- [ ] All M6 and earlier suites still green.
+- [x] **A7.3** integration: view-only password cannot send input; novnc unreachable from tester without forward-auth; `/screen/novnc/vnc.html` without a session → 401 via Caddy. *(Part 2: the first two in `tests/integration/test_screen_live.py`, run by `make test-browser`; the third in the CI edge job's screen phase, with 403 for a login that has no screen session and the relay unreachable from core and the sandbox.)*
+- [x] All M6 and earlier suites still green. *(Unit suite, page tests, and the 34 live browser tests with the screen switched on.)*
 
 Code Shipper (Grok) smoke on Contabo, then **ping Roland** for the manual part (A7.4 is a substantial test with his real credentials):
 
@@ -420,15 +453,38 @@ Code Shipper (Grok) smoke on Contabo, then **ping Roland** for the manual part (
 4. **A7.4 (Roland):** ask the agent to check something behind a login on a site Roland chooses; sign-in card appears; Roland takes control on the phone, logs in, presses I'm done; agent continues and reads the logged-in page. Audit shows `signin_requested`, `screen_session_start`/`end`, `signin_resolved` and no keystroke data. `docker compose logs browser novnc core caddy | grep -i <password>` finds nothing.
 5. `make verify` passes.
 
-#### Stays OFF until M7 is merged and smoked
+#### Stays OFF until Roland switches it on
 
-`SCREEN_ENABLED`, the `novnc` service, x11vnc, `request_signin`.
+`SCREEN_ENABLED`, the `novnc` service (the `screen` profile), x11vnc, `request_signin`. Merging part 2 changes none of them.
 
 #### Contabo deploy notes
 
-1. `make secrets` for `vnc_password` and `vnc_view_password`.
-2. Firewall: `vnc` and `screen` networks internal; nothing new published. Re-run the external port scan (only 22, 80, 443, 443/udp).
-3. Memory: novnc adds 64 MiB. Re-measure headroom with browser + screen session active.
+Roland runs these himself. Two steps, so that the code is on the server and verified before anything is switched on.
+
+**Step 1, after part 2 is merged: deploy with the screen still off.** Core mounts the two VNC secret files from this version on, so `make secrets` comes first. It creates what is missing and changes nothing that exists.
+
+```
+cd /opt/roland-agent && git pull --ff-only && sudo env APPLY=1 make secrets && sudo env APPLY=1 make deploy && sudo make verify
+```
+
+Expect `verify: 12 pass / 0 fail / 2 skip`: one more pass than before (the screen routes refuse a visitor without a login) and one more skip (the screen server, because the relay isn't running). Nothing visible changes.
+
+**Step 2: switch the screen on.** In `/opt/roland-agent/.env` set `SCREEN_ENABLED=true` and `COMPOSE_PROFILES=browser,screen`, then deploy and verify as usual:
+
+```
+cd /opt/roland-agent && sudo env APPLY=1 make deploy && sudo make verify
+```
+
+Expect `verify: 13 pass / 0 fail / 1 skip`, with `[PASS] screen server (x11vnc) listening in the browser container` and the two new isolation lines for noVNC. The Browser tab then shows Watch screen and Take control.
+
+To switch it off again: `SCREEN_ENABLED=false`, `COMPOSE_PROFILES=browser`, deploy.
+
+Notes:
+
+1. Firewall: the `vnc` and `screen` networks are internal and nothing new is published. The rule that drops connections from the browser to the relay is already in `deploy/firewall.sh`; deploy applies it. Re-run the external port scan (only 22, 80, 443, 443/udp).
+2. Memory: the relay is capped at 64 MiB (13 MiB idle, 32 MiB at its busiest in the test runs). x11vnc runs inside the browser container's existing 1280 MiB cap. Re-measure headroom with a screen session open (`make memory-report`).
+3. On a phone the screen page starts zoomed in: drag to move around, Fit screen to see the whole browser. Typing goes through the Keyboard button.
+4. For A7.4, look for the typed password afterwards with `docker compose logs browser novnc core caddy | grep -c -F '<password>'` (expect 0), as the acceptance asks.
 
 ---
 
@@ -603,17 +659,17 @@ CLI: `python -m agent` (serve), `chat`, `migrate --check`, `audit-verify`, `back
 | Area | Where to look today | Expected new locations (verify in tree) |
 |---|---|---|
 | Config, flags, secret loading | `agent/config.py` (already validates browser/screen secrets) | — |
-| Agent loop, tool dispatch | `agent/core.py`, `agent/tools.py`, `agent/tools_browser.py`, `agent/browser_client.py` | `agent/signin.py` |
+| Agent loop, tool dispatch | `agent/core.py`, `agent/tools.py`, `agent/tools_browser.py`, `agent/browser_client.py`, `agent/screen.py`, `agent/signin.py` | — |
 | Gate | `agent/gate.py` (`POLICIES`, `Gate`, `CONFIRM_CATEGORIES`, `PIN_KEY`), `agent/policy_browser.py`, `agent/web/routes_approvals.py` | — |
 | Shell | `agent/policy_shell.py`, `agent/sandbox_client.py`, `agent/local_shell.py`, `sandboxd/` | — |
 | Workspace/files | `agent/workspace.py`, `agent/tools_files.py`, `agent/web/routes_files.py` | screenshots/downloads integration |
 | Models | `agent/models/` (llamacpp, ollama, parse, grammar `action.gbnf`, `endpoint_guard.py`, `modelreg.py`), `docker/model/`, `deploy/model_store.py`, `deploy/models.lock` | `agent/persona.py`, `agent/training/`, `agent/eval/`, `training/`, `trainerd/`, `docker/trainer/` |
 | Persistence | `agent/memory.py`, `agent/migrations/` (m0001, m0002), `agent/audit.py`, `agent/backup.py` | `m0003` |
-| Web/UI | `agent/web/app.py`, `auth.py`, `middleware.py`, `agent/web/static/` | `screen.html`, `screen.js`, Browser/Settings tabs |
-| Browser service | `browserd/` (`launcher.py`, `session.py`, `server.py`, `guards.py`, `snapshot.js`, `settings.py`), `docker/browser/` (image, Chromium policy, seccomp profile), `requirements-browser.{in,lock}` | x11vnc child in `browserd/launcher.py` (`extra_children`), sign-in hand-over |
-| Edge | `docker/caddy/Caddyfile` (screen routes present), `docker-compose.yml` (reserved networks) | `docker/novnc/` |
+| Web/UI | `agent/web/app.py`, `auth.py`, `middleware.py`, `routes_screen.py`, `agent/web/static/` (with `screen.html`, `screen.js`) | Settings tab |
+| Browser service | `browserd/` (`launcher.py`, `session.py`, `server.py`, `guards.py`, `snapshot.js`, `settings.py`, `vnc.py`), `docker/browser/` (image, Chromium policy, seccomp profile), `requirements-browser.{in,lock}` | x11vnc child in `browserd/launcher.py` (`extra_children`), sign-in hand-over |
+| Edge | `docker/caddy/Caddyfile` (screen routes), `docker-compose.yml`, `docker/novnc/` (relay image, `fetch.py`), `requirements-novnc.{in,lock}` | — |
 | Deploy | `deploy/*.sh`, `deploy/preflight_edge.py`, `Makefile` | browser/vnc/trainer secrets and firewall rules |
-| Tests | `tests/`, `tests/integration/` (`edge.sh`, `isolation.sh`, `browser.sh`, `test_sandbox_live.py`, `test_browser_live.py`), `tests/frontend/` (`chat.test.cjs`, `snapshot.test.cjs`), `tests/fixtures/site/`, `docker-compose.test.yml` (`fixture-web`, `browser`, `tester`), `docker/tester/` | — |
+| Tests | `tests/`, `tests/integration/` (`edge.sh`, `isolation.sh`, `browser.sh`, `test_sandbox_live.py`, `test_browser_live.py`, `test_screen_live.py`, `rfb.py`), `tests/frontend/` (`chat.test.cjs`, `snapshot.test.cjs`, `screen.test.cjs`), `tests/fixtures/site/`, `docker-compose.test.yml` (`fixture-web`, `browser`, `tester`), `docker/tester/` | — |
 
 `docs/v2-spec.md` is the target design; `docs/AGENT.md` is the status. Where a spec path differs from the tree, follow the tree's conventions and note it in the PR.
 

@@ -22,7 +22,12 @@ let heartbeat = null;
 let signinOpen = !!signinId;
 let ended = false;
 let typed = "";
-let zoomed = false;
+// A phone starts zoomed in: fitted, the browser's 1280-wide screen is too small there to
+// read or tap. A wide window starts fitted.
+let zoomed = typeof matchMedia === "function" && matchMedia("(max-width: 700px)").matches;
+// Connections noVNC has already reported closed. Closing one of those again only makes
+// noVNC log an error.
+const closed = new WeakSet();
 
 async function post(path, body, keepalive = false) {
   const res = await fetch(path, {
@@ -75,7 +80,7 @@ function disconnect() {
   heartbeat = null;
   const old = rfb;
   rfb = null;
-  if (old) { try { old.disconnect(); } catch (_) {} }
+  if (old && !closed.has(old)) { try { old.disconnect(); } catch (_) {} }
   $("screen").replaceChildren();
   typed = "";
   $("screen-typing").value = "";
@@ -139,6 +144,7 @@ async function start(nextMode) {
       if (rfb === current) say(mode === "control" ? "Connected. The agent is paused." : "Connected. The agent keeps working.");
     });
     current.addEventListener("disconnect", () => {
+      closed.add(current);
       if (rfb !== current) return;
       // Give the browser back now, not when the idle timeout notices.
       const old = session;

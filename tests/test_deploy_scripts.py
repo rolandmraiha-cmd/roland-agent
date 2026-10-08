@@ -320,6 +320,8 @@ if command == "sleep":
 if command == "sudo":
     answer(code=1)  # Never delegate to a real privileged command.
 if command == "curl":
+    if "-w" in args:  # verify.sh asks for the HTTP status of the screen routes
+        answer(state.get("screen_http", {}).get(args[-1].rsplit("/screen/", 1)[-1], "403"))
     answer()  # Never contact the network.
 if command == "df":
     answer("Filesystem 1024-blocks Used Available Capacity Mounted on\nfixture 70000000 1000000 69000000 2% /")
@@ -336,7 +338,8 @@ if command == "stat":
     if fmt == "%s":
         answer(str(info.st_size))
     if fmt == "%u":
-        answer(str(state.get("browser_uid", 1000) if target.name == "browser_api_token" else 1000))
+        answer(str(state.get("browser_uid", 1000) if target.name == "browser_api_token"
+                   else state.get("vnc_uid", 1000) if target.name.startswith("vnc_") else 1000))
 if command == "docker":
     if args[0] == "info":
         answer("Firewall Backend: nftables")
@@ -399,6 +402,10 @@ if command == "docker":
                 (root / "stdin-read").touch()
             if state.get("hang_docker_service") == service:
                 hang_until_killed()
+            if service == "browser" and action == ["printenv", "SCREEN_ENABLED"]:
+                answer(state.get("browser_screen_env", "true"))
+            if service == "browser" and action[-2:] == ["healthcheck", "screen"]:
+                answer(code=state.get("screen_health_rc", 0))
             if service == "browser" and "healthcheck" in action:
                 answer(code=state.get("browser_health_rc", 0))
             if service == "browser" and "-c" in action:
@@ -1130,3 +1137,136 @@ def test_verify_browser_health_is_conditional_and_reports_failure(tmp_path, brow
     assert len(calls) == int(browser)
     if browser:
         assert calls[0][-4:] == ["python", "-m", "browserd", "healthcheck"]
+    # Without the relay the screen server is not looked for at all.
+    assert "[SKIP] screen server (novnc not running)\n" in result.stdout
+
+
+# --- M7: the screen in preflight, verify and isolation ---
+
+@pytest.mark.parametrize(
+    ("assignment", "enabled"),
+    [("", False), ("SCREEN_ENABLED=false", False), ("SCREEN_ENABLED=true", True), ("export SCREEN_ENABLED='true'", True)],
+)
+def test_preflight_requires_the_screen_passwords_only_when_enabled(tmp_path, assignment, enabled):
+    repo, env, _ = fake_deploy_host(tmp_path)
+    env_file = repo / ".env"
+    token = repo / "secrets" / "browser_api_token"
+    token.write_text("synthetic-browser-fixture")
+    token.chmod(0o400)
+    env_file.write_text(env_file.read_text() + "BROWSER_ENABLED=true\n" + assignment + "\n")
+    result = run_fake_script(repo, env, "preflight.sh")
+    assert (result.returncode != 0) is enabled, result.stdout + result.stderr
+    for name in ("vnc_password", "vnc_view_password"):
+        assert (f"missing secret file: {name}" in result.stderr) is enabled
+    # With the files in place (as `make secrets` leaves them) the same .env passes.
+    for name, value in (("vnc_password", "Fu11pw9Z"), ("vnc_view_password", "V1ewpw7Q")):
+        secret = repo / "secrets" / name
+        secret.write_text(value)
+        secret.chmod(0o400)
+    result = run_fake_script(repo, env, "preflight.sh")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Fu11pw9Z" not in result.stdout + result.stderr and "V1ewpw7Q" not in result.stdout + result.stderr
+    if enabled:
+        assert "OK: secret vnc_password mode 0400 uid 1000" in result.stdout
+
+
+def test_preflight_screen_needs_the_browser_and_strict_owner(tmp_path):
+    repo, env, state = fake_deploy_host(tmp_path)
+    for name in ("vnc_password", "vnc_view_password"):
+        secret = repo / "secrets" / name
+        secret.write_text("synthetic")
+        secret.chmod(0o400)
+    env_file = repo / ".env"
+    original = env_file.read_text()
+    env_file.write_text(original + "SCREEN_ENABLED=true\n")
+    result = run_fake_script(repo, env, "preflight.sh")
+    assert result.returncode != 0
+    assert "SCREEN_ENABLED=true needs BROWSER_ENABLED=true" in result.stderr
+    # A screen password owned by the wrong user is an error, not a warning.
+    token = repo / "secrets" / "browser_api_token"
+    token.write_text("synthetic-browser-fixture")
+    token.chmod(0o400)
+    env_file.write_text(original + "BROWSER_ENABLED=true\nSCREEN_ENABLED=true\n")
+    state["vnc_uid"] = 0
+    update_fake_state(env, state)
+    result = run_fake_script(repo, env, "preflight.sh")
+    assert result.returncode != 0 and "secret vnc_password uid must be 1000" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("codes", "status"),
+    [
+        ({"novnc/core/rfb.js": "401", "websockify": "401"}, "PASS"),  # the screen is on
+        ({}, "PASS"),                                                  # off: core says 403 to both
+        ({"novnc/core/rfb.js": "200", "websockify": "401"}, "FAIL"),  # a script got out without a login
+        ({"novnc/core/rfb.js": "401", "websockify": "101"}, "FAIL"),  # a connection got through
+        ({"novnc/core/rfb.js": "502", "websockify": "502"}, "FAIL"),  # Caddy passed it on to the relay
+        ({"novnc/core/rfb.js": "", "websockify": ""}, "FAIL"),
+    ],
+)
+def test_verify_screen_routes_must_refuse_a_visitor_without_a_login(tmp_path, codes, status):
+    repo, env, state = fake_deploy_host(tmp_path)
+    state["screen_http"] = codes
+    update_fake_state(env, state)
+    result = run_fake_script(repo, env, "verify.sh")
+    assert (result.returncode == 0) is (status == "PASS"), result.stdout + result.stderr
+    assert f"[{status}] screen routes " in result.stdout
+    asked = [command["args"][-1] for command in fake_commands(env) if command["command"] == "curl" and "-w" in command["args"]]
+    assert asked == ["https://fixture.invalid/screen/novnc/core/rfb.js", "https://fixture.invalid/screen/websockify"]
+
+
+@pytest.mark.parametrize(
+    ("screen_env", "health_code", "line"),
+    [
+        ("true", 0, "[PASS] screen server (x11vnc) listening in the browser container"),
+        ("true", 1, "[FAIL] screen server (x11vnc) is not listening"),
+        ("false", 0, "[SKIP] screen server (novnc runs, but SCREEN_ENABLED is not true for the browser)"),
+    ],
+)
+def test_verify_checks_the_screen_server_when_the_relay_runs(tmp_path, screen_env, health_code, line):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["services"]["novnc"] = "running"
+    state["browser_screen_env"] = screen_env
+    state["screen_health_rc"] = health_code
+    update_fake_state(env, state)
+    result = run_fake_script(repo, env, "verify.sh")
+    assert (result.returncode == 0) is ("[FAIL]" not in line), result.stdout + result.stderr
+    assert line in result.stdout
+    asked = [args[-3:] for args in browser_execs(env)]
+    assert (["browserd", "healthcheck", "screen"] in asked) is (screen_env == "true")
+
+
+@pytest.mark.parametrize("mode", ["--ci", "--server"])
+def test_isolation_probes_the_screen_relay_when_it_runs(tmp_path, mode):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["services"]["novnc"] = "running"
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, mode)
+    assert result.returncode == 0, result.stdout + result.stderr
+    targets = {tuple(args[-2:]) for args in browser_execs(env)}
+    assert {("10.77.5.30", "6080"), ("10.77.2.30", "6080")} <= targets
+    sandbox_probes = " ".join(
+        " ".join(command["args"]) for command in fake_commands(env)
+        if command["command"] == "docker" and "exec" in command["args"] and "sandbox" in command["args"]
+    )
+    for url in ("http://10.77.5.40:5900", "http://10.77.2.30:6080/", "http://10.77.5.30:6080/"):
+        assert url in sandbox_probes
+    assert "SKIP sandbox to noVNC" not in result.stdout
+
+
+def test_isolation_without_the_relay_says_so_and_still_probes_the_screen_server(tmp_path):
+    repo, env, _ = fake_deploy_host(tmp_path, browser=True)
+    result = run_fake_isolation(repo, env, "--server")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "SKIP sandbox to noVNC: novnc service is not running\n" in result.stdout
+    assert "ok fail: curl x11vnc\n" in result.stdout
+    assert not {("10.77.5.30", "6080"), ("10.77.2.30", "6080")} & {tuple(args[-2:]) for args in browser_execs(env)}
+
+
+def test_isolation_fails_if_the_browser_can_reach_the_relay(tmp_path):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["services"]["novnc"] = "running"
+    state["browser_probe_rc"] = 0  # the connection succeeded
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, "--ci")
+    assert result.returncode != 0 and "FAIL isolation" in result.stderr

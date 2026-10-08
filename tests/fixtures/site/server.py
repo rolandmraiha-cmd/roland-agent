@@ -212,6 +212,17 @@ _PAGES.update(
             "Notes",
             '<div contenteditable="true" title="Note text" style="min-height: 40px; border: 1px solid">old note</div>',
         ),
+        # For the screen tests (M7): shows what arrives from a real pointer and keyboard. A
+        # click anywhere is counted, its place is shown, and it puts the keyboard in the field.
+        "/extras/screen": _page(
+            "Screen test",
+            '<label>Typed here <input id="typed" name="typed"></label>'
+            '<p id="clicks">clicks: 0</p><p id="where">no click yet</p>'
+            "<script>var clicks = 0; document.addEventListener('click', function (event) {"
+            "clicks += 1; document.getElementById('clicks').textContent = 'clicks: ' + clicks;"
+            "document.getElementById('where').textContent = 'last click at ' + event.clientX + ',' + event.clientY;"
+            "document.getElementById('typed').focus(); });</script>",
+        ),
     }
 )
 

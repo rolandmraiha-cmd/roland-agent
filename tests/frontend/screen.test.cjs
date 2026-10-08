@@ -30,7 +30,7 @@ class FakeRFB {
   disconnect() { this.disconnected = true; }
 }
 
-async function fixture(search, { fail = {} } = {}) {
+async function fixture(search, { fail = {}, narrow = null } = {}) {
   assert.equal(SOURCE.split(NOVNC).length, 2, 'noVNC is imported once, from this site only');
   FakeRFB.made = [];
   const elements = new Map();
@@ -45,6 +45,8 @@ async function fixture(search, { fail = {} } = {}) {
     location, URLSearchParams, encodeURIComponent, JSON,
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     clearInterval: (id) => { if (timers[id - 1]) timers[id - 1].cleared = true; },
+    // `narrow` true or false gives the page a browser that can answer "is this a phone?".
+    ...(narrow === null ? {} : { matchMedia: (query) => ({ matches: query === '(max-width: 700px)' && narrow }) }),
     __importRFB: async () => { if (fail.novnc) throw new Error('403'); return { default: FakeRFB }; },
     fetch: async (url, options = {}) => {
       const body = options.body ? JSON.parse(options.body) : undefined;
@@ -240,6 +242,11 @@ test('handing back, switching and leaving all give the browser back at once', as
   await dropped.settle();
   assert.deepEqual(dropped.posts('/api/screen/release').map((c) => c.body), [{ id: 'screen-1' }]);
   assert.equal(dropped.get('screen-status').textContent, 'The screen was disconnected.');
+  // noVNC said it is closed: it is not told to close again (it would log an error), not
+  // even when the page is closed afterwards.
+  assert.equal(dropped.rfb().disconnected, false);
+  await dropped.get('screen-close').onclick();
+  assert.equal(dropped.rfb().disconnected, false);
 });
 
 test('Zoom in shows the screen full size with dragging; Fit screen scales it back', async () => {
@@ -257,6 +264,17 @@ test('Zoom in shows the screen full size with dragging; Fit screen scales it bac
   assert.deepEqual([f.rfb().scaleViewport, f.rfb().clipViewport, f.rfb().dragViewport], [false, true, true]);
   f.get('screen-zoom').onclick();
   assert.deepEqual([f.rfb().scaleViewport, f.rfb().clipViewport, f.rfb().dragViewport], [true, false, false]);
+});
+
+test('a phone starts zoomed in, a wide window starts fitted', async () => {
+  const phone = await fixture('?mode=control', { narrow: true });
+  assert.deepEqual([phone.rfb().scaleViewport, phone.rfb().clipViewport, phone.rfb().dragViewport], [false, true, true]);
+  assert.equal(phone.get('screen-zoom').textContent, 'Fit screen');
+  phone.get('screen-zoom').onclick();
+  assert.deepEqual([phone.rfb().scaleViewport, phone.rfb().clipViewport, phone.rfb().dragViewport], [true, false, false]);
+  const wide = await fixture('?mode=control', { narrow: false });
+  assert.deepEqual([wide.rfb().scaleViewport, wide.rfb().clipViewport, wide.rfb().dragViewport], [true, false, false]);
+  assert.equal(wide.get('screen-zoom').textContent, 'Zoom in');
 });
 
 test('a refused session or missing noVNC shows an error and connects nothing', async () => {

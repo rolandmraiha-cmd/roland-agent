@@ -79,7 +79,9 @@ fi
 secrets_dir=$deploy_repo/secrets
 env_file=$deploy_repo/.env
 required_secrets=(model_server_token agent_password_hash)
-browser_enabled=$(python3 - "$env_file" <<'PY'
+# True only for a literal true/1/yes/on in .env. The file is read, never executed.
+env_flag() {
+    python3 - "$env_file" "$1" <<'PY'
 import pathlib, shlex, sys
 
 value = ""
@@ -90,7 +92,7 @@ if path.is_file():
         if line.startswith("export "):
             line = line[7:].lstrip()
         key, separator, raw = line.partition("=")
-        if separator and key.strip() == "BROWSER_ENABLED":
+        if separator and key.strip() == sys.argv[2]:
             try:
                 parts = shlex.split(raw, comments=True)
             except ValueError:
@@ -98,9 +100,18 @@ if path.is_file():
             value = parts[0] if len(parts) == 1 else ""
 print("true" if value.lower() in {"true", "1", "yes", "on"} else "false")
 PY
-)
+}
+browser_enabled=$(env_flag BROWSER_ENABLED)
+screen_enabled=$(env_flag SCREEN_ENABLED)
 if [[ $browser_enabled == true ]]; then
     required_secrets+=(browser_api_token)
+fi
+if [[ $screen_enabled == true ]]; then
+    # The screen (M7): x11vnc and core each read the two passwords from these files.
+    required_secrets+=(vnc_password vnc_view_password)
+    if [[ $browser_enabled != true ]]; then
+        fail "SCREEN_ENABLED=true needs BROWSER_ENABLED=true: the screen shows the agent's browser"
+    fi
 fi
 if [[ ! -d $secrets_dir ]]; then
     fail "secrets/ directory missing (run make secrets && make hash-password)"
@@ -127,9 +138,9 @@ else
         if [[ $fmode != 400 ]]; then
             fail "secret $name mode must be 0400 (got $fmode)"
         elif [[ $fuid != 1000 ]]; then
-            # Browser enabling always requires its production owner. Keep the
+            # Browser and screen enabling always require the production owner. Keep the
             # existing development warning for the other secrets.
-            if [[ $name == browser_api_token || ${AGENT_ENV:-} == production || ${STRICT_SECRETS:-0} == 1 ]]; then
+            if [[ $name == browser_api_token || $name == vnc_* || ${AGENT_ENV:-} == production || ${STRICT_SECRETS:-0} == 1 ]]; then
                 fail "secret $name uid must be 1000 (got $fuid); run make secrets APPLY=1"
             else
                 warn "secret $name uid is $fuid (production expects 1000); run make secrets APPLY=1 on the host"

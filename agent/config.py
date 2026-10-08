@@ -89,6 +89,18 @@ def _bool(value: str) -> bool:
     raise ValueError("expected a boolean")
 
 
+def _vnc_usable(value: str) -> bool:
+    """A password x11vnc can read from one line of its password file."""
+    return (
+        0 < len(value) <= 64
+        and value.isascii()
+        and value.isprintable()
+        and " " not in value
+        and not value.startswith("#")
+        and "__" not in value
+    )
+
+
 @dataclass(frozen=True)
 class Config:
     # All defaults are code defaults from v2-spec §11.1, not deployment settings.
@@ -257,8 +269,18 @@ class Config:
         if self.screen_enabled:
             if not self.vnc_password or not self.vnc_view_password:
                 raise SystemExit("VNC_PASSWORD and VNC_VIEW_PASSWORD are required when SCREEN_ENABLED=true")
-            if self.vnc_password == self.vnc_view_password:
-                raise SystemExit("VNC_PASSWORD and VNC_VIEW_PASSWORD must differ")
+            # VNC looks at the first eight characters only: alike there, and the view-only
+            # password would open the screen for typing too.
+            if self.vnc_password[:8] == self.vnc_view_password[:8]:
+                raise SystemExit("VNC_PASSWORD and VNC_VIEW_PASSWORD must differ in their first 8 characters")
+            if not (_vnc_usable(self.vnc_password) and _vnc_usable(self.vnc_view_password)):
+                # The same rule as browserd/vnc.py, which writes them into x11vnc's password file.
+                raise SystemExit(
+                    "VNC_PASSWORD and VNC_VIEW_PASSWORD must be plain letters, digits or punctuation, without "
+                    "spaces, a leading # or a double underscore (make secrets creates suitable ones)"
+                )
+            if not self.browser_enabled:
+                raise SystemExit("SCREEN_ENABLED=true needs BROWSER_ENABLED=true: the screen shows the agent's browser")
         self.check_model()
 
     @classmethod

@@ -43,6 +43,8 @@ class Screens:
         self._lock = asyncio.Lock()
         # Set when screen connections should be cut but browserd couldn't be told; tick() does it.
         self._disconnect_due = False
+        # Set when browserd couldn't be told who has the browser; tick() tries again.
+        self._sync_due = False
 
     @property
     def available(self) -> bool:
@@ -70,7 +72,9 @@ class Screens:
         try:
             await self.browser.user_mode(self.roland_has_browser())
         except BrowserError:
+            self._sync_due = True
             return False
+        self._sync_due = False
         return True
 
     def password_for(self, mode: str) -> str:
@@ -168,6 +172,10 @@ class Screens:
         if not self.available:
             return
         await self.expire_idle()
+        if not (self._disconnect_due or self._sync_due or self.roland_has_browser()):
+            # Nothing of Roland's is open and browserd has been told everything, so there
+            # is nothing to compare. Most of the day this is the case: no call, no log line.
+            return
         async with self._lock:
             try:
                 if self._disconnect_due:

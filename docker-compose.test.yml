@@ -30,10 +30,14 @@ services:
 
   # The real browser service, pointed at the fixture site. The site has a private address,
   # so its name is let through here and nowhere else (never in docker-compose.yml).
+  # The screen server runs too, and also lets in the tester (10.77.5.31), which talks to it
+  # directly to check what x11vnc itself enforces. In production only noVNC may connect.
   browser:
     environment:
       BROWSER_ALLOW_PRIVATE_HOSTS: fixture-web
       BROWSER_MAX_DOWNLOAD_MB: "4"  # small, so the test for an oversized download is quick
+      SCREEN_ENABLED: "true"
+      VNC_ALLOWED_PEERS: "10.77.5.30,10.77.5.31"
     volumes:
       - type: bind
         source: ${WORKSPACE_HOST_DIR:-./.ci-workspace}/browser
@@ -108,8 +112,11 @@ services:
       BROWSER_LIVE_REQUIRED: ${BROWSER_LIVE_REQUIRED:-}
       BROWSER_LIVE_AFTER_RESTART: ${BROWSER_LIVE_AFTER_RESTART:-}
       SCREEN_ENABLED: "false"
+      VNC_HOST: 10.77.5.40
+      VNC_PASSWORD_FILE: /run/secrets/vnc_password
+      VNC_VIEW_PASSWORD_FILE: /run/secrets/vnc_view_password
       TZ: Europe/Helsinki
-    secrets: [sandbox_api_token, browser_api_token]
+    secrets: [sandbox_api_token, browser_api_token, vnc_password, vnc_view_password]
     volumes:
       - type: bind
         source: .
@@ -124,6 +131,8 @@ services:
     networks:
       sandbox_ctl: { ipv4_address: 10.77.3.10 }
       browser_ctl: { ipv4_address: 10.77.4.10 }
+      # Not noVNC's address: the real noVNC container runs next to the tester in this stack.
+      vnc: { ipv4_address: 10.77.5.31 }
       fixtures: { ipv4_address: 10.77.20.10 }
     depends_on:
       sandbox: { condition: service_healthy }

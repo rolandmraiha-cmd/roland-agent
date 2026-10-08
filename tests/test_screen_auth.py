@@ -273,3 +273,51 @@ async def test_restart_ends_sessions_and_housekeeping_cleans_up(tmp_path, fake):
     await again.screens.tick()
     assert fake.disconnects == before + 1  # once is enough
     assert again.memory.audit_rows(event="screen_session_end")[0]["detail"]["reason"] == "restart"
+    # With nothing open and nothing owed, housekeeping leaves browserd alone.
+    quiet = len(fake.calls)
+    for _ in range(3):
+        await again.screens.tick()
+    assert len(fake.calls) == quiet
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_retries_a_hand_back_browserd_missed(tmp_path, fake):
+    """Roland releases the screen while browserd can't be reached: the records say the agent
+    has the browser, browserd still says Roland. The next rounds put that right, then stop."""
+    agent = screen_agent(tmp_path, fake)
+    login_hash = "d" * 64
+    session = await agent.screens.start(login_hash, "control")
+    assert fake.mode == "user"
+    fake.unreachable = True
+    assert await agent.screens.release(session["id"], login_hash)
+    assert not agent.screens.roland_has_browser() and fake.mode == "user"
+    await agent.screens.tick()  # still unreachable: tried, nothing changed
+    assert fake.mode == "user"
+    fake.unreachable = False
+    before = fake.disconnects
+    await agent.screens.tick()
+    assert fake.mode == "agent" and fake.disconnects == before + 1
+    quiet = len(fake.calls)
+    await agent.screens.tick()
+    assert len(fake.calls) == quiet
+
+
+@pytest.mark.asyncio
+async def test_housekeeping_retries_when_only_the_mode_switch_was_missed(tmp_path, fake):
+    """The screen was cut, but browserd did not take "the agent has the browser again".
+    Until it does, the agent's calls come back locked; housekeeping keeps at it."""
+    agent = screen_agent(tmp_path, fake)
+    login_hash = "e" * 64
+    session = await agent.screens.start(login_hash, "control")
+    fake.down_paths = {"/v1/user-mode"}
+    before = fake.disconnects
+    assert await agent.screens.release(session["id"], login_hash)
+    assert fake.disconnects == before + 1 and fake.mode == "user"
+    await agent.screens.tick()  # still failing
+    assert fake.mode == "user"
+    fake.down_paths = set()
+    await agent.screens.tick()
+    assert fake.mode == "agent" and fake.disconnects == before + 1  # no second cut was owed
+    quiet = len(fake.calls)
+    await agent.screens.tick()
+    assert len(fake.calls) == quiet
