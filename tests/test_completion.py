@@ -7,7 +7,7 @@ import os
 import pytest
 
 from agent import core
-from agent.completion import UNSAVED_REPLY
+from agent.completion import UNSAVED_REPLY, file_save_request, unverified_save_claim
 from agent.models.context import estimate_tokens
 from agent.models.llamacpp import LlamaCppBrain
 from tests.conftest import call
@@ -20,6 +20,7 @@ async def collect(stream):
 @pytest.mark.parametrize("name,args", [
     ("read_file", {"path": "code.txt"}),
     ("browser_snapshot", {"max_chars": 2000}),
+    ("fetch_url", {"url": "https://example.com"}),
 ])
 @pytest.mark.asyncio
 async def test_successful_read_loop_ends_with_the_existing_result(make_agent, monkeypatch, name, args):
@@ -223,6 +224,84 @@ async def test_plain_answers_and_missing_file_answers_remain_available(make_agen
     events = await collect(agent.chat(agent.memory.new_chat(), prompt))
     assert len(agent.brain.seen) == 1
     assert events[-1]["reply"].strip() == answer
+
+
+@pytest.mark.parametrize("answer", [
+    "Sure, I've saved requested.txt.",
+    "Successfully saved requested.txt.",
+    "All set. I have saved requested.txt.",
+    "Okay, saved requested.txt.",
+])
+@pytest.mark.asyncio
+async def test_introductory_words_do_not_bypass_save_evidence(make_agent, answer):
+    agent = make_agent([answer, answer])
+    events = await collect(agent.chat(agent.memory.new_chat(), "Save requested.txt with x."))
+    assert events[-1]["reply"] == UNSAVED_REPLY
+    assert not any(event["type"] == "text" for event in events)
+
+
+@pytest.mark.parametrize("prompt,written", [
+    ("Save othernote.txt.", {"note.txt"}),
+    ("Save a.txt and b.txt.", {"a.txt"}),
+    ("Save config.toml and data.xml.", {"config.toml"}),
+    ("Save README and LICENSE.", {"README"}),
+])
+@pytest.mark.asyncio
+async def test_a_generic_save_acknowledgement_requires_every_exact_target(make_agent, monkeypatch, prompt, written):
+    writes = [("", [call("write_file", json.dumps({"path": path, "content": "x"}))]) for path in written]
+    agent = make_agent([*writes, "saved"])
+
+    async def result(ctx, name, args):
+        return f"Saved {args['path']} (1 characters)."
+
+    monkeypatch.setattr(core, "call_tool", result)
+    events = await collect(agent.chat(agent.memory.new_chat(), prompt))
+    assert events[-1]["reply"] == UNSAVED_REPLY
+    assert not any(event["type"] == "text" for event in events)
+
+
+@pytest.mark.parametrize("path", ["config.toml", "data.xml", "README", "config", ".env", "LICENSE"])
+@pytest.mark.asyncio
+async def test_save_requests_support_arbitrary_extensions_and_extensionless_names(make_agent, path):
+    agent = make_agent(["saved", "saved"])
+    events = await collect(agent.chat(agent.memory.new_chat(), f"Save {path}."))
+    assert events[-1]["reply"] == UNSAVED_REPLY
+    assert not any(event["type"] == "text" for event in events)
+
+
+@pytest.mark.parametrize("prompt", [
+    "Save config.toml with the content preference = short.",
+    "Save config with exactly this content: fact.",
+    'Save "preference" with content x.',
+])
+def test_file_content_and_quoted_names_do_not_change_file_intent(prompt):
+    assert file_save_request(prompt)
+    assert unverified_save_claim("saved", prompt, set())
+
+
+@pytest.mark.parametrize("prompt,answer,written", [
+    ("Save requested.txt.", "I haven't saved requested.txt.", set()),
+    ("Save requested.txt.", "The file was not saved.", set()),
+    ("Save a.txt and b.txt.", "Saved a.txt. I haven't saved b.txt.", {"a.txt"}),
+    ("Read input.txt and save its code in output.txt.", "saved", {"output.txt"}),
+    ('Save files named "my note.txt" and "second note.txt".', "saved", {"my note.txt", "second note.txt"}),
+])
+def test_honest_failures_partial_reports_and_input_files_are_not_false_save_claims(prompt, answer, written):
+    assert not unverified_save_claim(answer, prompt, written)
+
+
+@pytest.mark.parametrize("prompt,answer", [
+    ("Read code.txt and tell me who created it.", "The file was created by Codex."),
+    ("Explain what saved means in a file dialog.", "Saved means the text was stored."),
+    ("Write a paragraph about cars.", "I created a paragraph about cars."),
+    ("Save my preference for short replies.", "Saved your preference."),
+])
+@pytest.mark.asyncio
+async def test_reading_explanations_and_plain_writing_do_not_request_a_file(make_agent, prompt, answer):
+    assert not file_save_request(prompt)
+    agent = make_agent([answer])
+    events = await collect(agent.chat(agent.memory.new_chat(), prompt))
+    assert len(agent.brain.seen) == 1 and events[-1]["reply"].strip() == answer
 
 
 @pytest.mark.skipif(os.name == "nt", reason="The production Workspace uses Linux dir_fd operations")

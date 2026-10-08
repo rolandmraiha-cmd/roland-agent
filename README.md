@@ -28,6 +28,8 @@ Live screen and human sign-in (M7), persona and training pipeline (M8), and the 
 
 **Verification follow-up (#50, verified on Contabo):** scripts close stdin and disable Docker input attachment for sandbox/browser probes. Normal verification now finishes **11 / 0 / 1** without terminal redirection. The earlier killed probe (137) was a verifier input problem, not evidence of an OOM.
 
+**Completion review fixes:** web fetches also use the repeated-read guard. Save checks recognise acknowledgements after introductory words, arbitrary filename extensions and names without extensions. Generic “saved” needs exact evidence for every requested output path; input files and honest partial/failure reports remain distinct. These checks apply to recognised file-write requests; reading file contents and writing ordinary chat text do not require a file save.
+
 **Merged follow-ups:** #48–#50 landed in `v2` with merge commits and their temporary branches were removed. The tool-completion follow-up starts from `a0dbf22` and targets `v2`.
 
 ## Develop

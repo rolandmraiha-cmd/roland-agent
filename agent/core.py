@@ -11,7 +11,7 @@ from dataclasses import replace
 
 from .audit import Audit
 from .brain import Brain, Step
-from .completion import UNSAVED_REPLY, canonical_path, file_context, unverified_save_claim
+from .completion import UNSAVED_REPLY, canonical_path, file_save_request, unverified_save_claim
 from .config import Config
 from .gate import ALREADY_REJECTED, POLICIES, Gate, RunState
 from .memory import Job, Memory
@@ -22,7 +22,7 @@ from .tools_browser import BROWSER_TOOLS
 
 _MARKER = re.compile(r"tool_output", re.IGNORECASE)
 _NOT_NAME = re.compile(r"[^A-Za-z0-9_.-]")
-_READ_TOOLS = frozenset({"read_file", "list_files", "file_info", "browser_snapshot"})
+_READ_TOOLS = frozenset({"read_file", "list_files", "file_info", "browser_snapshot", "fetch_url"})
 
 
 def tool_name(raw: str) -> str:
@@ -305,7 +305,7 @@ class Agent:
         tools = schemas(tool_exclude)
         reply = ""
         request = next((str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), "")
-        check_save = file_context(request)
+        check_save = file_save_request(request)
         written_paths: set[str] = set()
         tool_attempted = False
         save_repair_attempted = False
