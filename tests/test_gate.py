@@ -12,7 +12,7 @@ from conftest import FakeBrain, call, make_config
 from fastapi.testclient import TestClient
 
 from agent.core import Agent
-from agent.gate import ALREADY_REJECTED, POLICIES, Decision, Gate, Risk, RunState
+from agent.gate import ALREADY_REJECTED, POLICIES, Decision, Gate, Risk, RunState, action_key
 from agent.memory import Memory
 from agent.tools import TOOLS, ToolContext, call_tool
 from agent.web.app import create_app
@@ -174,6 +174,27 @@ async def test_a_rejected_action_is_not_asked_again_in_the_same_run(tmp_path):
     assert len(agent.brain.seen) == 3  # no further tool rounds after the refusal
     assert agent.memory.facts()
     assert agent.memory.audit_rows(event="approval_repeat_refused")
+
+
+def test_rejection_memory_matches_actions_not_card_text():
+    """Codex review on #47: the card summary leaves out arguments, so it can't be the key."""
+    old = action_key("write_file", {"path": "a.txt", "content": "v1", "overwrite": True}, "Overwrite a.txt")
+    revised = action_key("write_file", {"path": "a.txt", "content": "v2", "overwrite": True}, "Overwrite a.txt")
+    assert old != revised
+    # The model's reason and pinned classifier facts don't make a call new.
+    assert old == action_key(
+        "write_file", {"path": "a.txt", "content": "v1", "overwrite": True, "reason": "again", "_pin": {"x": 1}},
+        "Overwrite a.txt",
+    )
+    # A fresh snapshot may give the same button another ref.
+    click = "Click “Submit order” (button) on httpbin.org · matched “order”"
+    assert action_key("browser_click", {"ref": "e13"}, click) == action_key("browser_click", {"ref": "e21"}, click)
+    typed = "Type into “Name” on httpbin.org"
+    assert action_key("browser_type", {"ref": "e4", "text": "Test"}, typed) != action_key(
+        "browser_type", {"ref": "e4", "text": "Other"}, typed
+    )
+    # Outside the browser a ref-like argument is real data.
+    assert action_key("some_tool", {"ref": "1"}, "s") != action_key("some_tool", {"ref": "2"}, "s")
 
 
 @pytest.mark.asyncio
