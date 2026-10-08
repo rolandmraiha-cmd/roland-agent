@@ -8,6 +8,11 @@ from typing import Any
 
 TokenCounter = Callable[[str], Awaitable[int]]
 ACTION_PROMPT_START = "\n\nAction format:\n"
+SIGNIN_HINT = (
+    "If Roland asks you to log in or sign in to a site, do not refuse: call request_signin "
+    "with the site's address. It shows him the site on his screen and he types the password "
+    "himself."
+)
 
 
 def action_prompt(tools: list[dict]) -> str:
@@ -27,6 +32,10 @@ def action_prompt(tools: list[dict]) -> str:
             "target's name and role; never guess. If it is missing, use the snapshot's next "
             "start number or omit max_chars for a fuller view."
         )
+    if any(entry.get("function", entry).get("name") == "request_signin" for entry in tools):
+        # This list carries no descriptions, and "log in to X" was refused outright without
+        # this line next to it (Contabo, 2026-10-08; a line in the browser note was not enough).
+        lines.append(SIGNIN_HINT)
     for entry in tools:
         fn = entry.get("function", entry)
         params = fn.get("parameters", {})

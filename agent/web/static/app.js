@@ -483,7 +483,8 @@ function renderApprovalCard(approval, { compact } = {}) {
 // a chat message saying "done" does nothing, and the composer stays locked meanwhile.
 // One sign-in can show in two places, the chat and the Browser tab: id -> place -> finisher.
 const signinCards = new Map();
-const SIGNIN_STATES = { done: "Signed in.", cancelled: "Cancelled.", expired: "Ran out of time." };
+// "I'm done" only says Roland stopped; whether he is signed in is for the agent to read off the page.
+const SIGNIN_STATES = { done: "You pressed I'm done.", cancelled: "Cancelled.", expired: "Ran out of time." };
 let browserSigninKey = null;
 
 function screenLink(label, cls, mode, signinId) {
@@ -505,7 +506,7 @@ function renderSigninCard(signin, place = "chat") {
   card.setAttribute("data-signin-id", signin.id);
   card.append(el("div", "badge", "sign-in"));
   card.append(el("div", "summary", "Sign in to " + (signin.site || "this site")));
-  card.append(el("p", "hint", "The agent never types passwords or codes. Open the screen, sign in yourself, then press I'm done."));
+  card.append(el("p", "hint", "The agent never types passwords or codes. Open the screen, sign in yourself, then press I'm done. If the sign-in form isn't showing there, open it on the site first."));
   const dl = el("dl", "");
   dl.append(el("dt", "", "page"), el("dd", "", typeof signin.url === "string" ? signin.url : ""));
   if (signin.reason) dl.append(el("dt", "", "why"), el("dd", "", String(signin.reason)));

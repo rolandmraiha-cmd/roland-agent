@@ -641,6 +641,13 @@ SIGNIN_FORM_ASK = (
     "This page has a sign-in form. Never type a password or code; call request_signin "
     "so Roland can sign in himself."
 )
+# Leads the page handed over after "I'm done" when its sign-in form is still there.
+SIGNIN_FORM_STILL = (
+    "The sign-in form is still showing, so he is probably not signed in. Tell him so, speaking "
+    "to him as \"you\"; don't call request_signin again unless he asks."
+)
+# Characters kept free in that tool result for the lines above the page.
+SIGNIN_RESULT_ROOM = 400
 
 
 def format_snapshot(
@@ -1104,7 +1111,21 @@ async def request_signin(ctx, args: dict) -> str:
     if signins is None:
         return "Error: asking Roland to sign in is turned off. Tell him which site needs a sign-in."
     url = str(args.get("url") or "").strip()
-    return await signins.request(ctx, url, _one_line(args.get("reason"), 300))
+    client = _browser(ctx)
+
+    async def page_now() -> str:
+        """The page once Roland is done, so the answer rests on it and not on the button he
+        pressed. Empty when it can't be read; the model is then told to look for itself."""
+        limit = max(SNAPSHOT_FLOOR, _snapshot_limit(ctx, {}) - SIGNIN_RESULT_ROOM)
+        try:
+            answer = await client.snapshot(limit)
+        except BrowserError:
+            return ""
+        # Never the "call request_signin" line here: that would ask him again straight away.
+        page = format_snapshot(answer, limit, can_ask_signin=False)
+        return f"{SIGNIN_FORM_STILL}\n{page}" if answer.get("login_form_detected") else page
+
+    return await signins.request(ctx, url, _one_line(args.get("reason"), 300), page_now=page_now)
 
 
 S = {"type": "string"}
@@ -1146,8 +1167,8 @@ SPECS: tuple[tuple[str, str, dict, list[str], Callable[[object, dict], Awaitable
      {"ref": S, "path": S, "reason": S}, ["ref", "path"], browser_upload),
     ("browser_downloads", "List files the browser downloaded. They are in browser/downloads/ in your workspace.",
      {}, [], browser_downloads),
-    ("request_signin", "Ask Roland to sign in to a site himself on the browser's screen, and wait. "
-     "Use it when a page needs a login; never type passwords or codes.",
+    ("request_signin", "Hand a sign-in to Roland: he signs in on the browser's screen and you wait. "
+     "Use it when he asks you to log in to a site or a page needs a login.",
      {"url": S, "site": S, "reason": S}, ["url"], request_signin),
 )
 

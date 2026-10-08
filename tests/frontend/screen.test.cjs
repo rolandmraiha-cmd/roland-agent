@@ -30,7 +30,8 @@ class FakeRFB {
   disconnect() { this.disconnected = true; }
 }
 
-async function fixture(search, { fail = {}, narrow = null } = {}) {
+// `visited` is how many pages the tab has shown: 1 for a tab opened just for the screen.
+async function fixture(search, { fail = {}, narrow = null, visited = 1 } = {}) {
   assert.equal(SOURCE.split(NOVNC).length, 2, 'noVNC is imported once, from this site only');
   FakeRFB.made = [];
   const elements = new Map();
@@ -38,11 +39,14 @@ async function fixture(search, { fail = {}, narrow = null } = {}) {
   const calls = [];
   const timers = [];
   const pageEvents = {};
-  const location = { search, protocol: 'https:', host: 'agent.test', href: 'https://agent.test/screen' + search };
+  const location = {
+    search, protocol: 'https:', host: 'agent.test', href: 'https://agent.test/screen' + search,
+    replace(to) { location.replaced = to; },
+  };
   const context = vm.createContext({
     document: { getElementById: get },
     window: { addEventListener: (name, fn) => { pageEvents[name] = fn; }, close() { context.closed = true; } },
-    location, URLSearchParams, encodeURIComponent, JSON,
+    location, history: { length: visited }, URLSearchParams, encodeURIComponent, JSON,
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return timers.length; },
     clearInterval: (id) => { if (timers[id - 1]) timers[id - 1].cleared = true; },
     // `narrow` true or false gives the page a browser that can answer "is this a phone?".
@@ -128,7 +132,11 @@ test('the sign-in screen takes control, and I\'m done is the button that ends it
   assert.equal(f.get('screen-watch').hidden, false);
   assert.equal(f.get('screen-mode').textContent, 'You have the browser');
   rfb.listeners.connect();
-  assert.equal(f.get('screen-status').textContent, 'Connected. The agent is paused.');
+  // The agent opens the address it was given, often the front page: he is told what to do there.
+  assert.equal(
+    f.get('screen-status').textContent,
+    "Connected. Sign in here, then press I'm done. If the sign-in form isn't showing, open it on the site first.",
+  );
   await f.get('screen-done').onclick();
   assert.deepEqual(f.posts('/api/signin/').map((c) => [c.method, c.url]), [['POST', '/api/signin/sig%2F1/done']]);
   assert.equal(rfb.disconnected, true);
@@ -213,6 +221,8 @@ test('the heartbeat keeps the session, and a session that is over closes the scr
 test('handing back, switching and leaving all give the browser back at once', async () => {
   const f = await fixture('?mode=control');
   const first = f.rfb();
+  first.listeners.connect();
+  assert.equal(f.get('screen-status').textContent, 'Connected. The agent is paused.');
   await f.get('screen-handback').onclick();
   assert.deepEqual(f.posts('/api/screen/release').map((c) => c.body), [{ id: 'screen-1' }]);
   assert.equal(first.disconnected, true);
@@ -222,6 +232,8 @@ test('handing back, switching and leaving all give the browser back at once', as
   const swap = await fixture('?mode=control');
   await swap.get('screen-watch').onclick();
   await swap.settle();
+  swap.rfb().listeners.connect();
+  assert.equal(swap.get('screen-status').textContent, 'Connected. The agent keeps working.');
   assert.deepEqual(swap.posts('/api/screen/release').map((c) => c.body), [{ id: 'screen-1' }]);
   assert.deepEqual(swap.posts('/api/screen/session').map((c) => c.body.mode), ['control', 'watch']);
   assert.equal(swap.rfb().viewOnly, true);
@@ -231,10 +243,21 @@ test('handing back, switching and leaving all give the browser back at once', as
   await leave.settle();
   assert.deepEqual(leave.posts('/api/screen/release').map((c) => [c.body, c.keepalive]), [[{ id: 'screen-1' }, true]]);
 
+  // Close in a tab opened just for the screen shuts that tab.
   const close = await fixture('?mode=watch');
   await close.get('screen-close').onclick();
   assert.equal(close.posts('/api/screen/release').length, 1);
+  assert.equal(close.context.closed, true);
   assert.equal(close.location.href, '/');
+  assert.equal(close.location.replaced, undefined);
+
+  // Where the screen was loaded in the chat's own tab, Close goes back to the chat. Shutting
+  // that tab would take the chat with it.
+  const sameTab = await fixture('?mode=control&signin=sig-1', { visited: 2 });
+  await sameTab.get('screen-close').onclick();
+  assert.equal(sameTab.posts('/api/screen/release').length, 1);
+  assert.equal(sameTab.context.closed, undefined);
+  assert.equal(sameTab.location.replaced, '/');
 
   // The screen dropping on its own (network, or core cutting it) releases the session too.
   const dropped = await fixture('?mode=control');

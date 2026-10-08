@@ -872,6 +872,8 @@ test('sign-in card shows the site as text and its buttons call only the sign-in 
   assert.equal(card.children.find((c) => c.className === 'summary').textContent, 'Sign in to <img src=x onerror=alert(1)>');
   const dl = card.children.find((c) => c.tagName === 'DL');
   assert.deepEqual(dl.children.map((c) => c.textContent), ['page', 'javascript:alert(1)', 'why', '<b>trust me</b>']);
+  // The agent opens the address it was given, often a front page: the card says what to do then.
+  assert.match(card.children.find((c) => c.className === 'hint').textContent, /sign-in form isn't showing there, open it on the site first/);
   const [open, done, cancel] = actionsOf(card);
   // The link goes to this app's own screen page, never to the address the agent named.
   assert.equal(open.tagName, 'A');
@@ -884,7 +886,7 @@ test('sign-in card shows the site as text and its buttons call only the sign-in 
   assert.equal(cancel.disabled, true);
   assert.equal(open.hidden, true);
   assert.equal(open.href, undefined);
-  assert.equal(card.children[card.children.length - 1].textContent, 'Signed in.');
+  assert.equal(card.children[card.children.length - 1].textContent, "You pressed I'm done.");
   assert.equal(f.run('composerLocked'), false);
 
   const second = f.run('renderSigninCard(' + JSON.stringify({ ...signin, id: 'sig/2?x' }) + ')');
@@ -907,7 +909,7 @@ test('a failed Done leaves the sign-in card usable and says why', async () => {
 
 test('a finished sign-in renders without buttons', () => {
   const f = signinFixture();
-  for (const [status, text] of [['done', 'Signed in.'], ['cancelled', 'Cancelled.'], ['expired', 'Ran out of time.'], ['odd', 'Status: odd']]) {
+  for (const [status, text] of [['done', "You pressed I'm done."], ['cancelled', 'Cancelled.'], ['expired', 'Ran out of time.'], ['odd', 'Status: odd']]) {
     const card = f.run('renderSigninCard(' + JSON.stringify({ ...signin, status }) + ')');
     assert.equal(card.children.some((c) => c.className === 'actions'), false);
     assert.equal(card.children[card.children.length - 1].textContent, text);
@@ -952,7 +954,7 @@ test('the composer is locked while a sign-in waits, and typing "done" sends noth
   await sent;
   assert.equal(f.run('composerLocked'), false);
   assert.equal(actionsOf(card)[1].disabled, true);
-  assert.equal(card.children[card.children.length - 1].textContent, 'Signed in.');
+  assert.equal(card.children[card.children.length - 1].textContent, "You pressed I'm done.");
 });
 
 test('reopening a chat shows its waiting sign-in and keeps the composer locked', async () => {
@@ -997,7 +999,7 @@ test('a sign-in shown in the chat and on the Browser tab is finished in both pla
   for (const card of [inChat, redrawn]) {
     assert.equal(actionsOf(card)[1].disabled, true);
     assert.equal(actionsOf(card)[0].hidden, true);
-    assert.equal(card.children[card.children.length - 1].textContent, 'Signed in.');
+    assert.equal(card.children[card.children.length - 1].textContent, "You pressed I'm done.");
   }
   assert.equal(actionsOf(onTab)[1].disabled, false);  // the replaced copy is off the page
   assert.equal(f.run('signinCards.size'), 0);

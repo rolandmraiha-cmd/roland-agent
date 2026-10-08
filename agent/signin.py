@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -33,6 +34,12 @@ NEEDS_APPROVAL = (
     "then call request_signin with the address of the page that is showing."
 )
 STOPPED = "Not done: the run was stopped."
+# What the model is told when Roland presses the button. The button only says he stopped; the
+# model once answered "successfully signed in" from it while the sign-in form was still
+# showing (Contabo, 2026-10-08), so the page as it is now is handed over with it.
+DONE = 'Roland pressed "I\'m done" for {site}. That doesn\'t prove he is signed in.'
+DONE_PAGE = " This is the page now; go by what it shows:\n"
+DONE_LOOK = " Take a snapshot and go by what the page shows."
 
 
 def signin_public(row: dict) -> dict:
@@ -101,8 +108,11 @@ class SignIns:
             detail={"signin_id": row["id"], "site": row["site"], **extra},
         )
 
-    async def request(self, ctx, url: str, reason: str = "") -> str:
-        """The `request_signin` tool: returns the line the model is told when the wait ends."""
+    async def request(
+        self, ctx, url: str, reason: str = "", *, page_now: Callable[[], Awaitable[str]] | None = None,
+    ) -> str:
+        """The `request_signin` tool: returns the line the model is told when the wait ends.
+        `page_now` reads the page once Roland is done; what it returns goes into that line."""
         run = getattr(ctx, "run", None)
         if not self.screens.available:
             return UNAVAILABLE
@@ -198,7 +208,8 @@ class SignIns:
             final = (self.memory.signin_request(signin_id) or current)["status"]
             await run.events.put({"type": "signin_resolved", "id": signin_id, "status": final})
         if final == "done":
-            return f"Roland says he finished signing in to {row['site']}. Take a snapshot to confirm."
+            page = await page_now() if page_now is not None else ""
+            return DONE.format(site=row["site"]) + (DONE_PAGE + page if page else DONE_LOOK)
         if final == "expired":
             return f"Roland didn't finish signing in within {self.minutes} minutes."
         if run.stopped:
