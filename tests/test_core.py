@@ -44,7 +44,7 @@ async def test_file_use_rule_reaches_model_within_host_prompt_budget(make_agent,
 
     rule = (
         "Only use files if Roland asks to use them or names one. "
-        "Never keep notes yourself. Missing files contain nothing."
+        "Keep notes only when asked. Missing files contain nothing."
     )
     agent = make_agent(
         ["done"], model_ctx=3072, model_max_new_tokens=768,
@@ -64,6 +64,7 @@ async def test_file_use_rule_reaches_model_within_host_prompt_budget(make_agent,
 
     system = agent.brain.seen[0][0]["content"]
     assert rule in system
+    assert "Never keep notes yourself" not in system
     assert estimate_tokens(rule + "\n") <= 40
     assert agent._budget() == 3072 - 768 - 256
     assert estimate_tokens(system + request) <= agent._budget()
