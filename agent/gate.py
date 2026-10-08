@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 
 CONFIRM_CATEGORIES = frozenset({"payment", "message", "public_post", "delete"})
 
+# Returned instead of a new card when the run asks again for something Roland rejected.
+ALREADY_REJECTED = (
+    "Roland already rejected this in this conversation turn, so it wasn't asked again. "
+    "Don't try it again; tell Roland it wasn't done."
+)
+
 # Reserved argument name. Only a classifier may fill it (through Decision.pinned): call_tool
 # drops anything the model put there. It carries facts that must stay bound to the approved
 # action, such as the fingerprint of the page element Roland was shown.
@@ -75,6 +81,10 @@ class RunState:
     # tools_browser._target). The next action on the same element is gated instead of being
     # blocked again (§6.5 POST-navigation guard).
     blocked_submissions: set[str] = field(default_factory=set)
+    # (tool, card summary) of every approval Roland rejected in this run. The same action
+    # gets no new card: the summary names the element and site, so a fresh snapshot that
+    # renumbers refs doesn't make it look new.
+    rejected_actions: set[tuple[str, str]] = field(default_factory=set)
 
 
 def _safe(_ctx: ToolContext, _args: dict) -> Awaitable[Decision]:
@@ -417,6 +427,17 @@ class Gate:
             expires = time.time() + timeout_min * 60
             model_reason = str(args.get("reason", ""))[:300] or None
             summary = self._summary(name, args, decision)
+            if (name, summary) in run.rejected_actions:
+                self.audit.write(
+                    "agent",
+                    "approval_repeat_refused",
+                    run_id=run.run_id,
+                    chat_id=run.chat_id,
+                    tool=name,
+                    decision="rejected",
+                    detail={"category": decision.category, "summary": summary},
+                )
+                return Outcome(False, message=ALREADY_REJECTED)
             details = self._details(name, args, decision)
             needs_confirm = decision.category in CONFIRM_CATEGORIES
             approval_id = self.memory.add_approval(
@@ -505,6 +526,9 @@ class Gate:
         finally:
             run.pending_approval_id = None
             self._waiters.pop(approval_id, None)
+            final = self.memory.approval(approval_id)
+            if final is not None and final["status"] == "rejected":
+                run.rejected_actions.add((name, summary))
 
     async def _attach_card_screenshot(self, approval_id: str, decision: Decision) -> None:
         """Save what the browser shows right now so Roland can see it on the card. A failure

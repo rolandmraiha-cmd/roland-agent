@@ -12,7 +12,7 @@ from dataclasses import replace
 from .audit import Audit
 from .brain import Brain, Step
 from .config import Config
-from .gate import POLICIES, Gate, RunState
+from .gate import ALREADY_REJECTED, POLICIES, Gate, RunState
 from .memory import Job, Memory
 from .models.context import fit_messages, schemas_for_prompt
 from .schedule import now_text, today
@@ -203,17 +203,21 @@ class Agent:
         finally:
             self._streams.release()
 
-    async def _force_text_reply(self, messages: list[dict], reply: str) -> AsyncIterator[dict]:
-        """One tools-disabled model call after a repeated failed tool; ends the run."""
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    "That exact tool call already failed. Do not call tools again. "
-                    "Answer Roland now in plain text with what you know."
-                ),
-            }
-        )
+    async def _force_text_reply(
+        self,
+        messages: list[dict],
+        reply: str,
+        instruction: str = (
+            "That exact tool call already failed. Do not call tools again. "
+            "Answer Roland now in plain text with what you know."
+        ),
+        fallback: str = (
+            "A tool I needed failed, and retrying would not help. "
+            "Please try a different request or add the missing file."
+        ),
+    ) -> AsyncIterator[dict]:
+        """One tools-disabled model call after a repeated failed or rejected tool; ends the run."""
+        messages.append({"role": "user", "content": instruction})
         try:
             self._count_call()
         except LimitReached as e:
@@ -238,10 +242,7 @@ class Agent:
         # Tools were disabled; ignore any tool_calls the model still attempted.
         reply += step.text or ""
         if not reply.strip():
-            reply = (
-                "A tool I needed failed, and retrying would not help. "
-                "Please try a different request or add the missing file."
-            )
+            reply = fallback
         yield {"type": "done", "reply": reply}
 
     async def run(
@@ -336,6 +337,7 @@ class Agent:
                     ],
                 }
             )
+            asked_again_after_reject = False
             for call in step.tool_calls:
                 name = tool_name(call.name)
                 try:
@@ -405,6 +407,8 @@ class Agent:
                             # ref that didn't exist yet) may be worth making again.
                             for old in [s for s in failed_tool_sigs if s.startswith("browser_")]:
                                 del failed_tool_sigs[old]
+                        if result == f"Not done: {ALREADY_REJECTED}":
+                            asked_again_after_reject = True
                         if result.startswith("Not done:"):
                             decision_label = "gated"
                         elif policy and policy.taints:
@@ -419,6 +423,20 @@ class Agent:
                     # Extra model-facing cap after strip_markers (§6.2.3).
                     result = clip(result, self.config.model_tool_output_chars)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
+            if asked_again_after_reject:
+                # The gate refused to ask Roland again for something he rejected. Without this,
+                # the model tends to keep trying until MAX_TOOL_STEPS.
+                async for event in self._force_text_reply(
+                    messages,
+                    reply,
+                    instruction=(
+                        "Roland rejected that action, so it will not be asked again. Do not call "
+                        "tools again. Tell Roland in plain text what was not done."
+                    ),
+                    fallback="Not done: you rejected that action, so I didn't ask for it again.",
+                ):
+                    yield event
+                return
             if reply and not reply.endswith("\n"):
                 reply += "\n"
         yield {

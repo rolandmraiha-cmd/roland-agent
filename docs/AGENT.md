@@ -200,6 +200,7 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 - Docker clears `OOMKilled` when a container restarts, and it never shows a killed child process (llama-server under `run.sh`, a Chromium renderer). Check `RestartCount`, the cgroup's `oom_kill` counter or `journalctl -k`; `make memory-report` does the first two.
 - sandboxd leftover reap must run only inside its container; on a host it kills the machine.
 - A chat "yes" must never bypass the approval UI.
+- Within one run, an action Roland rejected gets no new card: the gate matches tool and card summary (element and site, so a renumbered ref doesn't count as new), answers `ALREADY_REJECTED`, and the loop ends with a plain-text reply. A new message may ask again.
 - `_pin` in tool args is reserved for classifiers (`Decision.pinned`). `call_tool` drops a model-supplied one; browser handlers refuse to act without it.
 - Browser tool errors start with `Error:` (nothing happened) and a blocked form submission starts with `Not done:` (ask again to get an approval card). The loop forgets earlier browser failures after a browser call succeeds, so a ref that failed can be retried after a new snapshot.
 - Grammar-valid output is not authorization.
