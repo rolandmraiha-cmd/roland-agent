@@ -35,6 +35,44 @@ async def test_history_and_facts_reach_model(make_agent):
     assert [m["content"] for m in sent[1:]] == ["first", "one", "second"]
 
 
+@pytest.mark.parametrize("browser_enabled", [False, True], ids=["browser-off", "browser-on"])
+@pytest.mark.parametrize("background", [False, True], ids=["chat", "job"])
+@pytest.mark.asyncio
+async def test_file_use_rule_reaches_model_within_host_prompt_budget(make_agent, browser_enabled, background):
+    from agent.models.context import estimate_tokens
+    from agent.tools import MAX_FACTS
+
+    rule = (
+        "Only use files if Roland asks to use them or names one. "
+        "Keep notes only when asked. Missing files contain nothing."
+    )
+    agent = make_agent(
+        ["done"], model_ctx=3072, model_max_new_tokens=768,
+        browser_enabled=browser_enabled, browser_api_token="test-browser-token",
+    )
+    # Exercise the protected system message with a full fact store and the optional browser note.
+    for i in range(MAX_FACTS):
+        agent.memory.remember(f"Preference {i}: " + "x" * 180)
+    request = "Tell me the page title of https://example.com."
+    if background:
+        job_id = agent.memory.add_job("Title", "0 7 * * *", request, 0)
+        ok, _ = await agent.run_job(agent.memory.job(job_id))
+        assert ok
+    else:
+        events = await collect(agent.chat(agent.memory.new_chat(), request))
+        assert events[-1]["type"] == "done"
+
+    system = agent.brain.seen[0][0]["content"]
+    assert rule in system
+    assert "Never keep notes yourself" not in system
+    assert estimate_tokens(rule + "\n") <= 40
+    assert agent._budget() == 3072 - 768 - 256
+    assert estimate_tokens(system + request) <= agent._budget()
+    assert ("You also have a real web browser" in system) is browser_enabled
+    # This is prompt guidance; ordinary file tools remain available in chats and jobs.
+    assert {"read_file", "write_file"}.issubset(agent.brain.tools[0])
+
+
 def test_old_facts_are_bounded_in_the_prompt(make_agent):
     # Older versions saved facts with no limits; the prompt still keeps them short and few.
     from agent.tools import MAX_FACT_CHARS, prompt_facts

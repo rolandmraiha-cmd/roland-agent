@@ -22,7 +22,13 @@ Roland's private, always-on AI agent: password-protected web chat, a self-hosted
 
 Live screen and human sign-in (M7), persona and training pipeline (M8), and the 2.0.0 release (M9). Their flags stay off in production. See [docs/NEXT.md](docs/NEXT.md).
 
-**M6 is still awaiting final acceptance.** The supplied `WATCH=600 make memory-report` says `A6.5 PASS`; a completed `sudo make verify` including browser isolation (A6.4) is still needed, followed by the form smoke after #46/#47 and Roland's confirmation. Repo browser defaults stay off; the host has both `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`. A short prompt rule to stop unsolicited notes files is the next separate PR. **Do not start M7 until Roland confirms M6 is done.** Snapshot: `pre-m6-deploy-2026-10-08`. Roland runs host commands himself; deploy uses `sudo env APPLY=1 make deploy` because of uid-1000 secret permissions.
+**M6 is still awaiting final acceptance.** The supplied `WATCH=600 make memory-report` says `A6.5 PASS`; a completed `sudo make verify` including browser isolation (A6.4) is still needed, followed by the form smoke after #46/#47 and Roland's confirmation. Repo browser defaults stay off; the host has both `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`. **Do not start M7 until Roland confirms M6 is done.** Snapshot: `pre-m6-deploy-2026-10-08`. Roland runs host commands himself; deploy uses `sudo env APPLY=1 make deploy` because of uid-1000 secret permissions.
+
+**File-use prompt follow-up (pending Contabo deploy):** the model is told to use files only when Roland asks to use them or names one, keep notes only when asked, and treat missing files as empty. Notes Roland requests remain supported; unsolicited notes are forbidden. Tests cover chats and jobs with the browser off/on at the host context budget. This is a short prompt rule; file tools, their policies and approvals are unchanged. Roland still needs to deploy and check the model's live behaviour.
+
+**Verification follow-up (pending host update):** `make verify` stalled at a sandbox network probe. The same probe finished with the expected blocked connection when its timeout ran inside the sandbox. `isolation.sh` now bounds those commands and stuck Docker clients, reports the active check, and fails when a probe breaks or exceeds its deadline. Regression tests cover actual stuck fixture processes and unexpected exit codes. Roland must rerun `sudo make verify` after updating; one blocked probe does not complete M6 acceptance.
+
+**Merge order for these follow-ups:** use GitHub's **Create a merge commit** for documentation PR #48, then merge #49. Both target `v2`; preserving #48's commit avoids conflicts in the documentation shared by the branches.
 
 ## Develop
 
