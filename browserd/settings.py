@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,7 @@ MAX_SCREENSHOT_BYTES = 5_000_000
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 FULL_PAGE_MAX_HEIGHT = 8000        # pixels in a full-page screenshot
+VNC_PORT = 5900                    # x11vnc, on the screen network only (§6.5)
 
 
 def _int(name: str, default: int, low: int, high: int) -> int:
@@ -57,6 +59,35 @@ def _token() -> str:
     return os.environ.get("BROWSER_API_TOKEN", "").strip()
 
 
+def _address(name: str, default: str) -> str:
+    """One IPv4 address of this container. Never "every address", and never loopback: the
+    screen server must listen on the screen network and nowhere else."""
+    raw = os.environ.get(name, "").strip() or default
+    try:
+        address = ipaddress.IPv4Address(raw)
+    except ValueError as error:
+        raise SystemExit(f"{name} must be an IPv4 address") from error
+    if address.is_unspecified or address.is_loopback:
+        raise SystemExit(f"{name} must be this container's own address on its network")
+    return str(address)
+
+
+def _addresses(name: str, default: str) -> tuple[str, ...]:
+    """A comma list of whole IPv4 addresses. x11vnc would also take name prefixes and file
+    names in its allow list; neither gets through here."""
+    found = []
+    for part in (os.environ.get(name, "").strip() or default).split(","):
+        if not part.strip():
+            continue
+        try:
+            found.append(str(ipaddress.IPv4Address(part.strip())))
+        except ValueError as error:
+            raise SystemExit(f"{name} must be a comma list of IPv4 addresses") from error
+    if not found:
+        raise SystemExit(f"{name} must name at least one address")
+    return tuple(found)
+
+
 def _viewport() -> tuple[int, int]:
     raw = os.environ.get("BROWSER_VIEWPORT", "").strip().lower() or "1280x800"
     width, _, height = raw.partition("x")
@@ -94,6 +125,11 @@ class Settings:
     locale: str = "en-GB"
     timezone: str = "Europe/Helsinki"
     headless: bool = False  # development and tests only; production is headed on Xvfb
+    # The screen Roland watches and signs in on (M7). Off: no x11vnc runs and nothing
+    # listens on the screen network. The launcher reads the same three settings.
+    screen_enabled: bool = False
+    vnc_listen: str = "10.77.5.40"
+    vnc_peers: tuple[str, ...] = ("10.77.5.30",)
 
     @property
     def downloads_dir(self) -> Path:
@@ -133,4 +169,7 @@ class Settings:
             max_download_bytes=_int("BROWSER_MAX_DOWNLOAD_MB", MAX_DOWNLOAD_BYTES // 2**20, 1, 2048) * 2**20,
             timezone=os.environ.get("TZ", "").strip() or "Europe/Helsinki",
             headless=_bool("BROWSERD_HEADLESS"),
+            screen_enabled=_bool("SCREEN_ENABLED"),
+            vnc_listen=_address("VNC_LISTEN", "10.77.5.40"),
+            vnc_peers=_addresses("VNC_ALLOWED_PEERS", "10.77.5.30"),
         )

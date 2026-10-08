@@ -91,6 +91,15 @@ def test_deprecated_api_key_is_ignored(clean_env, monkeypatch, caplog):
             {"screen_enabled": True, "vnc_password": "same-test", "vnc_view_password": "same-test"},
             "must differ",
         ),
+        # VNC only compares the first eight characters.
+        (
+            {"screen_enabled": True, "vnc_password": "Abcdefgh-control", "vnc_view_password": "Abcdefgh-view"},
+            "first 8 characters",
+        ),
+        ({"screen_enabled": True, "vnc_password": "two words", "vnc_view_password": "view-test"}, "without spaces"),
+        ({"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "#comment"}, "leading #"),
+        ({"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "a__SKIP__b"}, "double underscore"),
+        ({"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "view-test"}, "needs BROWSER_ENABLED"),
         ({"model_base_url": "https://127.0.0.1:8080"}, "must be an http URL"),
         ({"model_base_url": "http://8.8.8.8", "model_allowed_hosts": ("8.8.8.8",)}, "must resolve only"),
         ({"model_base_url": "http://10.0.0.2"}, "MODEL_ALLOWED_HOSTS"),
@@ -124,7 +133,7 @@ def test_valid_production_configuration():
         screen_enabled=True,
         vnc_password="control-test",
         vnc_view_password="view-test",
-    ).check()  # Settings are valid; build separately refuses unimplemented services.
+    ).check()
 
 
 def test_allowed_hosts_defaults_to_agent_host(clean_env, monkeypatch):
@@ -221,14 +230,26 @@ def test_sandbox_backend_builds(make_agent, monkeypatch):
     assert isinstance(agent.ctx.shell, SandboxShell)
 
 
-def test_screen_service_fails_closed_until_it_exists(make_agent, monkeypatch):
+def test_screen_can_be_switched_on_and_needs_the_browser(make_agent, monkeypatch):
+    """M7: SCREEN_ENABLED=true is accepted now, together with the browser it shows."""
     from agent import __main__ as cli
 
-    changes = {"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "view-test"}
-    config = replace(make_agent().config, **changes)
+    screen = {"screen_enabled": True, "vnc_password": "control-test", "vnc_view_password": "view-test"}
+    off = make_agent().config
+    monkeypatch.setattr(cli.Config, "from_env", lambda: off)
+    assert cli.build(validate=True).screens.available is False
+
+    config = replace(off, **screen, browser_enabled=True, browser_api_token="browser-test-token")
     monkeypatch.setattr(cli.Config, "from_env", lambda: config)
-    with pytest.raises(SystemExit, match="not implemented yet"):
-        cli.build(validate=True)
+    agent = cli.build(validate=True)
+    assert agent.screens.available is True
+    assert agent.screens.password_for("control") == "control-test" and agent.screens.password_for("watch") == "view-test"
+
+    without_browser = replace(off, **screen)
+    monkeypatch.setattr(cli.Config, "from_env", lambda: without_browser)
+    for validate in (True, False):  # the web server, and the commands that skip the full check
+        with pytest.raises(SystemExit, match="needs BROWSER_ENABLED"):
+            cli.build(validate=validate)
 
 
 def test_browser_can_be_switched_on_and_is_off_by_default(make_agent, monkeypatch):

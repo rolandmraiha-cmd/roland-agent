@@ -3,6 +3,7 @@ and an agent with the screen switched on. No real browser, VNC server or network
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 
@@ -35,13 +36,19 @@ class ScreenBrowserd:
         self.unreachable = False
         self.down_paths: set[str] = set()   # only these calls fail to connect
         self.forget_mode_on_status = False  # a browserd that restarted and lost user mode
+        self.disconnect_delay = 0.0         # the real one restarts x11vnc, which takes a moment
         self.calls: list[tuple[str, str, dict]] = []
 
     def paths(self, prefix: str = "") -> list[str]:
         return [path for _, path, _ in self.calls if path.startswith(prefix)]
 
     def transport(self) -> httpx.MockTransport:
-        return httpx.MockTransport(self.handle)
+        return httpx.MockTransport(self.handle_slowly)
+
+    async def handle_slowly(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/vnc/disconnect" and self.disconnect_delay:
+            await asyncio.sleep(self.disconnect_delay)
+        return self.handle(request)
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path

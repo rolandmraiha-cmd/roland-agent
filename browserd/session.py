@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import guards
+from . import guards, vnc
 from .settings import (
     FULL_PAGE_MAX_HEIGHT,
     MAX_ANSWER_BYTES,
@@ -687,8 +687,23 @@ class Session:
             self._posts_open_until = 0.0
             self._action = None
 
+    async def _show(self, tab: Tab | None = None) -> None:
+        """Put the agent's tab in front in the browser window. That window is what Roland
+        sees on the screen (M7), and a tab left behind another one counts as hidden to its
+        own page as well. A tab the agent can't see (one whose first request was refused,
+        say) may have opened in front of it."""
+        if self.s.headless:
+            return
+        try:
+            tab = tab or self._tab()
+            await asyncio.wait_for(tab.page.bring_to_front(), timeout=3)
+        except Exception:  # noqa: S110 -- the tab is closing; the next action shows the next one
+            pass
+
     async def _answer(self, act: _Action | None = None, **extra) -> dict:
         tab = self._tab()
+        if act is not None:
+            await self._show(tab)
         url, title = await self._where(tab)
         out: dict = {"ok": True, "mode": self.mode, "url": url, "title": title, **extra}
         if act is not None:
@@ -754,7 +769,10 @@ class Session:
 
     def health(self) -> dict:
         screen = self.s.headless or Path(f"/tmp/.X11-unix/X{self.s.display.lstrip(':')}").exists()  # noqa: S108
-        return {"ok": self.browser_ok, "xvfb": bool(screen), "vnc": False, "browser": self.browser_ok}
+        # "vnc" is whether the screen server is listening. It doesn't decide "ok": the agent's
+        # browser works without anyone being able to watch it.
+        shared = self.s.screen_enabled and vnc.listening(self.s.vnc_listen)
+        return {"ok": self.browser_ok, "xvfb": bool(screen), "vnc": bool(shared), "browser": self.browser_ok}
 
     async def status(self) -> dict:
         if not self.browser_ok:
@@ -769,11 +787,14 @@ class Session:
         return {"mode": self.mode, "tabs": tabs, "url": active_url, "title": active_title}
 
     async def set_user_mode(self, on: bool) -> dict:
-        """Roland takes the controls (the screen for that arrives in M7), or gives them back."""
+        """Roland takes the controls on the screen (M7), or gives them back."""
         async with self._lock:  # an action that is under way finishes first
             was_user, self.mode = self.mode == "user", "user" if on else "agent"
             if was_user and not on:
                 await self._hand_back()
+            # Core calls this whenever a screen session starts or ends, so this is also the
+            # moment to make sure the screen shows the tab the agent is on.
+            await self._show()
         return {"mode": self.mode}
 
     async def _hand_back(self) -> None:

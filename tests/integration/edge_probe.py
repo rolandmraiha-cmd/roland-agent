@@ -10,11 +10,88 @@ import httpx
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def main(project: str):
+SCREEN_PATHS = ("/screen/novnc/core/rfb.js", "/screen/novnc/vnc.html", "/screen/websockify")
+
+# Run inside the relay's own container: what it serves, and as whom.
+RELAY_CHECKS = """
+import os, urllib.error, urllib.request
+assert os.geteuid() == 1000
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+with opener.open('http://10.77.2.30:6080/core/rfb.js', timeout=5) as response:
+    assert response.status == 200 and 'javascript' in response.headers['Content-Type']
+    assert b'export default class RFB' in response.read()
+for path in ('/', '/core/', '/vnc.html', '/vnc_lite.html', '/package.json', '/app/ui.js'):
+    try:
+        opener.open('http://10.77.2.30:6080' + path, timeout=5)
+    except urllib.error.HTTPError as error:
+        assert error.code == 404, (path, error.code)
+    else:
+        raise AssertionError('the relay serves ' + path)
+"""
+
+# Run inside another container: the relay must be out of reach from there.
+NO_WAY_TO_RELAY = """
+import socket
+for address in ('10.77.2.30', '10.77.5.30'):
+    try:
+        socket.create_connection((address, 6080), 3).close()
+    except OSError:
+        continue
+    raise AssertionError('reached the screen relay at ' + address)
+"""
+
+
+def screen_probe(project: str, compose: list[str], password: str) -> None:
+    """A7.3, the part that needs no browser: with the screen switched on, the relay is only
+    reachable through Caddy, and Caddy lets nobody through whom core has not approved."""
+    with httpx.Client(
+        base_url="https://localhost", verify=False, trust_env=False, follow_redirects=False, timeout=15
+    ) as client:
+        # Without a login: 401 on every screen path, a websocket handshake included.
+        upgrade = {"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13",
+                   "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Origin": "https://localhost"}
+        for path in SCREEN_PATHS:
+            assert client.get(path).status_code == 401, path
+        assert client.get("/screen/websockify", headers=upgrade).status_code == 401
+        assert client.get("/screen").status_code in {302, 303, 401}  # the page itself needs the login too
+        response = client.post("/login", data={"password": password}, headers={"Origin": "https://localhost"})
+        assert response.status_code == 303
+        status = client.get("/api/status").json()
+        assert status["screen"] == {"enabled": True}
+        headers = {"Origin": "https://localhost", "X-CSRF-Token": status["csrf"]}
+        # Logged in, but with no screen session open: still nothing.
+        for path in SCREEN_PATHS:
+            assert client.get(path).status_code == 403, path
+        assert client.get("/screen/websockify", headers=upgrade).status_code == 403
+        # The script route never carries a websocket, and takes nothing but GET.
+        assert client.get("/screen/novnc/websockify", headers=upgrade).status_code == 403
+        assert client.post("/screen/novnc/core/rfb.js", headers=headers).status_code == 405
+        # No browser runs in this stack, so a session can't start, and a failed start leaves
+        # nothing behind that would open the routes. The answer holds no password.
+        for mode in ("watch", "control"):
+            # Core gives the missing browser a while to answer before it says so.
+            answer = client.post("/api/screen/session", json={"mode": mode}, headers=headers, timeout=90)
+            assert answer.status_code == 503 and "vnc_password" not in answer.text, answer.status_code
+        for path in SCREEN_PATHS:
+            assert client.get(path).status_code == 403, path
+        assert client.get("/screen").status_code == 200  # the page is served; it will say it can't connect
+        assert client.post("/logout", headers=headers).status_code == 200
+        for path in SCREEN_PATHS:
+            assert client.get(path).status_code == 401, path
+    subprocess.run(compose + ["exec", "-T", "novnc", "python", "-c", RELAY_CHECKS], check=True, timeout=60)
+    for service in ("core", "sandbox"):
+        subprocess.run(compose + ["exec", "-T", service, "python", "-c", NO_WAY_TO_RELAY], check=True, timeout=60)
+    print("Screen routes: 401 without a login, 403 without a screen session, relay unreachable around Caddy.")
+
+
+def main(project: str, screen: bool = False):
     if os.getenv("GITHUB_ACTIONS") != "true" or not project.startswith("roland-agent-edge-ci-"):
         raise SystemExit("The live edge probe is restricted to its disposable CI project")
     compose = ["docker", "compose", "--project-name", project, "-f", str(ROOT / "docker-compose.yml")]
     password = (ROOT / ".ci-workspace/login-password").read_text()
+    if screen:
+        screen_probe(project, compose, password)
+        return
     # Only the localhost test CA is untrusted; production uses Caddy's ACME certificates.
     with httpx.Client(
         base_url="https://localhost", verify=False, trust_env=False, follow_redirects=False, timeout=15
@@ -94,4 +171,4 @@ else:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], screen=sys.argv[2:] == ["--screen"])

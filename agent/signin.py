@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from .screen import Screens
 
 ACTIVE = frozenset({"pending", "in_progress"})
+# How long the tool waits, once a sign-in is decided, for the browser to be back with the agent.
+HANDOVER_WAIT_S = 30.0
 UNAVAILABLE = "Error: asking Roland to sign in is turned off. Tell him which site needs a sign-in."
 ONLY_IN_CHAT = (
     "Error: request_signin only works in a chat with Roland. Say which site needs a sign-in and stop."
@@ -168,6 +170,14 @@ class SignIns:
                     break
                 current = self.memory.signin_request(signin_id)
                 if current is None or current["status"] not in ACTIVE:
+                    # Decided, but `_close` may still be cutting Roland's screen and handing
+                    # the browser back, which takes a moment with a real browser. It wakes
+                    # the future last; returning on the stored status alone would let the
+                    # model's next call find the browser still locked.
+                    try:
+                        await asyncio.wait_for(asyncio.shield(future), timeout=HANDOVER_WAIT_S)
+                    except TimeoutError:
+                        pass
                     break
                 if time.time() >= current["expires"]:
                     break
@@ -226,8 +236,10 @@ class SignIns:
             if not self.memory.set_signin_status(row["id"], status, expected_status=current["status"]):
                 return False
             self._audit(actor, row, status, **extra)
-        await self.screens.end_all(f"signin_{status}")
-        future = self._waiters.get(row["id"])
-        if future is not None and not future.done():
-            future.set_result(status)
+        try:
+            await self.screens.end_all(f"signin_{status}")
+        finally:
+            future = self._waiters.get(row["id"])
+            if future is not None and not future.done():
+                future.set_result(status)
         return True

@@ -1,6 +1,7 @@
 """Read-only checks of the resolved Compose configuration; no deployment or firewall changes.
 
-Covers caddy, core, model and sandbox, and the browser service when its profile is on (M6).
+Covers caddy, core, model and sandbox, the browser service when its profile is on (M6), and
+the screen relay (novnc) when its profile is on (M7).
 """
 
 from __future__ import annotations
@@ -35,8 +36,9 @@ def configuration_errors(config: dict) -> list[str]:
     """Inspect resolved Compose JSON without printing environment values."""
     errors = []
     services = config.get("services", {})
-    if not {"caddy", "core", "model", "sandbox"} <= set(services) <= {"caddy", "core", "model", "sandbox", "browser"}:
-        return ["The stack must contain caddy, core, model and sandbox, and may add only browser"]
+    known = {"caddy", "core", "model", "sandbox", "browser", "novnc"}
+    if not {"caddy", "core", "model", "sandbox"} <= set(services) <= known:
+        return ["The stack must contain caddy, core, model and sandbox, and may add only browser and novnc"]
     for name, service in services.items():
         if (
             service.get("user") != "1000:1000"
@@ -102,6 +104,7 @@ def configuration_errors(config: dict) -> list[str]:
     core = services["core"].get("environment", {})
     caddy = services["caddy"].get("environment", {})
     errors.extend(browser_errors(config))
+    errors.extend(screen_errors(config))
     for key, value in {
         "AGENT_ENV": "production",
         "COOKIE_SECURE": "true",
@@ -111,7 +114,6 @@ def configuration_errors(config: dict) -> list[str]:
         "CORE_ALLOWED_PEERS": "10.77.1.2",
         "ALLOW_SHELL": "true",
         "SHELL_BACKEND": "sandbox",
-        "SCREEN_ENABLED": "false",
         "TRAINING_CAPTURE": "false",
         "TRAINING_LOOP_ENABLED": "false",
     }.items():
@@ -172,8 +174,8 @@ def browser_errors(config: dict) -> list[str]:
         if enabled == "true":
             errors.append("BROWSER_ENABLED=true needs the browser service: set COMPOSE_PROFILES=browser in .env")
         return errors
-    if browser.get("ports") or set(browser.get("networks", {})) != {"browser_ctl", "browser_egress"}:
-        errors.append("Browser must have only browser_ctl and browser_egress networks and no published ports")
+    if browser.get("ports") or set(browser.get("networks", {})) != {"browser_ctl", "browser_egress", "vnc"}:
+        errors.append("Browser must have only browser_ctl, browser_egress and vnc networks and no published ports")
     if config.get("networks", {}).get("browser_ctl", {}).get("internal") is not True:
         errors.append("Browser control network must be internal")
     env = browser.get("environment", {})
@@ -211,6 +213,78 @@ def browser_errors(config: dict) -> list[str]:
     return errors
 
 
+NOVNC_COMMAND = ["websockify", "--web", "/opt/novnc", "--file-only", "--heartbeat=30", "10.77.2.30:6080", "10.77.5.40:5900"]
+VNC_SECRETS = {"vnc_password", "vnc_view_password"}
+
+
+def _address(service: dict, network: str) -> str | None:
+    return (service.get("networks", {}).get(network) or {}).get("ipv4_address")
+
+
+def _secret_names(service: dict) -> set[str]:
+    return {item.get("source") for item in service.get("secrets", []) if isinstance(item, dict)}
+
+
+def screen_errors(config: dict) -> list[str]:
+    """The screen (M7) is off unless three things agree: SCREEN_ENABLED for core and the
+    browser, the browser itself, and the Compose profile that starts the noVNC relay.
+    Checks the relay's shape when it is there: two internal networks, nothing else."""
+    errors = []
+    services = config.get("services", {})
+    networks = config.get("networks", {})
+    core_env = services["core"].get("environment", {})
+    enabled = str(core_env.get("SCREEN_ENABLED", "")).lower()
+    browser = services.get("browser")
+    novnc = services.get("novnc")
+    if enabled not in {"true", "false"}:
+        errors.append("Core SCREEN_ENABLED must be true or false")
+    for name in ("screen", "vnc"):
+        # Compose leaves a network out of the resolved file while no running service uses it.
+        if name in networks and networks[name].get("internal") is not True:
+            errors.append(f"The {name} network must be internal")
+    # Only core (hands them to Roland's page) and the browser (x11vnc checks them) hold them.
+    for name, service in services.items():
+        if name not in {"core", "browser"} and _secret_names(service) & VNC_SECRETS:
+            errors.append(f"{name} must not be given the screen passwords")
+    if _address(services["caddy"], "screen") != "10.77.2.2":
+        errors.append("Caddy must be on the screen network at its fixed address")
+    if set(services["core"].get("networks", {})) & {"screen", "vnc"}:
+        errors.append("Core must not be on the screen or vnc network: the screen never passes through it")
+    if browser is not None:
+        env = browser.get("environment", {})
+        if str(env.get("SCREEN_ENABLED", "")).lower() != enabled:
+            errors.append("Core and the browser must agree on SCREEN_ENABLED")
+        if (
+            env.get("VNC_LISTEN") != "10.77.5.40"
+            or env.get("VNC_ALLOWED_PEERS") != "10.77.5.30"
+            or _address(browser, "vnc") != "10.77.5.40"
+        ):
+            errors.append("The screen server must listen on the browser's vnc address and allow only noVNC")
+    if enabled == "true":
+        if browser is None or str(core_env.get("BROWSER_ENABLED", "")).lower() != "true":
+            errors.append("SCREEN_ENABLED=true needs the browser: BROWSER_ENABLED=true and the browser profile")
+        if novnc is None:
+            errors.append(
+                "SCREEN_ENABLED=true needs the noVNC service: set COMPOSE_PROFILES=browser,screen in .env"
+            )
+    if novnc is None:
+        return errors
+    if (
+        novnc.get("ports")
+        or set(novnc.get("networks", {})) != {"screen", "vnc"}
+        or _address(novnc, "screen") != "10.77.2.30"
+        or _address(novnc, "vnc") != "10.77.5.30"
+    ):
+        errors.append("noVNC must have only the screen and vnc networks, at its fixed addresses, and no published ports")
+    if novnc.get("command") not in (None, NOVNC_COMMAND) or novnc.get("entrypoint"):
+        errors.append("noVNC must run the image's own websockify command (no token, certificate or traffic options)")
+    if novnc.get("secrets") or novnc.get("env_file") or any(novnc.get("environment", {}).get(name) for name in SECRET_ENV):
+        errors.append("noVNC must hold no secret")
+    if any(mount.get("type") != "tmpfs" for mount in novnc.get("volumes", [])):
+        errors.append("noVNC must mount nothing")
+    return errors
+
+
 def private_path_errors(path: Path, *, directory: bool, uid: int = 1000) -> list[str]:
     """Check metadata only. Never read or print a secret value."""
     try:
@@ -235,13 +309,19 @@ def path_errors(config: dict) -> list[str]:
     secrets = config.get("secrets", {})
     # Every secret a container mounts. Compose can't start a service whose secret file is
     # missing, so a missing one must stop a deploy here, before anything is recreated.
-    for name in ("agent_password_hash", "model_server_token", "sandbox_api_token", "browser_api_token"):
+    for name in (
+        "agent_password_hash", "model_server_token", "sandbox_api_token", "browser_api_token",
+        "vnc_password", "vnc_view_password",
+    ):
+        # Core mounts the two screen passwords since M7, whether or not the screen is on.
+        # `make secrets` creates any that are missing and never changes one that exists.
+        hint = " (run: sudo env APPLY=1 make secrets)" if name in VNC_SECRETS else ""
         filename = secrets.get(name, {}).get("file")
         if not filename:
-            errors.append(f"{name}: required file secret is missing")
+            errors.append(f"{name}: required file secret is missing{hint}")
             continue
         path = Path(filename)
-        errors.extend(f"{name}: {error}" for error in private_path_errors(path, directory=False))
+        errors.extend(f"{name}: {error}{hint}" for error in private_path_errors(path, directory=False))
         errors.extend(f"{name} parent: {error}" for error in private_path_errors(path.parent, directory=True))
     mounts = config["services"]["core"].get("volumes", [])
     workspace = next((mount.get("source") for mount in mounts if mount.get("target") == "/workspace"), None)
@@ -296,6 +376,12 @@ def main() -> int:
     )
     if "browser" in config.get("services", {}):
         print("The browser service is part of this stack (COMPOSE_PROFILES=browser).")
+    if "novnc" in config.get("services", {}):
+        screen_on = str(config["services"]["core"].get("environment", {}).get("SCREEN_ENABLED", "")).lower() == "true"
+        print(
+            "The screen relay (novnc) is part of this stack (COMPOSE_PROFILES has screen); "
+            + ("the screen is switched on." if screen_on else "SCREEN_ENABLED is false, so it is not used.")
+        )
     return 0
 
 

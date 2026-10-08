@@ -136,6 +136,25 @@ async def test_done_resolves_and_unlocks(tmp_path, fake):
         await agent.screens.start("c" * 64, "control", row["id"])
 
 
+@pytest.mark.parametrize("button", ["done", "cancel"])
+async def test_the_model_is_not_told_before_the_browser_is_back(tmp_path, fake, button):
+    """Cutting Roland's screen takes a moment with a real browser (x11vnc is restarted).
+    The tool must not return in that moment: the model's next call would still be refused.
+    Found by the live sign-in test, where the snapshot after "I'm done" came back locked."""
+    fake.disconnect_delay = 0.6  # longer than the tool's own polling
+    agent = screen_agent(tmp_path, fake, [("", [ask()]), ("", [call("browser_snapshot")]), "Read it."])
+    _, _events, task = await chat(agent)
+    row = await waiting(agent)
+    await agent.screens.start("c" * 64, "control", row["id"])
+    decide = agent.signins.done if button == "done" else agent.signins.cancel
+    await decide(row["id"])
+    await asyncio.wait_for(task, 5)
+    results = tool_results(agent)
+    assert LOCKED not in results[1] and "URL: https://shop.example/login" in results[1]
+    order = [path for path in fake.paths("/v1/") if path in {"/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot"}]
+    assert order[-3:] == ["/v1/vnc/disconnect", "/v1/user-mode", "/v1/snapshot"]
+
+
 async def test_done_without_opening_the_screen_counts_too(tmp_path, fake):
     """He may already be signed in: pressing I'm done on the card is enough."""
     agent = screen_agent(tmp_path, fake, [("", [ask()]), "ok"])

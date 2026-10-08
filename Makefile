@@ -37,7 +37,8 @@ test-sandbox:
 	docker compose -f docker-compose.yml -f docker-compose.test.yml down -v
 
 # Live browser stack (A6.3; not run by CI). Needs Docker, a .env and secrets/ (make secrets).
-# Builds the browser image, runs it against the fixture site, restarts it, and removes the
+# Builds the browser and relay images, runs them against the fixture site with the screen
+# switched on (the A7.3 screen tests included), restarts the browser, and removes the
 # test stack again. CHROMIUM_SANDBOX=1 runs the same with Chromium's own sandbox on.
 test-browser:
 	bash tests/integration/browser.sh

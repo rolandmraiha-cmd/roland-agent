@@ -15,7 +15,9 @@ x-host: &agent_host ${AGENT_DOMAIN:-${AGENT_FALLBACK_HOST:-37-60-226-214.sslip.i
 
 # M4: core + caddy + model + sandbox. M6 adds the browser service, behind the "browser"
 # profile: it only starts when .env has COMPOSE_PROFILES=browser, and core only uses it when
-# .env also has BROWSER_ENABLED=true. Screen and training stay off.
+# .env also has BROWSER_ENABLED=true. M7 adds the screen Roland watches and signs in on: the
+# novnc service behind the "screen" profile, and SCREEN_ENABLED=true for core and the browser
+# (so .env then has COMPOSE_PROFILES=browser,screen). Training stays off.
 services:
   caddy:
     <<: *hardening
@@ -72,7 +74,9 @@ services:
       BROWSER_ENABLED: ${BROWSER_ENABLED:-false}
       BROWSER_URL: http://10.77.4.40:7100
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
-      SCREEN_ENABLED: "false"
+      SCREEN_ENABLED: ${SCREEN_ENABLED:-false}
+      VNC_PASSWORD_FILE: /run/secrets/vnc_password
+      VNC_VIEW_PASSWORD_FILE: /run/secrets/vnc_view_password
       TRAINING_CAPTURE: "false"
       TRAINING_LOOP_ENABLED: "false"
       TRAINER_URL: ""
@@ -81,7 +85,8 @@ services:
       MODEL_MAX_CONCURRENCY: "1"
       MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
       AGENT_PASSWORD_HASH_FILE: /run/secrets/agent_password_hash
-    secrets: [model_server_token, agent_password_hash, sandbox_api_token, browser_api_token]
+    # The two screen passwords are handed to Roland's screen page, one per mode (§6.6).
+    secrets: [model_server_token, agent_password_hash, sandbox_api_token, browser_api_token, vnc_password, vnc_view_password]
     volumes:
       - agent-data:/data
       - backups:/backups
@@ -188,7 +193,8 @@ services:
 
   # One persistent Chromium on a virtual screen, driven by browserd (§6.5). Off unless the
   # "browser" profile is on. The profile volume holds Roland's signed-in sessions and is
-  # mounted here and nowhere else.
+  # mounted here and nowhere else. With SCREEN_ENABLED=true it also runs x11vnc, the screen
+  # server, on the vnc network; otherwise nothing listens there.
   browser:
     <<: *hardening
     profiles: ["browser"]
@@ -217,7 +223,12 @@ services:
       BROWSER_SENSITIVE_MATCH: ${BROWSER_SENSITIVE_MATCH:-substring}
       BROWSER_BLOCK_BACKGROUND_POSTS: ${BROWSER_BLOCK_BACKGROUND_POSTS:-false}
       BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
-    secrets: [browser_api_token]
+      SCREEN_ENABLED: ${SCREEN_ENABLED:-false}
+      VNC_LISTEN: 10.77.5.40
+      VNC_ALLOWED_PEERS: 10.77.5.30
+      VNC_PASSWORD_FILE: /run/secrets/vnc_password
+      VNC_VIEW_PASSWORD_FILE: /run/secrets/vnc_view_password
+    secrets: [browser_api_token, vnc_password, vnc_view_password]
     volumes:
       - browser-profile:/profile
       - type: bind
@@ -228,6 +239,7 @@ services:
     shm_size: 320m
     networks:
       browser_ctl: { ipv4_address: 10.77.4.40 }
+      vnc: { ipv4_address: 10.77.5.40 }
       browser_egress: { ipv4_address: 10.77.12.40, gw_priority: 100 }
     healthcheck:
       test: ["CMD", "python", "-m", "browserd", "healthcheck"]
@@ -243,6 +255,31 @@ services:
     memswap_limit: 1280m
     cpus: 2.0
     pids_limit: 512
+
+  # The screen relay (§6.6): websockify serves noVNC's script files to the screen page and
+  # carries the screen connection from Caddy to x11vnc. Off unless the "screen" profile is
+  # on. It has no secret, no volume and no way out: Caddy reaches it on one internal network
+  # (only after core said yes, forward_auth), and it reaches x11vnc on the other.
+  novnc:
+    <<: *hardening
+    profiles: ["screen"]
+    build: { context: ., dockerfile: docker/novnc/Dockerfile }
+    image: roland-agent/novnc:local
+    user: "1000:1000"
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    networks:
+      screen: { ipv4_address: 10.77.2.30 }
+      vnc: { ipv4_address: 10.77.5.30 }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('10.77.2.30', 6080), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 64m
+    memswap_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
 
 # Reserved bridges are declared now; later services attach when implemented.
 networks:
@@ -272,3 +309,5 @@ secrets:
   agent_password_hash: { file: ./secrets/agent_password_hash }
   sandbox_api_token: { file: ./secrets/sandbox_api_token }
   browser_api_token: { file: ./secrets/browser_api_token }
+  vnc_password: { file: ./secrets/vnc_password }
+  vnc_view_password: { file: ./secrets/vnc_view_password }

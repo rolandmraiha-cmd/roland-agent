@@ -7,6 +7,7 @@ none may be added (docs/NEXT.md, M6 security requirements).
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import json
 import logging
@@ -20,7 +21,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
-from . import guards
+from . import guards, vnc
 from .session import BrowserdError, Session
 from .settings import MAX_BODY, MAX_SNAPSHOT_CHARS, MAX_TEXT_CHARS, MAX_URL_CHARS, Settings
 
@@ -63,8 +64,11 @@ def _flag(body: dict, name: str, default: bool = False) -> bool:
     return value
 
 
-def create_app(settings: Settings, session, *, manage_session: bool = False) -> FastAPI:
-    """`session` is a browserd.session.Session, or a stand-in with the same methods in tests."""
+def create_app(settings: Settings, session, *, manage_session: bool = False, cut_screen=None) -> FastAPI:
+    """`session` is a browserd.session.Session, or a stand-in with the same methods in tests.
+    `cut_screen` stands in for `vnc.cut_connections` there."""
+    cut_screen = cut_screen or vnc.cut_connections
+    cutting = asyncio.Lock()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -277,7 +281,15 @@ def create_app(settings: Settings, session, *, manage_session: bool = False) -> 
 
     @app.post("/v1/vnc/disconnect")
     async def vnc_disconnect():
-        return {"ok": True}  # nothing to disconnect until the screen exists (M7)
+        """Cut every screen connection (§6.6). Core calls this whenever a screen session
+        ends, so a page that is still open can't go on watching or typing."""
+        if not settings.screen_enabled:
+            return {"ok": True, "vnc": False}  # no screen server runs, so nothing is connected
+        async with cutting:
+            outcome = await cut_screen(settings.vnc_listen)
+        if outcome == "failed":
+            raise BrowserdError("unavailable", 503)
+        return {"ok": True, "vnc": outcome == "cut"}
 
     return app
 
@@ -306,14 +318,16 @@ def serve() -> None:
         raise SystemExit(1)
 
 
-def healthcheck_cli() -> bool:
-    """The container's health check. Standard library only, and never through a proxy."""
+def healthcheck_cli(screen: bool = False) -> bool:
+    """The container's health check. Standard library only, and never through a proxy.
+    With `screen`, the screen server must be listening too (`make verify` asks for that)."""
     host = os.environ.get("BROWSERD_HOST", "").strip() or "10.77.4.40"
     port = os.environ.get("BROWSERD_PORT", "").strip() or "7100"
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(f"http://{host}:{port}/healthz", timeout=3) as response:  # noqa: S310 -- fixed http address
             payload = json.loads(response.read(4096))
-        return isinstance(payload, dict) and payload.get("ok") is True and payload.get("browser") is True
+        healthy = isinstance(payload, dict) and payload.get("ok") is True and payload.get("browser") is True
+        return healthy and (not screen or payload.get("vnc") is True)
     except (OSError, ValueError):
         return False

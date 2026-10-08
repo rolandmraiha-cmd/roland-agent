@@ -24,7 +24,7 @@ from agent import policy_browser
 from agent.brain import Step, ToolCall
 from agent.core import Agent
 from agent.memory import Memory
-from agent.tools_browser import BROWSER_TOOLS
+from agent.tools_browser import BROWSER_TOOLS, SCREEN_TOOLS
 
 pytestmark = pytest.mark.integration
 
@@ -697,7 +697,10 @@ async def test_editable_area_takes_text(agent_for):
 def test_browser_tools_are_all_offered_when_the_browser_is_on(agent_for):
     agent = agent_for(["hi"])
     asyncio.run(run(agent))
-    assert BROWSER_TOOLS <= set(agent.brain.tools[0])
+    offered = set(agent.brain.tools[0])
+    # Asking Roland to sign in needs the screen (M7), which this agent doesn't have switched
+    # on; tests/integration/test_screen_live.py covers the agent that does.
+    assert BROWSER_TOOLS - SCREEN_TOOLS <= offered and not SCREEN_TOOLS & offered
 
 
 def test_wrong_input_is_refused_before_it_reaches_the_page():

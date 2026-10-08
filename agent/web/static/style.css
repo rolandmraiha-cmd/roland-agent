@@ -163,5 +163,8 @@ a.button[hidden], .browser-screen[hidden] { display: none; }
 #screen-error { margin: .4rem .6rem; overflow-wrap: anywhere; }
 #screen-error[hidden] { display: none; }
 .screen-canvas { flex: 1; min-height: 0; background: #000; }
+/* noVNC centres its picture. At the top it sits under the buttons and stays in view when a
+   phone keyboard opens. !important because noVNC sets the margin on the element itself. */
+.screen-canvas canvas { margin: 0 auto auto !important; }
 /* Takes what a phone keyboard types and passes it on; nothing is shown or kept in it. */
 .screen-typing { position: fixed; bottom: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; }
