@@ -56,7 +56,7 @@ function fixture() {
   const source = fs.readFileSync(path.join(__dirname, '../../agent/web/static/app.js'), 'utf8');
   vm.runInContext(source.split('// ---------- start ----------')[0], context);
   vm.runInContext('loadChats = async () => []; loadStatus = async () => {};', context);
-  return { context, get, pageEvents, createdURLs, revokedURLs, run: (code) => vm.runInContext(code, context) };
+  return { context, get, pageEvents, createdURLs, revokedURLs, timers, run: (code) => vm.runInContext(code, context) };
 }
 function deferred() {
   let resolve, reject;
@@ -1023,4 +1023,82 @@ test('the Browser tab leaves its sign-in cards alone while the list is unchanged
   await f.run('loadBrowserSignins()');
   f.run('showView("chat")');
   assert.equal(f.get('browser-signins').children.length, 0);
+});
+
+// ---------- a chat opened while the agent is still answering in it ----------
+function busyFixture() {
+  const f = fixture();
+  f.asked = [];
+  f.failing = false;
+  f.state = { messages: [{ role: 'user', content: 'log in to shop.example' }], busy: true, pending_approvals: [], pending_signins: [] };
+  f.context.api = async (url) => {
+    f.asked.push(url);
+    if (f.failing) throw new Error('network');
+    return { json: async () => f.state };
+  };
+  f.bubbles = () => f.get('messages').children.filter((c) => c.className.startsWith('msg')).map((c) => c.children[0].textContent);
+  f.tick = async () => { await f.timers.get(f.run('busyWatch'))(); await new Promise((resolve) => setImmediate(resolve)); };
+  return f;
+}
+
+test('a chat that is still being answered redraws by itself when something changes', async () => {
+  const f = busyFixture();
+  await f.run('openChat(5)');
+  assert.deepEqual(f.bubbles(), ['log in to shop.example', 'The agent is still answering here. This page updates by itself when it has finished.']);
+  const first = f.run('busyWatch');
+  assert.notEqual(first, null);
+
+  // Nothing new: it asked, and left the page as it was.
+  await f.tick();
+  assert.deepEqual(f.asked, ['/api/chats/5/messages', '/api/chats/5/messages']);
+  assert.equal(f.run('busyWatch'), first);
+  assert.equal(f.bubbles().length, 2);
+
+  // A request that fails waits for the next round.
+  f.failing = true;
+  await f.tick();
+  assert.equal(f.run('busyWatch'), first);
+  f.failing = false;
+
+  // A sign-in card turned up meanwhile: Roland has to see it, and the chat is still watched.
+  f.state = { ...f.state, pending_signins: [signin] };
+  await f.tick();
+  assert.equal(f.get('messages').children.filter((c) => c.className.includes('signin-card')).length, 1);
+  assert.equal(f.run('composerLocked'), true);
+  assert.notEqual(f.run('busyWatch'), null);
+  assert.equal(f.timers.has(first), false);
+
+  // The answer is there: shown, no note left, and nothing asks any more.
+  f.state = { messages: [...f.state.messages, { role: 'assistant', content: 'You are signed in.' }], busy: false, pending_approvals: [], pending_signins: [] };
+  await f.tick();
+  assert.deepEqual(f.bubbles(), ['log in to shop.example', 'You are signed in.']);
+  assert.equal(f.run('busyWatch'), null);
+  assert.equal(f.run('composerLocked'), false);
+});
+
+test('the watch on a busy chat ends when another chat is opened or the chat goes away', async () => {
+  const f = busyFixture();
+  await f.run('openChat(5)');
+  const first = f.run('busyWatch');
+  f.state = { messages: [], busy: false, pending_approvals: [], pending_signins: [] };
+  await f.run('openChat(6)');
+  assert.equal(f.run('busyWatch'), null);
+  assert.equal(f.timers.has(first), false);
+
+  // Deleting the open chat or starting a new one moves on without opening another.
+  f.state = { messages: [], busy: true, pending_approvals: [], pending_signins: [] };
+  await f.run('openChat(7)');
+  const asked = f.asked.length;
+  f.run('++chatLoad; currentChat = null');
+  await f.tick();
+  assert.equal(f.run('busyWatch'), null);
+  assert.equal(f.asked.length, asked);
+});
+
+test('a chat that is not being answered is not watched', async () => {
+  const f = busyFixture();
+  f.state = { messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }], busy: false, pending_approvals: [], pending_signins: [] };
+  await f.run('openChat(5)');
+  assert.equal(f.run('busyWatch'), null);
+  assert.deepEqual(f.asked, ['/api/chats/5/messages']);
 });
