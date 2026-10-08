@@ -6,21 +6,23 @@ import asyncio
 import json
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 
 from .audit import Audit
 from .brain import Brain, Step
+from .completion import UNSAVED_REPLY, canonical_path, file_context, unverified_save_claim
 from .config import Config
 from .gate import ALREADY_REJECTED, POLICIES, Gate, RunState
 from .memory import Job, Memory
-from .models.context import fit_messages, schemas_for_prompt
+from .models.context import ACTION_PROMPT_START, action_prompt, fit_messages, schemas_for_prompt
 from .schedule import now_text, today
 from .tools import ToolContext, call_tool, clip, describe, prompt_facts, schemas
 from .tools_browser import BROWSER_TOOLS
 
 _MARKER = re.compile(r"tool_output", re.IGNORECASE)
 _NOT_NAME = re.compile(r"[^A-Za-z0-9_.-]")
+_READ_TOOLS = frozenset({"read_file", "list_files", "file_info", "browser_snapshot"})
 
 
 def tool_name(raw: str) -> str:
@@ -89,6 +91,18 @@ def _has_failed_retry(tool_calls, failed_tool_sigs: dict[str, str], tool_exclude
     return False
 
 
+def _only_repeated_reads(tool_calls, results: dict[str, str], excluded: set[str]) -> bool:
+    for call in tool_calls:
+        if call.name not in _READ_TOOLS or call.name in excluded:
+            return False
+        try:
+            if tool_signature(call.name, call.args()) not in results:
+                return False
+        except ValueError:
+            return False
+    return bool(tool_calls)
+
+
 class Agent:
     def __init__(self, config: Config, memory: Memory, brain: Brain):
         self.config = config
@@ -131,19 +145,28 @@ class Agent:
         config.workspace.mkdir(parents=True, exist_ok=True)
 
     def system_prompt(self, extra: str = "") -> str:
-        facts = prompt_facts(self.memory) or "(nothing yet)"
         shell_note = "" if self.allow_shell else "Shell commands are turned off right now.\n"
-        return (
-            SYSTEM.format(
+        excluded = set()
+        if not self.allow_shell:
+            excluded.add("run_shell")
+        if self.ctx.browser is None:
+            excluded |= BROWSER_TOOLS
+        action_note = action_prompt(schemas(excluded)) if self.config.model_tool_mode != "native" else ""
+
+        def render(facts: str) -> str:
+            return SYSTEM.format(
                 name=self.config.agent_name,
                 now=now_text(self.config.timezone),
                 tz=self.config.timezone,
                 facts=facts,
                 shell_note=shell_note,
                 browser_note=BROWSER_NOTE if self.ctx.browser is not None else "",
-            )
-            + extra
-        )
+            ) + extra + action_note
+
+        # Reserve room for the actual tool catalogue without raising the context cap.
+        room = max(100, self.config.model_system_prompt_budget * 3 - len(render("")))
+        facts = prompt_facts(self.memory, max_chars=min(1500, room)) or "(nothing yet)"
+        return render(facts)
 
     def calls_left(self) -> int:
         return max(0, self.config.daily_call_limit - self.memory.calls_today(today(self.config.timezone)))
@@ -167,6 +190,15 @@ class Agent:
 
     async def _prepare(self, messages: list[dict], tools: list[dict]) -> tuple[list[dict], list[dict]]:
         compact = schemas_for_prompt(tools)
+        if self.config.model_tool_mode != "native":
+            messages = [dict(m) for m in messages]
+            for message in messages:
+                if message.get("role") == "system":
+                    base = str(message.get("content") or "").split(ACTION_PROMPT_START, 1)[0]
+                    message["content"] = base + action_prompt(compact)
+                    break
+            else:
+                messages.insert(0, {"role": "system", "content": action_prompt(compact).lstrip()})
         try:
             fitted = await fit_messages(
                 messages,
@@ -216,6 +248,7 @@ class Agent:
             "A tool I needed failed, and retrying would not help. "
             "Please try a different request or add the missing file."
         ),
+        finalize: Callable[[str], str] | None = None,
     ) -> AsyncIterator[dict]:
         """One tools-disabled model call after a repeated failed or rejected tool; ends the run."""
         messages.append({"role": "user", "content": instruction})
@@ -225,10 +258,13 @@ class Agent:
             yield {"type": "error", "message": str(e)}
             return
         step = Step()
+        pending_text = []
         try:
             async for item in self._stream_step(messages, []):
                 if isinstance(item, Step):
                     step = item
+                elif finalize is not None and item["type"] == "text":
+                    pending_text.append(item)
                 else:
                     yield item
         except LimitReached as e:
@@ -244,6 +280,12 @@ class Agent:
         reply += step.text or ""
         if not reply.strip():
             reply = fallback
+        if finalize is not None:
+            checked = finalize(reply)
+            if checked == reply:
+                for event in pending_text:
+                    yield event
+            reply = checked
         yield {"type": "done", "reply": reply}
 
     async def run(
@@ -262,9 +304,26 @@ class Agent:
             tool_exclude = set(tool_exclude) | BROWSER_TOOLS
         tools = schemas(tool_exclude)
         reply = ""
+        request = next((str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), "")
+        check_save = file_context(request)
+        written_paths: set[str] = set()
+        write_attempted = False
+        save_repair_attempted = False
+
+        def finalize(text: str) -> str:
+            return UNSAVED_REPLY if unverified_save_claim(text, request, written_paths) else text
+
+        read_results: dict[str, str] = {}
         # Identical failing tool calls (e.g. read_file on a missing path) burn context and RAM.
         failed_tool_sigs: dict[str, str] = {}
         for step_index in range(self.config.max_tool_steps + 1):
+            offered = tools
+            if step_index == self.config.max_tool_steps:
+                offered = []
+                messages.append({"role": "user", "content": (
+                    "The tool budget is used up. Answer now using the existing results; "
+                    "say which requested actions remain unfinished.\nRoland's request: " + request
+                )})
             parse_attempts = 0
             while True:
                 try:
@@ -273,10 +332,13 @@ class Agent:
                     yield {"type": "error", "message": str(e)}
                     return
                 step = Step()
+                pending_text = []
                 try:
-                    async for item in self._stream_step(messages, tools):
+                    async for item in self._stream_step(messages, offered):
                         if isinstance(item, Step):
                             step = item
+                        elif check_save and item["type"] == "text":
+                            pending_text.append(item)
                         else:
                             yield item
                 except LimitReached as e:
@@ -312,14 +374,47 @@ class Agent:
                         return
                     continue
                 break
-            reply += step.text
             if not step.tool_calls:
-                yield {"type": "done", "reply": reply}
+                candidate = reply + step.text
+                if unverified_save_claim(candidate, request, written_paths):
+                    if not write_attempted and not save_repair_attempted and step_index < self.config.max_tool_steps:
+                        save_repair_attempted = True
+                        messages.append({"role": "user", "content": (
+                            "No successful file write has happened in this run. If Roland asked to "
+                            "save a file, call write_file with the requested path and content first; "
+                            "otherwise answer truthfully. Never create unsolicited notes.\n"
+                            "Roland's request: " + request
+                        )})
+                        continue
+                    candidate = UNSAVED_REPLY
+                else:
+                    for event in pending_text:
+                        yield event
+                yield {"type": "done", "reply": candidate}
                 return
+            narration = step.text if finalize(step.text) == step.text else ""
+            for event in pending_text:
+                # A native tool call may carry narration, but no unverified save claim.
+                if narration:
+                    yield event
+            reply += narration
             # Same failed signature again: stop the tool loop and force a text answer.
             # Re-feeding the cached error still lets the model ask until MAX_TOOL_STEPS.
             if _has_failed_retry(step.tool_calls, failed_tool_sigs, tool_exclude):
-                async for event in self._force_text_reply(messages, reply):
+                async for event in self._force_text_reply(messages, reply, finalize=finalize if check_save else None):
+                    yield event
+                return
+            if _only_repeated_reads(step.tool_calls, read_results, tool_exclude):
+                async for event in self._force_text_reply(
+                    messages,
+                    reply,
+                    instruction=(
+                        "Those reads already succeeded. Do not call tools again. Use their existing "
+                        "results to answer; mention any unfinished actions.\nRoland's request: " + request
+                    ),
+                    fallback="I stopped a repeated read. I couldn't finish the answer from the available results.",
+                    finalize=finalize if check_save else None,
+                ):
                     yield event
                 return
             if step_index == self.config.max_tool_steps:
@@ -327,7 +422,7 @@ class Agent:
             messages.append(
                 {
                     "role": "assistant",
-                    "content": step.text or None,
+                    "content": narration or None,
                     "tool_calls": [
                         {
                             "id": c.id,
@@ -353,11 +448,19 @@ class Agent:
                     sig = tool_signature(name, args)
                     policy = POLICIES.get(name)
                     decision_label = "safe"
-                    if sig in failed_tool_sigs:
+                    if sig in read_results:
+                        # Another call in this same batch can still do useful work.
+                        result = read_results[sig]
+                    elif sig in failed_tool_sigs:
                         # Refuse to re-run the same failing call; stops OOM-prone tool loops.
                         result = failed_tool_sigs[sig]
                         yield {"type": "tool", "text": describe(name, args), "tool": name, "decision": decision_label}
                     else:
+                        if name not in _READ_TOOLS:
+                            # Actions, shell commands and browser_wait can change what a read sees.
+                            read_results.clear()
+                        if name == "write_file":
+                            write_attempted = True
                         tool_name_ = name
                         tool_args_ = args
 
@@ -408,6 +511,15 @@ class Agent:
                             # ref that didn't exist yet) may be worth making again.
                             for old in [s for s in failed_tool_sigs if s.startswith("browser_")]:
                                 del failed_tool_sigs[old]
+                        if name in _READ_TOOLS and not result.startswith(("Error:", "Not done:")):
+                            read_results[sig] = result
+                        if name == "write_file" and result.startswith("Saved "):
+                            saved_path = canonical_path(str(args.get("path", "")))
+                            if saved_path:
+                                written_paths.add(saved_path)
+                        elif name in {"delete_file", "move_file", "run_shell"}:
+                            # Do not retain write evidence after something may remove/change it.
+                            written_paths.clear()
                         if result == f"Not done: {ALREADY_REJECTED}":
                             asked_again_after_reject = True
                         if result.startswith("Not done:"):
@@ -435,6 +547,7 @@ class Agent:
                         "tools again. Tell Roland in plain text what was not done."
                     ),
                     fallback="Not done: you rejected that action, so I didn't ask for it again.",
+                    finalize=finalize if check_save else None,
                 ):
                     yield event
                 return

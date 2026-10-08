@@ -7,6 +7,30 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 TokenCounter = Callable[[str], Awaitable[int]]
+ACTION_PROMPT_START = "\n\nAction format:\n"
+
+
+def action_prompt(tools: list[dict]) -> str:
+    """Grammar constrains output; it does not tell the model what tools exist."""
+    note = (
+        ACTION_PROMPT_START
+        + 'Call: {"action":"tool","tool":"NAME","args":{...}}. '
+        'Answer: {"action":"reply","text":"..."}. '
+        "Use a tool before claiming an action is done; after its result, answer.\n"
+    )
+    if not tools:
+        return note + "No tools are available. Answer using the existing results."
+    lines = ["Available tools (argument types; ? means optional):"]
+    for entry in tools:
+        fn = entry.get("function", entry)
+        params = fn.get("parameters", {})
+        required = set(params.get("required", ()))
+        args = ", ".join(
+            f"{key}{'' if key in required else '?'}:{value.get('type', 'string')}"
+            for key, value in params.get("properties", {}).items()
+        )
+        lines.append(f"{fn['name']}({args})")
+    return note + "\n".join(lines)
 
 
 def estimate_tokens(text: str) -> int:

@@ -273,12 +273,12 @@ async def remember(ctx: ToolContext, args: dict) -> str:
     return f"Remembered as fact {fact_id}."
 
 
-def prompt_facts(memory: Memory) -> str:
+def prompt_facts(memory: Memory, *, max_chars: int = MAX_FACTS_PROMPT_CHARS) -> str:
     """Saved facts as prompt lines, newest first: one line each, shortened, and the whole block
     at most MAX_FACTS_PROMPT_CHARS. The system prompt is never trimmed, so this keeps it inside
     a small model's context however many facts are saved (older versions saved without limits)."""
     facts = memory.facts()
-    room = MAX_FACTS_PROMPT_CHARS - 100  # left for the "not shown" line
+    room = max_chars - 100  # left for the "not shown" line
     lines: list[str] = []
     used = 0
     for fact_id, text in reversed(facts):
