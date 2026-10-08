@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59) is merged at `e2f0792`; its host deploy remains with Roland. Roland requested merge of M8 #56 and deletion of its feature branch. Next: deploy merged `v2` with training off and finish M8 host acceptance before M9.**
+> Snapshot: 9 Oct 2026. Deployed code baseline **`e208bbd`** (#56, M8 with training off; Roland's deployment log, as recorded in the handoff comment on #56): 13 / 0 / 1 with 3393 MiB available. Before that the host ran **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59) and M8 (#56) are merged and deployed at `e208bbd`, with training off. The feedback follow-up (#61) clears the pressed thumb and makes the chosen vote visible; Roland deploys it. Next: finish M8 host acceptance (M8, "Host acceptance in progress") before M9.**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -85,12 +85,12 @@ Before writing any code:
 3. Large instruction-MD replacements still follow draft → Roland approves the text → PR. Routine status updates that match already-shipped work may land in the feature PR after Shipper review.
 4. Each PR, not only milestone PRs, updates the Done/Not done tables and tip in `docs/AGENT.md`, the remaining plan in `docs/NEXT.md`, and the short “what works / what does not” in `README.md` when that reality changed, plus `docs/SECURITY.md` for any accepted limit. Do that on every edit that changes the story, and again before squash-merge so the merged commit is not ahead of the docs.
 
-## 3. Current production state (8 Oct 2026)
+## 3. Current production state (9 Oct 2026)
 
 | Item | Value |
 |---|---|
 | Repository | https://github.com/rolandmraiha-cmd/roland-agent |
-| Integration branch | `v2`; Contabo checkout and app image **`2de54f4`** (#58). M6, fixes #43–#53 and M7 (#55, #57, #58) are live; verification passed normally. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
+| Integration branch | `v2`; Contabo checkout and app image **`e208bbd`** (#56; Roland's deployment log, as recorded in the handoff comment on #56, 9 Oct 2026). M6, fixes #43–#53, M7 (#55, #57, #58), the chat refresh (#59) and M8 (#56, training off) are live; verification passed normally (13 / 0 / 1). The feedback follow-up (#61) is merged and not deployed. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
 | `main` | Untouched since v1; do not push until M9 |
 | Live URL | https://37-60-226-214.sslip.io/ |
 | Host | Contabo VPS, Ubuntu 24.04, ~4 vCPU / ~8 GB RAM, IPv4 `37.60.226.214` |
@@ -519,9 +519,34 @@ Notes:
 
 **Spec:** §6.10, §6.11 (all subsections), §7.4 (migration m0003), §8.2 (persona/feedback/training/model endpoints), M8 in §12.
 
-#### Approved implementation; host acceptance pending (8 Oct 2026)
+#### Approved implementation, as merged (8 Oct 2026)
 
-All ten deliverables are implemented in PR #56. Roland requested its merge and branch removal on 8 Oct 2026; that includes the model runbook (M8.10). The branch is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh and preserving its screen service, routes, browser hand-back, passwords and deployment checks. Screen/trainer profile composition and capture exclusions are covered by combined tests. CI fixes update backup expectations for migration 3, load `TRAINING_DATA_DIR` as a path, require every mounted secret, annotate the generated activation script for ShellCheck, and add hash-locked protobuf to both training environments. CPU training and conversion now complete; model-client handling reads streamed schema-error bodies before constrained fallback, while unrelated HTTP errors still fail immediately. Three real-stream transport regression cases cover both rejection statuses and refusal to retry other errors. The synthetic model now declares 4096 context tokens, matching evaluation; its regression test covers the full public suite plus the output allowance because the pinned server caps slots at the trained context. Complete byte fallback fixes the pinned server tokenizer failure on newlines and unseen characters; a Unicode round-trip regression covers it. A literal assistant prefix avoids artificial whitespace that caused the pinned sampler to discard its first token; a separate prefix regression covers this. Cancellation now delivers the final sign-in event before ending the chat; the existing M7 regression reproduced on the untouched baseline and passes with the fix. The CPU workflow provides the checkout import path to its standalone probe. The actual tiny-GGUF swap probe exercises authenticated API import, promotion and rollback with human request tokens, missing-token refusal, unchanged container start time for valid swaps, and rollback after a corrupt candidate. All five GitHub checks passed on code head `c9a7ef1`: lint, 1,543 unit tests, 81 frontend tests, edge/isolation, and actual CPU training/conversion plus the authenticated pinned-container swap/rollback probe. This final merge-status update changes documentation only. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). No M8 deployment, paid GPU or real model promotion has been performed. Defaults remain off.
+All ten deliverables are implemented in PR #56. Roland requested its merge and branch removal on 8 Oct 2026; that includes the model runbook (M8.10). The branch is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh and preserving its screen service, routes, browser hand-back, passwords and deployment checks. Screen/trainer profile composition and capture exclusions are covered by combined tests. CI fixes update backup expectations for migration 3, load `TRAINING_DATA_DIR` as a path, require every mounted secret, annotate the generated activation script for ShellCheck, and add hash-locked protobuf to both training environments. CPU training and conversion now complete; model-client handling reads streamed schema-error bodies before constrained fallback, while unrelated HTTP errors still fail immediately. Three real-stream transport regression cases cover both rejection statuses and refusal to retry other errors. The synthetic model now declares 4096 context tokens, matching evaluation; its regression test covers the full public suite plus the output allowance because the pinned server caps slots at the trained context. Complete byte fallback fixes the pinned server tokenizer failure on newlines and unseen characters; a Unicode round-trip regression covers it. A literal assistant prefix avoids artificial whitespace that caused the pinned sampler to discard its first token; a separate prefix regression covers this. Cancellation now delivers the final sign-in event before ending the chat; the existing M7 regression reproduced on the untouched baseline and passes with the fix. The CPU workflow provides the checkout import path to its standalone probe. The actual tiny-GGUF swap probe exercises authenticated API import, promotion and rollback with human request tokens, missing-token refusal, unchanged container start time for valid swaps, and rollback after a corrupt candidate. All five GitHub checks passed on code head `c9a7ef1`: lint, 1,543 unit tests, 81 frontend tests, edge/isolation, and actual CPU training/conversion plus the authenticated pinned-container swap/rollback probe. This final merge-status update changes documentation only. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). At that merge no M8 deployment had been performed; no paid GPU has been rented and no model promoted. Defaults remain off.
+
+#### Host acceptance in progress (9 Oct 2026)
+
+Source for points 1 to 3: the handoff comment on #56 (Roland's deployment log and a live session on the agent). The evidence is written out in `docs/AGENT.md` §12. The draft #60 proposed the same handoff as `docs/M8-HANDOFF.md`; it was closed unmerged because §2.6 keeps status in these three documents.
+
+1. **Deployed.** The host runs `e208bbd` with training off. `make verify`: 13 pass / 0 fail / 1 skip, 3393 MiB available. The first preflight stopped on a `TRAINER_URL` left in `.env` with the training profile off. That was the host file, not an app fault, and Roland corrected it.
+2. **Passed live.** A thumbs-up, a thumbs-down and a text correction are saved and kept after a refresh. The chat says "Capture is off / Not captured". Persona edit, preview and save work. The serving model is still `qwen3-4b-q4km-base` with no previous model.
+3. **Found live.** Clear vote removed the saved vote but left the old thumb at `aria-pressed="true"` until a refresh.
+4. **Feedback follow-up (#61, `v2-m8-clear-vote-fix`).** A successful clear sets both thumbs to unpressed and removes an old error line; a failed clear keeps the vote and shows the error. A pressed thumb also had no style of its own, so a saved vote could not be seen on screen; `style.css` now fills it. Regression tests are in `tests/frontend/settings.test.cjs`. Not on the server until Roland deploys.
+
+Open before Roland is asked to accept M8:
+
+- [ ] Deploy the follow-up and repeat the Clear vote test: the chosen thumb is filled after a vote and after a refresh, and both thumbs are empty straight after Clear vote.
+- [ ] Persona: restore an earlier version, and check that the safety block is shown last and read-only. Version 6 with blank standing instructions is the present state; the restore click itself was not watched.
+- [ ] `docker compose exec -T core python -m agent migrate --check` shows schema version 3, and `make model-list` shows the base model as current.
+- [ ] With capture off, a thumbs-up writes no `training_examples` row. Only the "Not captured" label was read; the database was not queried.
+- [ ] Ordinary chat, chat refresh, the browser screen and a sign-in by Roland on the M8 build.
+- [ ] Only if Roland chooses it: agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. A rented GPU is optional.
+
+Noticed while fixing, not changed:
+
+1. The feedback row is placed beside the answer bubble. Next to a long answer, and on a phone, the thumbs and Clear vote stack in a narrow column.
+2. After a reload the row reads "Not captured" for every vote a dataset has not used, including one that was captured: the chat's message list carries the vote but not whether it was captured. Look at this before the capture test, or the label will mislead.
+
+Keep capture, the weekly loop, `TRAINER_URL` and the `training` profile off until Roland says otherwise. Roland runs the host commands himself.
 
 #### Goal
 
@@ -529,7 +554,7 @@ Roland can edit the persona safely, opt in to labelled feedback capture, export 
 
 #### Dependencies
 
-Roland authorised M8 coding in parallel with M7 on 8 Oct 2026, then asked to fix M8 and integrate the new M7 baseline. `v2-m8-model` originally started at `c35bb21` and is now rebased on final M7 in `v2` at `e2f0792` (#57–#59). Capture must refuse every active sign-in or screen session using durable M7 records. Roland accepted M7 on 8 Oct 2026; M8 host deployment and smoke remain pending. Keep training capture, the scheduled loop and the trainer profile off; Container integration has passed; host smoke and Roland's explicit choice are still required before enabling it. The parallel coding authorisation supersedes the sequential coding order in §5. Roland's later merge request authorises integration and feature-branch removal; host deployment, GPU rental and model promotion remain separate decisions.
+Roland authorised M8 coding in parallel with M7 on 8 Oct 2026, then asked to fix M8 and integrate the new M7 baseline. `v2-m8-model` originally started at `c35bb21` and is now rebased on final M7 in `v2` at `e2f0792` (#57–#59). Capture must refuse every active sign-in or screen session using durable M7 records. Roland accepted M7 on 8 Oct 2026; M8 is deployed and its host acceptance is in progress (above). Keep training capture, the scheduled loop and the trainer profile off; Container integration has passed; host smoke and Roland's explicit choice are still required before enabling it. The parallel coding authorisation supersedes the sequential coding order in §5. Roland's later merge request authorises integration and feature-branch removal; host deployment, GPU rental and model promotion remain separate decisions.
 
 #### Deliverables
 
@@ -583,6 +608,8 @@ Manual (**Roland decides**): **A8.10** — one real loop on a rented GPU. Not re
 `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINER_URL` empty, compose profile `training` not in `COMPOSE_PROFILES`. `make deploy` must check that `COMPOSE_PROFILES=training` and `TRAINER_URL` are both set or both unset.
 
 #### Next steps after merge
+
+Status on 9 Oct 2026: steps 1 to 3 are done, except the `migrate --check` in step 3; step 4 is partly done. What is still open is listed under "Host acceptance in progress" above.
 
 1. Roland updates `/opt/roland-agent` to the merged `v2`, including #59 chat refresh and #56 M8. Confirm the fetched remote tip before deploying.
 2. Back up the running database/workspace and create missing mounted secrets with `sudo env APPLY=1 make secrets`; existing secrets are retained. Keep `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINER_URL` empty and `COMPOSE_PROFILES=browser,screen`; retain the existing model context/memory and tool-step limits.
