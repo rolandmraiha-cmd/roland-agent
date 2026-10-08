@@ -12,7 +12,7 @@ from conftest import FakeBrain, call, make_config
 from fastapi.testclient import TestClient
 
 from agent.core import Agent
-from agent.gate import POLICIES, Decision, Gate, Risk, RunState
+from agent.gate import ALREADY_REJECTED, POLICIES, Decision, Gate, Risk, RunState, action_key
 from agent.memory import Memory
 from agent.tools import TOOLS, ToolContext, call_tool
 from agent.web.app import create_app
@@ -131,6 +131,114 @@ async def test_rejected_returns_not_done_with_note(tmp_path):
     assert any("Not done: Roland rejected this." in (m.get("content") or "") for m in tool_msgs)
     assert any("Roland's note: keep it" in (m.get("content") or "") for m in tool_msgs)
     assert agent.memory.facts()
+
+
+async def _reject_pending(agent, count):
+    """Reject the next `count` approvals as they appear."""
+    done = 0
+    for _ in range(200):
+        for row in agent.memory.approvals(status="pending"):
+            await agent.gate.reject(row["id"], args_hash=row["args_hash"])
+            done += 1
+            if done == count:
+                return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"only {done} of {count} approvals appeared")
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_action_is_not_asked_again_in_the_same_run(tmp_path):
+    """Seen on Contabo: right after Roland rejected "Submit order", the model asked for the
+    same click again and a second card appeared."""
+    agent = _agent_with_script(
+        tmp_path,
+        [
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            "I left fact 1 alone.",
+            "unused: the run must end before this",
+        ],
+    )
+    agent.memory.remember("stay")
+    chat_id = agent.memory.new_chat()
+
+    async def run_chat():
+        return [e async for e in agent.chat(chat_id, "forget it")]
+
+    events, _ = await asyncio.gather(run_chat(), _reject_pending(agent, 1))
+    assert len(agent.memory.approvals(status="all")) == 1
+    assert sum(e.get("type") == "approval_required" for e in events) == 1
+    tool_msgs = [m for turn in agent.brain.seen for m in turn if m.get("role") == "tool"]
+    assert any(ALREADY_REJECTED in (m.get("content") or "") for m in tool_msgs)
+    assert events[-1]["type"] == "done" and events[-1]["reply"].strip() == "I left fact 1 alone."
+    assert len(agent.brain.seen) == 3  # no further tool rounds after the refusal
+    assert agent.memory.facts()
+    assert agent.memory.audit_rows(event="approval_repeat_refused")
+
+
+def test_rejection_memory_matches_actions_not_card_text():
+    """Codex review on #47: the card summary leaves out arguments, so it can't be the key."""
+    old = action_key("write_file", {"path": "a.txt", "content": "v1", "overwrite": True}, "Overwrite a.txt")
+    revised = action_key("write_file", {"path": "a.txt", "content": "v2", "overwrite": True}, "Overwrite a.txt")
+    assert old != revised
+    # The model's reason and pinned classifier facts don't make a call new.
+    assert old == action_key(
+        "write_file", {"path": "a.txt", "content": "v1", "overwrite": True, "reason": "again", "_pin": {"x": 1}},
+        "Overwrite a.txt",
+    )
+    # A fresh snapshot may give the same button another ref.
+    click = "Click “Submit order” (button) on httpbin.org · matched “order”"
+    assert action_key("browser_click", {"ref": "e13"}, click) == action_key("browser_click", {"ref": "e21"}, click)
+    typed = "Type into “Name” on httpbin.org"
+    assert action_key("browser_type", {"ref": "e4", "text": "Test"}, typed) != action_key(
+        "browser_type", {"ref": "e4", "text": "Other"}, typed
+    )
+    # Outside the browser a ref-like argument is real data.
+    assert action_key("some_tool", {"ref": "1"}, "s") != action_key("some_tool", {"ref": "2"}, "s")
+
+
+@pytest.mark.asyncio
+async def test_a_different_action_after_a_rejection_still_gets_a_card(tmp_path):
+    agent = _agent_with_script(
+        tmp_path,
+        [
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            ("", [call("forget", json.dumps({"fact_id": 2}))]),
+            "Both stay.",
+        ],
+    )
+    agent.memory.remember("one")
+    agent.memory.remember("two")
+    chat_id = agent.memory.new_chat()
+
+    async def run_chat():
+        return [e async for e in agent.chat(chat_id, "forget them")]
+
+    events, _ = await asyncio.gather(run_chat(), _reject_pending(agent, 2))
+    assert len(agent.memory.approvals(status="all")) == 2
+    assert events[-1]["type"] == "done" and events[-1]["reply"].strip() == "Both stay."
+
+
+@pytest.mark.asyncio
+async def test_a_new_message_may_ask_again_for_a_rejected_action(tmp_path):
+    """The memory of rejections lasts one run: Roland may change his mind in a new message."""
+    agent = _agent_with_script(
+        tmp_path,
+        [
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            "Not forgotten.",
+            ("", [call("forget", json.dumps({"fact_id": 1}))]),
+            "Still not forgotten.",
+        ],
+    )
+    agent.memory.remember("stay")
+    chat_id = agent.memory.new_chat()
+    for _ in range(2):
+        async def run_chat():
+            return [e async for e in agent.chat(chat_id, "forget fact 1")]
+
+        await asyncio.gather(run_chat(), _reject_pending(agent, 1))
+    assert len(agent.memory.approvals(status="all")) == 2
 
 
 @pytest.mark.asyncio

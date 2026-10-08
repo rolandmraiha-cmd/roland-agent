@@ -19,6 +19,28 @@ if TYPE_CHECKING:
 
 CONFIRM_CATEGORIES = frozenset({"payment", "message", "public_post", "delete"})
 
+def action_key(name: str, args: dict, summary: str) -> tuple[str, str, str]:
+    """What makes two gated calls "the same action" for the rejection memory.
+
+    The summary names the element and site but leaves out or cuts arguments (an overwrite's
+    content, typed text), so the arguments that matter count too. Left out: the model's
+    `reason`, `_`-keys pinned by classifiers, and a browser `ref`, which a fresh snapshot may
+    renumber for the same element.
+    """
+    kept = {
+        key: value
+        for key, value in args.items()
+        if not key.startswith("_") and key != "reason" and not (key == "ref" and name.startswith("browser_"))
+    }
+    return name, summary, json.dumps(kept, sort_keys=True, ensure_ascii=False, default=str)
+
+
+# Returned instead of a new card when the run asks again for something Roland rejected.
+ALREADY_REJECTED = (
+    "Roland already rejected this in this conversation turn, so it wasn't asked again. "
+    "Don't try it again; tell Roland it wasn't done."
+)
+
 # Reserved argument name. Only a classifier may fill it (through Decision.pinned): call_tool
 # drops anything the model put there. It carries facts that must stay bound to the approved
 # action, such as the fingerprint of the page element Roland was shown.
@@ -75,6 +97,9 @@ class RunState:
     # tools_browser._target). The next action on the same element is gated instead of being
     # blocked again (§6.5 POST-navigation guard).
     blocked_submissions: set[str] = field(default_factory=set)
+    # action_key() of every approval Roland rejected in this run. The same action gets no
+    # new card; a revised one (other content, other text) does.
+    rejected_actions: set[tuple[str, str, str]] = field(default_factory=set)
 
 
 def _safe(_ctx: ToolContext, _args: dict) -> Awaitable[Decision]:
@@ -417,6 +442,18 @@ class Gate:
             expires = time.time() + timeout_min * 60
             model_reason = str(args.get("reason", ""))[:300] or None
             summary = self._summary(name, args, decision)
+            key = action_key(name, args, summary)
+            if key in run.rejected_actions:
+                self.audit.write(
+                    "agent",
+                    "approval_repeat_refused",
+                    run_id=run.run_id,
+                    chat_id=run.chat_id,
+                    tool=name,
+                    decision="rejected",
+                    detail={"category": decision.category, "summary": summary},
+                )
+                return Outcome(False, message=ALREADY_REJECTED)
             details = self._details(name, args, decision)
             needs_confirm = decision.category in CONFIRM_CATEGORIES
             approval_id = self.memory.add_approval(
@@ -505,6 +542,9 @@ class Gate:
         finally:
             run.pending_approval_id = None
             self._waiters.pop(approval_id, None)
+            final = self.memory.approval(approval_id)
+            if final is not None and final["status"] == "rejected":
+                run.rejected_actions.add(key)
 
     async def _attach_card_screenshot(self, approval_id: str, decision: Decision) -> None:
         """Save what the browser shows right now so Roland can see it on the card. A failure
