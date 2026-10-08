@@ -3,7 +3,7 @@
 Roland's private, always-on AI agent: password-protected web chat, a self-hosted open-weight model only (no hosted LLM), tools with a code-enforced approval gate, a sandboxed terminal, workspace files, and approved background jobs.
 
 **Live:** https://37-60-226-214.sslip.io/ (Contabo VPS, Ubuntu 24.04).
-**Branch:** `v2` is the integration branch (docs base `a27b5ff`, #37, plus M6 in #38 to #42: built, off by default, not deployed). M5 code is `98971cc` (#32). Confirm the tip with `git log origin/v2 -1` before coding. `main` is untouched until the M9 release.
+**Branch:** `v2` is the integration branch; verified tip and deployed Contabo HEAD are `23fd1fc` (#47, 8 Oct 2026). M6 browser is enabled; basic smoke and the A6.5 memory watch passed, while final isolation verification and M6 acceptance remain pending. Before the browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code). Confirm the remote tip before coding. `main` is untouched until M9.
 
 **Not the same as Grok:** this app is Contabo-hosted **roland-agent**. Roland also has **Grok Bot** teammates (Crew Chief, Code Builder, Code Shipper, …) in a separate chat; they are not this runtime. If those Grok bots are parked, an outside AI Roland gave this repo to may still work — see [docs/NEXT.md](docs/NEXT.md) §0.
 
@@ -14,13 +14,15 @@ Roland's private, always-on AI agent: password-protected web chat, a self-hosted
 - **M3 approval gate:** risky tool calls wait for Approve/Reject in the UI; untrusted content taints the run; chat text never approves.
 - **M4 sandbox:** `run_shell` runs in an isolated `sandboxd` container, not in core.
 - **M5 workspace and files:** Files UI and tools (list, preview, download, move, delete to trash, restore).
-- On Contabo the model runs with `MODEL_CTX=3072` (4096 ran out of memory at the 3840m limit). Small CPU model: expect slow, modest answers.
+- **M6 browser:** a persistent Chromium in its own container, on as Roland's Contabo trial with Chromium's sandbox enabled. Example.com navigation and a harmless form approval/rejection were smoked; final acceptance remains pending.
+- On Contabo the model stays at `MODEL_CTX=3072` / `MODEL_MEM_LIMIT=3840m`. The OOM at 3072 came from llama-server's RAM prompt cache, now disabled (`--cache-ram 0`, #43). The browser-enabled memory watch passed: model peak 3084.29 MiB, browser peak 822.80 MiB, minimum host available 3553 MiB. The context decision stays open. Small CPU model: expect slow, modest answers.
+- Fixes #45–#47 are deployed: preserve length-limited replies, require the confirming tap 1–5 s later, and suppress repeat cards for an action rejected in the same run. The form smoke still needs repeating after those approval fixes.
 
 ## What does not work yet
 
 Live screen and human sign-in (M7), persona and training pipeline (M8), and the 2.0.0 release (M9). Their flags stay off in production. See [docs/NEXT.md](docs/NEXT.md).
 
-**The browser (M6) is built but not switched on.** The code is all here: core decides which clicks need Roland's approval, and a separate `browser` container runs one Chromium that the agent drives through `browserd`. It has been tested off the server only, against a test website in Docker (`make test-browser`). It is **not deployed and not smoked on Contabo**, and it stays off there until Roland switches it on: the container only starts with `COMPOSE_PROFILES=browser` in `.env`, and the agent only uses it with `BROWSER_ENABLED=true`. Still to do before that: measure memory on the server, deploy, and run the M6 smoke (docs/NEXT.md, M6).
+**M6 is still awaiting final acceptance.** The supplied `WATCH=600 make memory-report` says `A6.5 PASS`; a completed `sudo make verify` including browser isolation (A6.4) is still needed, followed by the form smoke after #46/#47 and Roland's confirmation. Repo browser defaults stay off; the host has both `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`. A short prompt rule to stop unsolicited notes files is the next separate PR. **Do not start M7 until Roland confirms M6 is done.** Snapshot: `pre-m6-deploy-2026-10-08`. Roland runs host commands himself; deploy uses `sudo env APPLY=1 make deploy` because of uid-1000 secret permissions.
 
 ## Develop
 

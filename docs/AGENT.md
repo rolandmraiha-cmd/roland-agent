@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-07. Docs base **`a27b5ff`** (#37) plus M6: the fixture site (#38), part 1 (#39: core-side browser code), the Browser tab (#40), the server-side checks (#41) and part 2 (#42: the browser service). M6 is built, off by default and not deployed. M5 code **`98971cc`** (#32). Verify against remote `v2` before coding.
+> Snapshot: 2026-10-08. Verified remote `v2` and Roland's deployed Contabo HEAD: **`23fd1fc`** (#47). M6 (#38–#42) is enabled on Contabo; all five services are healthy. The memory watch reports **A6.5 PASS**; A6.4 and final M6 acceptance await a completed `make verify`. Fixes #43, #45, #46 and #47 are deployed. Verify against remote `v2` before coding.
 >
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -11,7 +11,7 @@ A private HTTPS agent on Roland's Contabo VPS with:
 1. Password-protected web chat, persistent chats/facts/jobs, streamed replies.
 2. Self-hosted open-weight model only (no third-party inference).
 3. A code-enforced approval gate, an isolated terminal sandbox and a workspace files UI (shipped).
-4. Next: a persistent Chromium the agent drives (M6; built and tested off the server, off by default, not yet deployed or smoked on Contabo) and a live screen of that same browser for Roland's own sign-ins (M7).
+4. A persistent Chromium the agent drives (M6; enabled on Contabo, basic smoke and memory watch passed, final acceptance pending) and, later, a live screen of that same browser for Roland's own sign-ins (M7).
 5. Later: persona editing and scrubbed, opt-in training on a **separate** GPU machine, never the VPS (M8), then the 2.0.0 release (M9).
 
 Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a small local model; quality and speed are modest.
@@ -51,18 +51,20 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | M4 sandbox | `sandboxd` container, `SHELL_BACKEND=sandbox`, shell classifier | #31 |
 | M5 files | Workspace + Files UI/API, trash and restore (A5.4 is the Contabo smoke; #32 title still says A5.1–A5.3) | #32; docs tip **`5104fb6`** |
 | M6 part 1 (core side) | Click classifier, `browserd` client, 16 browser tools with gate policies, element fingerprint pinned to approvals, screenshot on approval cards; A6.1 and A6.2 green | #39 |
-| M6 part 2 (browser service, **off by default, not deployed**) | `browserd/` (launcher, session, server, `snapshot.js`), `docker/browser/` image and Chromium policy, `browser` compose service behind the `browser` profile, `BROWSER_ENABLED` accepted by `python -m agent`, A6.3 live tests green in Docker (`make test-browser`), Chromium sandbox experiment done | #42 |
+| M6 part 2 (browser service, **off by default in the repo; enabled on Contabo**) | `browserd/` (launcher, session, server, `snapshot.js`), `docker/browser/` image and Chromium policy, `browser` compose service behind the `browser` profile, `BROWSER_ENABLED` accepted by `python -m agent`, A6.3 live tests green in Docker (`make test-browser`), Chromium sandbox on as Roland's Contabo trial | #42 |
+| Contabo follow-up fixes | RAM prompt cache disabled; memory watch catches restarts/cgroup OOM kills; length-limited replies preserved; confirming tap must be 1–5 s later; no repeat card for a rejected action within a run | #43, #45, #46, #47; deployed at `23fd1fc` |
 
 - M6.4 fixture site exists at `tests/fixtures/site/server.py` with the `fixture-web` test service (#38). Part 2 added pages to it and drives it with the real browser.
 - M6.7 Browser tab and authenticated status/thumbnail routes exist (#40). They show the browser's mode, address, tabs and a thumbnail on request; with the browser off the tab says so.
-- Server-side checks exist (#41): `tests/integration/isolation.sh` probes from the browser container as well as the sandbox, and `make memory-report` gives the read-only headroom verdict that must come before the browser is switched on. Neither has been run on Contabo with the browser.
-- Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with `caddy`, `core`, `model`, `sandbox` healthy.
+- Server-side checks exist (#41): `tests/integration/isolation.sh` probes from the browser container as well as the sandbox, and `make memory-report` gives the read-only headroom verdict that must come before the browser is switched on. The pre-step memory check passed after #43; `WATCH=600 make memory-report` with the browser enabled reports A6.5 PASS. A completed `make verify` isolation result remains pending.
+- Deployed and live on Contabo: https://37-60-226-214.sslip.io/ at `23fd1fc`, with `caddy`, `core`, `model`, `sandbox`, `browser` healthy. Before today's browser deployment the host was `98971cc` (M5 code), not the previously documented `a27b5ff` docs commit.
 - DB schema version **2**. App version still **0.1.0** (bump to 2.0.0 at M9).
 
 ## 4. Not done (do not document as available)
 
-- **M6** browser (the Contabo part) · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
-- **M6 still missing:** everything on the server. The memory measurement that must come first (`make memory-report`), the deploy with the browser switched on, the smoke, A6.4 with the firewall and A6.5. The browser has never run on Contabo; do not describe it as available. A CI job for the live browser tests needs a workflow edit, which the credentials used so far cannot push; until then they run with `make test-browser`.
+- **M6** final acceptance · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
+- **M6 still missing:** a completed Contabo `make verify` (including A6.4 isolation), a repeat of the form smoke after #46/#47, and Roland's confirmation that M6 is done. The A6.5 memory report passed; final acceptance remains open. A CI job for the live browser tests still needs a workflow edit; until then they run with `make test-browser`.
+- **Current coding follow-up:** a short system-prompt rule to use files only when Roland asks or names one, never keep unsolicited notes, and treat a missing file as empty; add a regression test without changing tool policies or approvals. Stop after this PR; do not start M7 without Roland's confirmation.
 - `python -m agent` still refuses `SCREEN_ENABLED=true` ("not implemented yet").
 - Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit CI already runs `tests/test_no_hosted_llm.py`.
 - `make model-bench`: deferred.
@@ -130,7 +132,7 @@ Never set `ALLOW_SHELL=true` on a personal computer. Never set `SANDBOX_REAP_ALL
 | `core` | App, gate, tools, SQLite/backups volumes, workspace bind; `ALLOW_SHELL=true`, `SHELL_BACKEND=sandbox`; `BROWSER_ENABLED` from `.env` (default `false`); screen/training flags `"false"`. Also on `browser_ctl` (10.77.4.10) and mounts `browser_api_token` | 640m |
 | `model` | Internal `model` network only; read-only weights; `model_server_token` | `${MODEL_MEM_LIMIT:-3840m}` |
 | `sandbox` | `sandboxd` on `sandbox_ctl`; peer + Bearer `sandbox_api_token`; own egress network | 1g |
-| `browser` (**only with `COMPOSE_PROFILES=browser`; not running on Contabo**) | Chromium on a virtual screen plus `browserd` on `browser_ctl` 10.77.4.40:7100; peer + Bearer `browser_api_token`; own egress network; the `browser-profile` volume is mounted here only | 1280m (includes 320m shm and /tmp) |
+| `browser` (**only with `COMPOSE_PROFILES=browser`; enabled on Contabo**) | Chromium on a virtual screen plus `browserd` on `browser_ctl` 10.77.4.40:7100; peer + Bearer `browser_api_token`; own egress network; the `browser-profile` volume is mounted here only | 1280m (includes 320m shm and /tmp) |
 
 Config caps total 5600 MiB, or 6880 MiB with the browser. Caps are not measured usage.
 
@@ -143,12 +145,14 @@ Config caps total 5600 MiB, or 6880 MiB with the browser. Caps are not measured 
 | Catalogue default | `qwen3-4b-q4km` (~2.5 GB); hashes in `deploy/models.lock` |
 | CI-only | `test-tiny` (not an assistant) |
 | Image pin | `docker/model/VERSION` → llama.cpp `server-b11434` digest |
-| Context on Contabo | **`MODEL_CTX=3072`** in host `.env` (lowered after an OOM kill at 4096) |
+| Context on Contabo | **`MODEL_CTX=3072`** in host `.env`; later OOM at 3072 traced to the RAM prompt cache, now disabled |
 | Context repo default | 4096 in compose/`.env.example`; hard cap 6144 in `docker/model/run.sh` |
 | Mem limit | **`MODEL_MEM_LIMIT=3840m`** — never raise without Roland's OK |
 | Isolation | No published port, no egress, digest-pinned, read-only weights |
 
 **Open decision (Roland):** keep 3072 and align the repo default, raise the memory limit (costs browser headroom), or move to a larger VPS. Until decided, keep 3072/3840m.
+
+After #43 (`--cache-ram 0`), Roland's pre-step with two chats plus "continue" measured model peak **3038 MiB**, minimum host available **4045 MiB**, and **2765 MiB** projected available after the 1280 MiB browser cap: PRE-STEP PASS. With the browser enabled, the supplied `WATCH=600` report measured model peak **3084.29 MiB**, browser peak **822.80 MiB**, and minimum host available **3553 MiB**, with no observed restarts or cgroup OOM kills: A6.5 PASS. These measurements are at 3072; they do not establish that 4096 fits. Decision 1 remains open.
 
 **Rules:** do not raise `MODEL_MEM_LIMIT` to make things fit. Measure host memory with all live services under load before enabling the browser; if browser cap plus live usage leaves less than ~800 MiB available, stop and ask Roland. Planned full stack is ~6944 MiB (7072 with trainer) of ~7987 MiB. Take a Contabo snapshot before each new service goes live.
 
@@ -165,19 +169,19 @@ Config caps total 5600 MiB, or 6880 MiB with the browser. Caps are not measured 
 - **M5 files:** workspace path confinement, trash/restore instead of hard delete.
 - **M6 core side:** every browser tool has a policy and taints the run; clicks are classified from a fresh look at the element (keywords in English and Finnish, submit controls, default-deny); typing into password, code or card fields is FORBIDDEN; the element fingerprint and a digest of every fact the classifier read, including the full page address, are pinned into the stored approval args (`_pin`, which the model can never supply); before an approved action runs, core looks at the element again and stops if anything differs, and `browserd` re-checks the fingerprint; an approved upload sends only the exact bytes that were in the file when Roland was asked; actions run in `safe` mode unless Roland approved that exact action; a `safe` action that tries to submit a form is reported and gated on retry; approval cards carry a screenshot for Roland; screenshots are never handed to the model; refs and tab ids are validated before they reach a URL; `browserd` answers are size-capped and type-checked.
 
-- **M6 browser service (built; off by default; not yet run on Contabo):** `browserd` has exactly the §8.4 routes, for core's address and token only, with no route for cookies, storage, field values, running script or the debugging protocol, and no debugging port (Playwright's pipe). It refuses private and local addresses and anything but http/https, by name in its request guard and again inside Chromium for redirects and WebSockets. A form submission (POST) only goes out during an action Roland approved and only from that action's tab, whether a click, a key, a list choice or the page itself tried it. Dialogs are always answered no. The fixed `snapshot.js` is the only script; it never reads the value of a password, code or card field, and `browserd` drops such a value again and builds the fingerprint itself. At most 2 tabs. The profile volume is mounted into the browser container only. Accepted limits (Chromium sandbox off by default, background requests, and more) are in `docs/SECURITY.md`.
+- **M6 browser service (enabled on Contabo; final isolation acceptance pending):** `browserd` has exactly the §8.4 routes, for core's address and token only, with no route for cookies, storage, field values, running script or the debugging protocol, and no debugging port (Playwright's pipe). It refuses private and local addresses and anything but http/https, by name in its request guard and again inside Chromium for redirects and WebSockets. A form submission (POST) only goes out during an action Roland approved and only from that action's tab, whether a click, a key, a list choice or the page itself tried it. Dialogs are always answered no. The fixed `snapshot.js` is the only script; it never reads the value of a password, code or card field, and `browserd` drops such a value again and builds the fingerprint itself. At most 2 tabs. The profile volume is mounted into the browser container only. Roland chose Chromium's sandbox on as a Contabo trial, background POSTs allowed (decision 7a), and both sensitive-field rules retained (decision 8). Accepted limits are in `docs/SECURITY.md`.
 
 ### Pending
 
-M6 on the server: firewall rules confirmed from the browser container (A6.4) and the smoke · M7 screen auth and sign-in locking · M8 capture/scrubber/promotion controls · M9 full §10 security review and `docs/SECURITY.md` write-up.
+M6 on the server: completed firewall/isolation verification (A6.4), form smoke repeated after #46/#47, and Roland's final acceptance · M7 screen auth and sign-in locking · M8 capture/scrubber/promotion controls · M9 full §10 security review and `docs/SECURITY.md` write-up.
 
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model.
 
 ## 8. Next coding order
 
 1. **Grok bots:** wait for Roland to unpause THE SCAM CALL CENTER before those bots start M6. **External AI:** if Roland already handed you this plan, start when he said — Grok parking does not block you.
-2. Decide MODEL_CTX vs memory (§6) and record host memory under load with `make memory-report`.
-3. **M6 on Contabo** (pre-step measurement, deploy with the browser on, smoke, A6.4, A6.5; Roland's three browser decisions in NEXT.md §6) → **M7** screen/sign-in → **M8** persona/training → **M9** release.
+2. Record the supplied M6 Contabo evidence, then add the short file-use prompt rule and regression test in a separate PR. Decision 1 (MODEL_CTX vs memory) stays open; keep 3072/3840m.
+3. Finish **M6 on Contabo** (`make verify`/A6.4 and the form smoke after #46/#47; A6.5 memory evidence passed). **Stop and report back. Do not start M7 until Roland confirms M6 is done.** M7 → M8 → M9 remains the later order.
 
 Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 
@@ -190,11 +194,13 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 | Public IPv4 | `37.60.226.214` |
 | URL | https://37-60-226-214.sslip.io/ |
 | Paths | `/opt/roland-agent`, workspace `/srv/roland-agent/workspace` |
-| Live services | caddy, core, model, sandbox (healthy) |
-| Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m` |
+| Live services / HEAD | caddy, core, model, sandbox, browser (healthy); `23fd1fc` |
+| Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`, `COMPOSE_PROFILES=browser`, `BROWSER_ENABLED=true`, `BROWSER_CHROMIUM_SANDBOX=true`, `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json`, `MAX_TOOL_STEPS=6` |
+| Snapshot | `pre-m6-deploy-2026-10-08` |
 
 ### Gotchas
 
+- The deploy user is not uid 1000 and cannot read the uid-1000 secrets (directory 0700, files 0400). Roland deploys with `sudo env APPLY=1 make deploy`; read-only verification is `sudo make verify` from `/opt/roland-agent`.
 - `MODEL_CTX=4096` with `MODEL_MEM_LIMIT=3840m` OOM-killed the model on Contabo, and so did 3072 on 2026-10-08. The cause was llama-server's RAM prompt cache (`--cache-ram`, default 8192 MiB), not the context: `run.sh` passes `--cache-ram 0`; keep it there.
 - A reply longer than `MODEL_MAX_NEW_TOKENS` (768, about 500 words) is kept as far as it got, with a note to send "continue" (`finish_step` in `agent/models/parse.py`). Only a cut-off tool call is an invalid action that the loop asks for again. Before this change, every long answer was thrown away and regenerated up to `MODEL_PARSE_RETRIES` times, at 3–4 minutes per attempt on Contabo.
 - Docker clears `OOMKilled` when a container restarts, and it never shows a killed child process (llama-server under `run.sh`, a Chromium renderer). Check `RestartCount`, the cgroup's `oom_kill` counter or `journalctl -k`; `make memory-report` does the first two.
@@ -239,6 +245,8 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 
 ## 12. Last verified
 
-Remote `v2` at **`a27b5ff`** (#37; M5 code `98971cc`) is what is deployed on Contabo, with caddy/core/model/sandbox healthy and M5 A5.4 green. M6 part 1 and the fixture site were verified off the server only: `make lint`, `pytest` (853 passed) and the frontend tests (31 passed) in a dev container, plus CI. The fixture site was also driven with a real headless Chromium and started as a container from `docker-compose.test.yml`. It changes nothing on Contabo while `BROWSER_ENABLED=false`. Not run for it: any Contabo smoke. `tests/test_sandboxd.py::test_leftover_background_process_is_reaped` fails in that dev container on untouched `v2` as well; it passes in CI. Re-run `make test` before claiming anything newer.
+**Current, 8 Oct 2026 (Roland's supplied logs):** remote `v2` and deployed Contabo HEAD are **`23fd1fc`**. `git pull --ff-only` advanced the host from `c81ef05`; `sudo env APPLY=1 make deploy` completed with all five services healthy/running and HTTPS smoke successful. This makes #46 and #47 live; a post-fix form smoke is not supplied. The `WATCH=600 make memory-report` log ends with **A6.5 PASS**, model peak 3084.29 MiB, browser peak 822.80 MiB, minimum host available 3553 MiB, and no observed restarts/cgroup OOM kills. A completed `make verify` result is not yet supplied; A6.4 and M6 acceptance remain open. Before the first browser deployment the host was `98971cc`, not `a27b5ff` (same M5 code). Snapshot: `pre-m6-deploy-2026-10-08`.
 
-M6 (#38 to #42 together) was also verified off the server only, in a dev container on 7 Oct 2026, on the tree that has all of them: `make lint`; `pytest` (the one known local failure above, everything else green); the frontend and page-script tests under Node; and `make test-browser`, which runs the browser image with a real headed Chromium in the hardened container against the fixture site (35 live tests: 34, then the profile test after a restart), checks the container from outside, and runs the isolation probes between the sandbox and the browser. That run passed with the defaults and with Chromium's own sandbox on. The isolation probes were also run once with a real core container in the stack: from the browser, core's `browser_ctl` address refused the connection and its edge address timed out, while core itself reached `browserd`. The Browser tab was opened in a real browser against the running app and browser service, at desktop and phone width: status, tabs, thumbnail and the user-mode notice all showed, with no script errors. Memory of the browser container after the tests: about 350 MiB for its programs plus about 30 MiB shared memory, of the 1280 MiB cap; the total counter peaked between about 530 and 1100 MiB, but that includes file cache. These were small test pages; real sites will use more. The dev container has no AppArmor and no host firewall, so none of this says what Contabo will do. The browser image for these runs was built with apt pointed at an https mirror, because the dev container's proxy does not carry plain http; the Dockerfile as committed has not been built unmodified anywhere yet. Not run: anything on Contabo, the firewall rules, `make memory-report` against a real host, real websites, CI for the live browser tests (no CI job yet).
+**Historical dev verification:** M6 part 1 and the fixture site were verified off the server: `make lint`, `pytest` (853 passed) and frontend tests (31 passed) in a dev container, plus CI. The fixture site was also driven with a real headless Chromium and started as a container from `docker-compose.test.yml`. `tests/test_sandboxd.py::test_leftover_background_process_is_reaped` failed in that dev container on untouched `v2` as well; it passed in CI. Re-run `make test` for each new PR.
+
+M6 (#38 to #42 together) was also verified off the server only, in a dev container on 7 Oct 2026, on the tree that has all of them: `make lint`; `pytest` (the one known local failure above, everything else green); the frontend and page-script tests under Node; and `make test-browser`, which runs the browser image with a real headed Chromium in the hardened container against the fixture site (35 live tests: 34, then the profile test after a restart), checks the container from outside, and runs the isolation probes between the sandbox and the browser. That run passed with the defaults and with Chromium's own sandbox on. The isolation probes were also run once with a real core container in the stack: from the browser, core's `browser_ctl` address refused the connection and its edge address timed out, while core itself reached `browserd`. The Browser tab was opened in a real browser against the running app and browser service, at desktop and phone width: status, tabs, thumbnail and the user-mode notice all showed, with no script errors. Memory of the browser container after the tests: about 350 MiB for its programs plus about 30 MiB shared memory, of the 1280 MiB cap; the total counter peaked between about 530 and 1100 MiB, but that includes file cache. These were small test pages; real sites will use more. The dev container has no AppArmor and no host firewall, so those dev results alone do not verify Contabo's isolation. The browser image for these runs was built with apt pointed at an https mirror, because the dev container's proxy does not carry plain http; that dev run did not build the committed Dockerfile unmodified; Roland's later Contabo deploy built the browser image successfully. Not run during that dev verification: anything on Contabo, the host firewall, `make memory-report` against a real host, real websites, or CI for the live browser tests (still no CI job). See the current Contabo evidence above.
