@@ -1,9 +1,10 @@
 # Model training, review and recovery
 
-**Draft text for Roland's approval (M8.10).** M8 is under review and has not been deployed.
-Capture, the scheduled loop, trainer and GPU rental are off. This branch is rebased on the final M7
-baseline in `v2` at `e2f0792` (#57–#59), including chat refresh. Combined CI and review are
-required before merge. Roland accepted M7 on 8 Oct 2026.
+**M8 implementation approved for integration by Roland (8 Oct 2026, #56).** M8 has not been deployed; host acceptance is pending.
+Capture, the scheduled loop, trainer and GPU rental are off. The implementation is rebased on final M7
+in `v2` at `e2f0792` (#57–#59), including chat refresh. All five GitHub checks passed on code head
+`c9a7ef1`, including actual CPU training and model swap/rollback. Roland accepted M7 on 8 Oct 2026;
+his request to merge #56 includes this runbook (M8.10). Deploy and smoke M8 with training off next.
 
 Use self-hosted inference only. Fine-tuning happens on a separate GPU machine, never Contabo.
 It can reinforce mistakes, learn an injected instruction or forget useful skills. Evaluation
