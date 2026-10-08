@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#111418">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<title>Browser screen</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="screen-body">
+<header class="screen-bar">
+  <strong id="screen-mode">Browser screen</strong>
+  <span id="screen-status" class="hint" role="status" aria-live="polite">Connecting…</span>
+  <div class="screen-buttons">
+    <button id="screen-done" class="primary" type="button" hidden>I'm done</button>
+    <button id="screen-keyboard" class="ghost" type="button" hidden>Keyboard</button>
+    <button id="screen-zoom" class="ghost" type="button" hidden>Zoom in</button>
+    <button id="screen-handback" class="ghost" type="button" hidden>Hand back to agent</button>
+    <button id="screen-watch" class="ghost" type="button" hidden>Switch to watch</button>
+    <button id="screen-control" class="ghost" type="button" hidden>Take control</button>
+    <button id="screen-close" class="ghost" type="button">Close</button>
+  </div>
+</header>
+<p id="screen-error" class="error" role="alert" hidden></p>
+<main id="screen" class="screen-canvas"></main>
+<textarea id="screen-typing" class="screen-typing" rows="1" aria-label="Type into the browser"
+          autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false"></textarea>
+<script src="/static/screen.js"></script>
+</body>
+</html>

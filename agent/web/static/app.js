@@ -9,6 +9,7 @@ let chatLoad = 0;
 let pendingApprovalCount = 0;
 let composerLocked = false;
 let activeView = "chat";
+let screenEnabled = false;
 
 function setSending(value) {
   sending = value;
@@ -76,6 +77,7 @@ async function loadStatus() {
     document.title = s.name;
     $("status").textContent = `${s.model} · ${s.calls_left}/${s.daily_limit} calls left today`;
     if (typeof s.pending_approvals === "number") setApprovalBadge(s.pending_approvals);
+    screenEnabled = !!(s.screen && s.screen.enabled);
     if (activeView === "browser") await loadBrowserStatus();
   } catch (_) {}
 }
@@ -144,6 +146,12 @@ async function openChat(id) {
         hasPending = true;
         $("messages").append(renderApprovalCard(a));
       }
+    }
+  }
+  if (Array.isArray(data.pending_signins)) {
+    for (const signin of data.pending_signins) {
+      hasPending = true;
+      $("messages").append(renderSigninCard(signin));
     }
   }
   setComposerLocked(hasPending);
@@ -234,6 +242,14 @@ async function send(text) {
         reply.before(card);
         loadStatus();
       } else if (ev.type === "approval_resolved") {
+        setComposerLocked(false);
+        loadStatus();
+      } else if (ev.type === "signin_required") {
+        setComposerLocked(true);
+        reply.before(renderSigninCard(ev.signin));
+        loadStatus();
+      } else if (ev.type === "signin_resolved") {
+        finishSigninCard(ev.id, ev.status);
         setComposerLocked(false);
         loadStatus();
       } else if (ev.type === "file") {
@@ -460,6 +476,96 @@ function renderApprovalCard(approval, { compact } = {}) {
   actions.append(approveBtn, rejectBtn, note);
   card.append(actions);
   return card;
+}
+
+// ---------- sign-in (M7) ----------
+// Roland signs in himself on the browser's screen. Only these buttons end the agent's wait:
+// a chat message saying "done" does nothing, and the composer stays locked meanwhile.
+// One sign-in can show in two places, the chat and the Browser tab: id -> place -> finisher.
+const signinCards = new Map();
+const SIGNIN_STATES = { done: "Signed in.", cancelled: "Cancelled.", expired: "Ran out of time." };
+let browserSigninKey = null;
+
+function screenLink(label, cls, mode, signinId) {
+  const link = el("a", cls, label);
+  link.href = "/screen?mode=" + mode + (signinId ? "&signin=" + encodeURIComponent(signinId) : "");
+  link.target = "_blank";
+  link.rel = "noopener";
+  return link;
+}
+
+function finishSigninCard(id, status) {
+  const places = signinCards.get(id);
+  signinCards.delete(id);
+  if (places) for (const finish of places.values()) finish(status);
+}
+
+function renderSigninCard(signin, place = "chat") {
+  const card = el("div", "card approval-card signin-card");
+  card.setAttribute("data-signin-id", signin.id);
+  card.append(el("div", "badge", "sign-in"));
+  card.append(el("div", "summary", "Sign in to " + (signin.site || "this site")));
+  card.append(el("p", "hint", "The agent never types passwords or codes. Open the screen, sign in yourself, then press I'm done."));
+  const dl = el("dl", "");
+  dl.append(el("dt", "", "page"), el("dd", "", typeof signin.url === "string" ? signin.url : ""));
+  if (signin.reason) dl.append(el("dt", "", "why"), el("dd", "", String(signin.reason)));
+  card.append(dl);
+  const expires = signin.expires ? new Date(signin.expires * 1000) : null;
+  if (expires) card.append(el("p", "hint", "Expires: " + expires.toLocaleString()));
+  const state = el("p", "hint", "");
+  const waiting = !signin.status || signin.status === "pending" || signin.status === "in_progress";
+  if (!waiting) {
+    state.textContent = SIGNIN_STATES[signin.status] || "Status: " + signin.status;
+    card.append(state);
+    return card;
+  }
+  const actions = el("div", "actions");
+  const open = screenLink("Open sign-in screen", "button primary", "control", signin.id);
+  const done = el("button", "ghost", "I'm done");
+  const cancel = el("button", "ghost danger", "Cancel");
+  if (!signinCards.has(signin.id)) signinCards.set(signin.id, new Map());
+  signinCards.get(signin.id).set(place, (status) => {
+    done.disabled = true;
+    cancel.disabled = true;
+    open.hidden = true;
+    open.removeAttribute("href");
+    state.textContent = SIGNIN_STATES[status] || "Status: " + status;
+  });
+  const act = (path, status) => async () => {
+    done.disabled = true;
+    cancel.disabled = true;
+    try {
+      await api(`/api/signin/${encodeURIComponent(signin.id)}/${path}`, { method: "POST" });
+      finishSigninCard(signin.id, status);
+      setComposerLocked(false);
+      loadStatus();
+      if (activeView === "browser") loadBrowserSignins();
+    } catch (e) {
+      done.disabled = false;
+      cancel.disabled = false;
+      card.append(el("p", "error", e.message));
+    }
+  };
+  done.onclick = act("done", "done");
+  cancel.onclick = act("cancel", "cancelled");
+  actions.append(open, done, cancel);
+  card.append(actions, state);
+  return card;
+}
+
+async function loadBrowserSignins() {
+  const list = $("browser-signins");
+  if (!list || !screenEnabled) return;
+  let rows;
+  try { rows = await (await api("/api/signin?status=pending")).json(); } catch (_) { return; }
+  if (activeView !== "browser") return;
+  const waiting = Array.isArray(rows) ? rows : [];
+  // The tab polls every few seconds; leave the cards alone unless the list itself changed.
+  const key = waiting.map((signin) => signin.id).join("\n");
+  if (key === browserSigninKey) return;
+  browserSigninKey = key;
+  list.replaceChildren();
+  for (const signin of waiting) list.append(renderSigninCard(signin, "browser"));
 }
 
 async function loadApprovals() {
@@ -876,6 +982,8 @@ function renderBrowserState() {
   $("browser-details").hidden = !state || !state.enabled || !state.reachable;
   $("browser-refresh").disabled = !browserCanRefresh() || browserShotPending;
   $("browser-refresh").textContent = browserShotPending ? "Refreshing…" : "Refresh";
+  // Watch and Take control exist only while the screen is switched on (M7).
+  $("browser-screen").hidden = !(screenEnabled && state && state.enabled && state.reachable);
   $("browser-status").textContent = !state ? "Loading browser status…"
     : !state.enabled ? "Browser is off."
     : !state.reachable ? "Browser is on but unavailable."
@@ -911,6 +1019,8 @@ function resetBrowserView(stopPolling = true) {
   ++browserStateVersion;
   browserState = null;
   browserStateKey = "";
+  browserSigninKey = null;
+  if ($("browser-signins")) $("browser-signins").replaceChildren();
   invalidateBrowserThumbnail();
   browserError("");
   renderBrowserState();
@@ -931,6 +1041,7 @@ async function loadBrowserStatus() {
     browserState = state;
     browserError("");
     renderBrowserState();
+    loadBrowserSignins();
   } catch (e) {
     if (load !== browserStatusLoad || activeView !== "browser") return;
     resetBrowserView(false);

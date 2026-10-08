@@ -633,7 +633,19 @@ def _with_page_text(out: str, text: str, limit: int, truncated: object) -> str:
     return out
 
 
-def format_snapshot(answer: dict, limit: int, start: int = 0, *, short: bool = False) -> str:
+SIGNIN_FORM_TELL = (
+    "This page has a sign-in form. Never type a password or code; tell Roland he has "
+    "to sign in himself."
+)
+SIGNIN_FORM_ASK = (
+    "This page has a sign-in form. Never type a password or code; call request_signin "
+    "so Roland can sign in himself."
+)
+
+
+def format_snapshot(
+    answer: dict, limit: int, start: int = 0, *, short: bool = False, can_ask_signin: bool = False,
+) -> str:
     """The page as text for a text-only model: one line per element, then the visible text.
     Values of sensitive fields are dropped here as well, whatever browserd sent. A long page
     is read in pieces: `start` is the number of the first element line to show.
@@ -646,10 +658,7 @@ def format_snapshot(answer: dict, limit: int, start: int = 0, *, short: bool = F
     page_url = str(answer.get("url") or "")
     head = [f"URL: {_one_line(page_url, 300)}   Title: {_one_line(answer.get('title'), 120)}"]
     if answer.get("login_form_detected"):
-        head.append(
-            "This page has a sign-in form. Never type a password or code; tell Roland he has "
-            "to sign in himself."
-        )
+        head.append(SIGNIN_FORM_ASK if can_ask_signin else SIGNIN_FORM_TELL)
     head += _notes(answer)
     elements = answer.get("elements")
     lines = [element_line(item, page_url) for item in elements if isinstance(item, dict)] \
@@ -773,7 +782,9 @@ async def browser_snapshot(ctx, args: dict) -> str:
     except BrowserError as error:
         return _fail(error)
     # Only a request below the full size may get the short view; see format_snapshot.
-    return format_snapshot(answer, limit, start, short=limit < _snapshot_limit(ctx, {}))
+    return format_snapshot(
+        answer, limit, start, short=limit < _snapshot_limit(ctx, {}), can_ask_signin=_can_ask_signin(ctx),
+    )
 
 
 async def browser_screenshot(ctx, args: dict) -> str:
@@ -1074,6 +1085,28 @@ async def browser_downloads(ctx, args: dict) -> str:
     return "\n".join(lines) or "Nothing has been downloaded."
 
 
+def _can_ask_signin(ctx) -> bool:
+    """True when request_signin can work here: the screen is on and this is a chat, not a job."""
+    signins = getattr(ctx, "signins", None)
+    run = getattr(ctx, "run", None)
+    return bool(
+        signins is not None and signins.screens.available
+        and (run is None or getattr(run, "origin", "chat") == "chat")
+    )
+
+
+async def request_signin(ctx, args: dict) -> str:
+    """Ask Roland to sign in himself on the browser's screen (§6.7), and wait for him. The
+    site shown to Roland always comes from the address, never from what the model calls it."""
+    if _browser(ctx) is None:
+        return OFF
+    signins = getattr(ctx, "signins", None)
+    if signins is None:
+        return "Error: asking Roland to sign in is turned off. Tell him which site needs a sign-in."
+    url = str(args.get("url") or "").strip()
+    return await signins.request(ctx, url, _one_line(args.get("reason"), 300))
+
+
 S = {"type": "string"}
 INTEGER = {"type": "integer"}
 BOOLEAN = {"type": "boolean"}
@@ -1113,8 +1146,13 @@ SPECS: tuple[tuple[str, str, dict, list[str], Callable[[object, dict], Awaitable
      {"ref": S, "path": S, "reason": S}, ["ref", "path"], browser_upload),
     ("browser_downloads", "List files the browser downloaded. They are in browser/downloads/ in your workspace.",
      {}, [], browser_downloads),
+    ("request_signin", "Ask Roland to sign in to a site himself on the browser's screen, and wait. "
+     "Use it when a page needs a login; never type passwords or codes.",
+     {"url": S, "site": S, "reason": S}, ["url"], request_signin),
 )
 
 BROWSER_TOOLS = frozenset(spec[0] for spec in SPECS)
+# Offered only when SCREEN_ENABLED=true as well (M7), and never in a job.
+SCREEN_TOOLS = frozenset({"request_signin"})
 
-__all__ = ["BROWSER_TOOLS", "CLASSIFIERS", "SPECS", "element_line", "format_snapshot"]
+__all__ = ["BROWSER_TOOLS", "CLASSIFIERS", "SCREEN_TOOLS", "SPECS", "element_line", "format_snapshot"]

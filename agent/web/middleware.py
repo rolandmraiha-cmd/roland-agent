@@ -246,7 +246,7 @@ class SecurityHeaders:
                     }:
                         continue
                     headers[name] = value
-                if path.startswith("/api/") or internal_path(path) or path in {"/", "/login", "/healthz"}:
+                if path.startswith("/api/") or internal_path(path) or path in {"/", "/login", "/healthz", "/screen"}:
                     headers["Cache-Control"] = "no-store"
             await send(message)
 

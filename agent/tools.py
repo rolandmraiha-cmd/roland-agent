@@ -52,6 +52,7 @@ class ToolContext:
     config: object | None = None
     shell: object | None = None  # ShellBackend; None → LocalShell when allow_shell
     browser: object | None = None  # BrowserClient; None → browser tools are off
+    signins: object | None = None  # SignIns; None → request_signin is off
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[str]]

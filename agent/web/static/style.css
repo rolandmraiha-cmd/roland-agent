@@ -145,3 +145,23 @@ code { font-size: .85em; color: var(--muted); }
   .tabs { width: 100%; }
   .tab { flex: 1 0 auto; padding: .35em .6em; }
 }
+
+/* screen and sign-in (M7) */
+a.button { display: inline-block; font: inherit; color: inherit; text-decoration: none; border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: .55em 1em; }
+a.button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+a.button.ghost { background: transparent; }
+a.button[hidden], .browser-screen[hidden] { display: none; }
+.browser-screen { margin: .8rem 0; }
+#browser-signins { margin-top: .6rem; }
+.signin-card { border-color: var(--accent); }
+.screen-body { display: flex; flex-direction: column; height: 100dvh; overflow: hidden; }
+.screen-bar { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; padding: .4rem .6rem; border-bottom: 1px solid var(--line); padding-top: max(.4rem, env(safe-area-inset-top)); }
+.screen-bar .hint { flex: 1; min-width: 8rem; margin: 0; }
+.screen-buttons { display: flex; gap: .4rem; flex-wrap: wrap; }
+.screen-buttons button { padding: .4em .8em; }
+.screen-buttons button[hidden] { display: none; }
+#screen-error { margin: .4rem .6rem; overflow-wrap: anywhere; }
+#screen-error[hidden] { display: none; }
+.screen-canvas { flex: 1; min-height: 0; background: #000; }
+/* Takes what a phone keyboard types and passes it on; nothing is shown or kept in it. */
+.screen-typing { position: fixed; bottom: 0; left: 0; width: 1px; height: 1px; padding: 0; border: 0; opacity: 0; font-size: 16px; }

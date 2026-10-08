@@ -8,6 +8,7 @@ the model inside the <tool_output> envelope.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -15,6 +16,9 @@ import httpx
 MAX_JSON_BYTES = 1_000_000      # one browserd JSON answer
 MAX_SCREENSHOT_BYTES = 5_000_000  # §8.4: image/png <= 5 MB
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+# What core may still ask browserd while Roland has the browser (§8.4). Everything else is
+# refused here too, before it reaches the network: browserd forgets user mode if it restarts.
+OPEN_WHILE_LOCKED = frozenset({"/healthz", "/v1/status", "/v1/user-mode", "/v1/vnc/disconnect"})
 
 # What the model is told for each browserd error code. Unknown codes get a general line.
 ERROR_TEXT = {
@@ -99,6 +103,9 @@ class BrowserClient:
     action_timeout: float = 30
     nav_timeout: float = 45
     transport: httpx.AsyncBaseTransport | None = field(default=None, repr=False)
+    # Set by core (M7): True while Roland controls the browser or a sign-in is waiting. Then
+    # no read, action or capture is sent at all, whatever browserd itself believes.
+    locked: Callable[[], bool] | None = field(default=None, repr=False)
 
     async def _call(
         self,
@@ -111,6 +118,8 @@ class BrowserClient:
         raw: bool = False,
         auth: bool = True,
     ):
+        if self.locked is not None and path not in OPEN_WHILE_LOCKED and self.locked():
+            raise BrowserLocked(ERROR_TEXT["user_mode"])
         headers = {"Authorization": f"Bearer {self.token}"} if auth else {}
         wait = (timeout if timeout is not None else self.action_timeout) + 10
         try:
@@ -254,3 +263,16 @@ class BrowserClient:
         if not isinstance(answer, list):
             raise BrowserError("the browser sent an answer that couldn't be read.", "bad_answer")
         return answer
+
+    async def user_mode(self, on: bool) -> str:
+        """Hand the browser to Roland (True) or back to the agent (False). Returns the mode
+        browserd reports afterwards; anything but the mode asked for is an error."""
+        answer = await self._dict("POST", "/v1/user-mode", {"on": bool(on)})
+        mode = answer.get("mode")
+        if mode != ("user" if on else "agent"):
+            raise BrowserError("the browser didn't change who controls it.", "bad_answer")
+        return mode
+
+    async def vnc_disconnect(self) -> None:
+        """Drop every screen-sharing connection to the browser (§6.6)."""
+        await self._dict("POST", "/v1/vnc/disconnect", timeout=10)

@@ -762,6 +762,17 @@ class Memory:
             > 0
         )
 
+    def active_signin_requests(self, chat_id: int | None = None) -> list[dict]:
+        """Sign-ins Roland has not finished, cancelled or let run out: waiting or under way."""
+        return [
+            dict(row)
+            for row in self._all(
+                "SELECT * FROM signin_requests WHERE status IN ('pending','in_progress') "
+                "AND (? IS NULL OR chat_id = ?) ORDER BY created, id",
+                (chat_id, chat_id),
+            )
+        ]
+
     def expire_signin_requests(self, now: float) -> int:
         return self._exec(
             "UPDATE signin_requests SET status = 'expired', finished = ? "
@@ -810,6 +821,16 @@ class Memory:
             self._exec(
                 "UPDATE screen_sessions SET ended = ? WHERE id = ? AND session_hash = ? AND ended IS NULL",
                 (time.time(), screen_id, session_hash),
+            ).rowcount
+            > 0
+        )
+
+    def finish_screen_session(self, screen_id: str) -> bool:
+        """End a screen session whoever started it: expiry, logout and replacement use this."""
+        return (
+            self._exec(
+                "UPDATE screen_sessions SET ended = ? WHERE id = ? AND ended IS NULL",
+                (time.time(), screen_id),
             ).rowcount
             > 0
         )

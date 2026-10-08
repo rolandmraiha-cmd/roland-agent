@@ -21,6 +21,7 @@ from agent.tools import ToolContext, call_tool
 from agent.tools_browser import (
     BROWSER_TOOLS,
     NOT_CHECKED,
+    SCREEN_TOOLS,
     SHORT_VIEW_NOTE,
     _snapshot_limit,
     browser_click,
@@ -550,8 +551,11 @@ async def test_browser_tools_are_hidden_and_refused_when_off(tmp_path, make_agen
     on = browser_agent(tmp_path / "on", fake, ["hi"])
     chat_id = on.memory.new_chat()
     [event async for event in on.chat(chat_id, "hello")]
-    assert BROWSER_TOOLS <= set(on.brain.tools[0])
+    assert BROWSER_TOOLS - SCREEN_TOOLS <= set(on.brain.tools[0])
     assert "Never type passwords" in on.system_prompt()
+    # Asking Roland to sign in needs the screen as well (M7); without it the agent just says so.
+    assert "request_signin" not in on.brain.tools[0] and "request_signin" not in on.system_prompt()
+    assert "stop and tell Roland" in on.system_prompt()
 
 
 @pytest.mark.asyncio

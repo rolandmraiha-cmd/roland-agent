@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`50767ec`** (#53). Normal verification passed 11 / 0 / 1 with 3730 MiB available. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone.**
+> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`50767ec`** (#53). Normal verification passed 11 / 0 / 1 with 3730 MiB available. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: part 1 (core side) is written and dormant; part 2 (the services) is next.**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -340,6 +340,39 @@ The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap us
 
 **Spec:** §6.6, §6.7, §6.8, §8.2 (screen/sign-in endpoints), §8.4 (`/v1/user-mode`, `/v1/vnc/disconnect`), M7 in §12.
 
+#### Status: part 1 (core side) written and dormant; part 2 (services) not built (8 Oct 2026)
+
+M7 is split into PRs to `v2`, like M6.
+
+- **Part 1, core side: written, dormant.** Deliverables 4, 5, 6 and 7 below, the core half of 2 (the client calls for `/v1/user-mode` and `/v1/vnc/disconnect`), and the tests for A7.1 and A7.2. `python -m agent` still refuses `SCREEN_ENABLED=true` and compose still sets it to `"false"`, so nothing changes on a deployed server.
+- **Part 2, the services: not built.** Deliverables 1, 3 and 8, the browserd half of 2 (a real disconnect, `healthz.vnc`), the compose service and networks, the firewall rule, `SCREEN_ENABLED` accepted by `python -m agent`, and A7.3.
+- **Verified so far (part 1):** lint, the unit suite and the page tests, plus one run of the real pages in a headless browser against a fake browserd and a stand-in for noVNC's `RFB` (phone and desktop width, no script or CSP errors). No VNC server, noVNC or Caddy has been run against this code yet.
+
+#### Contract between core and the services (fixed by part 1; part 2 must implement it)
+
+1. **`POST /v1/user-mode` `{"on": bool}`** answers `{"mode": "user"|"agent"}`. Core treats any other answer as a failure and then refuses to hand out a VNC password.
+2. **`POST /v1/vnc/disconnect`** must drop every VNC client and answer `{"ok": true}`. Core calls it when a screen session ends for any reason, when a sign-in is resolved, and once after core starts. It is called *before* user mode is switched off.
+3. **`/v1/status` stays open in user mode** and reports `mode`. Core reads it every 10 seconds while the screen is on and corrects browserd when the mode differs from the records.
+4. **Caddy `forward_auth`** sends `GET /internal/screen-auth?kind=ws|static` with the visitor's `Cookie` and, for the websocket, `Origin`. Core answers 200 (pass), 401 (no valid login) or 403 (screen off, no active screen session for that login, unknown `kind`, or a websocket `Origin` other than `https://{AGENT_HOST}`), with no body.
+5. **The page** imports `RFB` from `/screen/novnc/core/rfb.js` and connects to `wss://{host}/screen/websockify`. It uses `viewOnly`, `scaleViewport`, `clipViewport`, `dragViewport`, `focusOnClick`, `sendKey(keysym, null)`, `disconnect()` and the events `connect`, `disconnect`, `securityfailure`, `credentialsrequired`. The noVNC release pinned in part 2 must provide these.
+6. **Passwords:** core returns `VNC_VIEW_PASSWORD` for watch and `VNC_PASSWORD` for control. x11vnc must enforce view-only for the first.
+
+#### Where part 1 differs from the spec (for the reviewer)
+
+Each one is stricter than, or an addition to, `docs/v2-spec.md`; none loosens a rule.
+
+1. **A second lock in core.** Besides browserd's user mode, `BrowserClient` refuses the agent's calls itself while Roland has control or a sign-in waits. browserd forgets user mode when it restarts.
+2. **`request_signin` takes the site from the address.** `site` is accepted but not used, so the card cannot name one site and open another.
+3. **`request_signin` does not open an address `browser_open` would ask about.** The model must open that page with approval first; when the browser already shows the address, nothing is navigated.
+4. **One sign-in at a time**, and none while Roland already controls the browser.
+5. **I'm done counts without the screen having been opened** (he may be signed in already).
+6. **A restart cancels waiting sign-ins and ends screen sessions.**
+7. **`screen_session_end` also records a reason** (released, expired, logout, replaced, restart, signin_done …) next to mode and duration.
+8. **The screen page keeps the normal CSP** (`frame-ancestors 'none'`); it is not shown in a frame.
+9. **The screen page has three extra controls:** Take control (from watching), Keyboard (a phone needs a text box to show its keyboard) and Zoom in / Fit screen. It also gives the browser back when the page is left or the connection drops, instead of waiting for the idle timeout.
+10. **Jobs:** `request_signin` is not offered; the job is told to answer "Needs sign-in to <site>". There is no separate notice on the Approvals tab.
+11. **`GET /api/signin?status=pending`** lists sign-ins that are waiting or under way; no other status is served.
+
 #### Goal
 
 Roland can watch or take control of **the same Chromium the agent drives** from his browser or phone, through authenticated same-origin noVNC, and sign in to sites himself. The agent never sees credentials.
@@ -374,8 +407,8 @@ Expected locations per `docs/v2-spec.md`; verify in tree:
 
 Automated:
 
-- [ ] **A7.1** `tests/test_screen_auth.py`: requires session; requires active screen session; WS origin must match; peer must be Caddy; only one screen session; logout ends screen and disconnects; VNC password not in logs or audit.
-- [ ] **A7.2** `tests/test_signin.py`: request sets user mode and waits; Done resolves and unlocks; cancel and timeout messages; agent browser tools locked during sign-in; chat text "done" does not resolve; `request_signin` not available in jobs.
+- [x] **A7.1** `tests/test_screen_auth.py`: requires session; requires active screen session; WS origin must match; peer must be Caddy; only one screen session; logout ends screen and disconnects; VNC password not in logs or audit. *(Part 1: the seven named tests plus the screen switched off, refused requests, a failed hand-over, the core-side lock and restart clean-up.)*
+- [x] **A7.2** `tests/test_signin.py`: request sets user mode and waits; Done resolves and unlocks; cancel and timeout messages; agent browser tools locked during sign-in; chat text "done" does not resolve; `request_signin` not available in jobs. *(Part 1: the six named tests plus Stop, restart, refused addresses, the `browser_open` approval rule and the prompt staying within budget.)*
 - [ ] **A7.3** integration: view-only password cannot send input; novnc unreachable from tester without forward-auth; `/screen/novnc/vnc.html` without a session → 401 via Caddy.
 - [ ] All M6 and earlier suites still green.
 
