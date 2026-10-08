@@ -64,7 +64,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 
 - **M6** final acceptance · **M7** screen/sign-in · **M8** persona/training · **M9** release. Plan and acceptance: [docs/NEXT.md](NEXT.md).
 - **M6 still missing:** a completed Contabo `make verify` (including A6.4 isolation), a repeat of the form smoke after #46/#47, and Roland's confirmation that M6 is done. The A6.5 memory report passed; final acceptance remains open. A CI job for the live browser tests still needs a workflow edit; until then they run with `make test-browser`.
-- **Current coding follow-up:** a short system-prompt rule to use files only when Roland asks or names one, never keep unsolicited notes, and treat a missing file as empty; add a regression test without changing tool policies or approvals. Stop after this PR; do not start M7 without Roland's confirmation.
+- **File-use prompt follow-up:** `agent/core.py` now tells the model to use files only when Roland asks to use them or names one, keep no unsolicited notes, and treat missing files as empty. A regression test covers chats and jobs with the browser off/on and a full fact store at `MODEL_CTX=3072`; the added line is within 40 tokens using the repo's conservative estimator. Tool policies and approvals are unchanged. This prompt change still needs Roland's Contabo deploy and smoke. Stop after this PR; do not start M7 without Roland's confirmation.
 - `python -m agent` still refuses `SCREEN_ENABLED=true` ("not implemented yet").
 - Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit CI already runs `tests/test_no_hosted_llm.py`.
 - `make model-bench`: deferred.
@@ -180,7 +180,7 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 ## 8. Next coding order
 
 1. **Grok bots:** wait for Roland to unpause THE SCAM CALL CENTER before those bots start M6. **External AI:** if Roland already handed you this plan, start when he said — Grok parking does not block you.
-2. Record the supplied M6 Contabo evidence, then add the short file-use prompt rule and regression test in a separate PR. Decision 1 (MODEL_CTX vs memory) stays open; keep 3072/3840m.
+2. The supplied M6 Contabo evidence is recorded, and the short file-use prompt rule plus regression test are implemented as the separate follow-up. Roland reviews/merges, deploys and smokes it; Contabo still runs `23fd1fc` until he does. Decision 1 (MODEL_CTX vs memory) stays open; keep 3072/3840m.
 3. Finish **M6 on Contabo** (`make verify`/A6.4 and the form smoke after #46/#47; A6.5 memory evidence passed). **Stop and report back. Do not start M7 until Roland confirms M6 is done.** M7 → M8 → M9 remains the later order.
 
 Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
