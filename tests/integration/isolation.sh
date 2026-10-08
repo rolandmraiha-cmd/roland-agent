@@ -34,24 +34,40 @@ for compose_file in "${compose_files[@]}"; do
 done
 
 compose() {
-    docker compose "${compose_args[@]}" "$@"
+    timeout --kill-after=2s 15s docker compose "${compose_args[@]}" "$@"
 }
 
-# Fail the probe if it succeeds or hangs past 5s. Success of curl = isolation failure.
-must_fail() {
-    local label=$1
+# Stop the probe inside the container: stopping Docker's client alone may leave
+# curl running there. The outer deadline also bounds a stuck Docker exec client.
+sandbox_probe() {
+    local seconds=$1
     shift
-    if timeout 5 docker compose "${compose_args[@]}" exec -T sandbox "$@" >/dev/null 2>&1; then
-        printf 'FAIL isolation: %s unexpectedly succeeded\n' "$label" >&2
-        return 1
-    fi
+    timeout --kill-after=2s "$((seconds + 5))s" docker compose "${compose_args[@]}" exec -T sandbox \
+        timeout --kill-after=1s "${seconds}s" "$@"
+}
+
+# Only curl's DNS, connection and connect-timeout errors show a blocked target.
+# HTTP errors, missing commands and deadline expiry must fail verification.
+must_fail() {
+    local label=$1 status=0
+    shift
+    printf 'check: %s\n' "$label"
+    sandbox_probe 5 "$@" >/dev/null 2>&1 || status=$?
+    case $status in
+        6 | 7 | 28) ;;
+        *)
+            printf 'FAIL isolation: %s (probe exit %s; expected blocked connection)\n' "$label" "$status" >&2
+            return 1
+            ;;
+    esac
     printf 'ok fail: %s\n' "$label"
 }
 
 must_succeed() {
     local label=$1
     shift
-    if ! timeout 15 docker compose "${compose_args[@]}" exec -T sandbox "$@" >/dev/null 2>&1; then
+    printf 'check: %s\n' "$label"
+    if ! sandbox_probe 15 "$@" >/dev/null 2>&1; then
         printf 'FAIL isolation: %s unexpectedly failed\n' "$label" >&2
         return 1
     fi
@@ -62,7 +78,8 @@ must_succeed() {
 # missing Python, Docker errors and a hung probe from looking like isolation.
 browser_must_fail() {
     local label=$1 host=$2 port=$3 status=0
-    timeout 5 docker compose "${compose_args[@]}" exec -T browser python3 -c '
+    printf 'check: %s\n' "$label"
+    timeout --kill-after=2s 5s docker compose "${compose_args[@]}" exec -T browser python3 -c '
 import socket, sys
 try:
     with socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=3):
@@ -80,7 +97,8 @@ sys.exit(0)
 
 browser_must_succeed() {
     local label=$1 host=$2 port=$3
-    if ! timeout 15 docker compose "${compose_args[@]}" exec -T browser python3 -c '
+    printf 'check: %s\n' "$label"
+    if ! timeout --kill-after=2s 15s docker compose "${compose_args[@]}" exec -T browser python3 -c '
 import socket, sys
 with socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=10):
     pass
@@ -93,7 +111,10 @@ with socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=10):
 
 need_docker
 
-running=$(compose ps --status running --services 2>/dev/null || true)
+if ! running=$(compose ps --status running --services 2>/dev/null); then
+    printf 'FAIL isolation: cannot list running Compose services\n' >&2
+    exit 1
+fi
 is_running() {
     grep -qx -- "$1" <<< "$running"
 }

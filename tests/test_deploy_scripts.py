@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 from pathlib import Path
@@ -275,8 +276,11 @@ def test_preflight_script_mentions_required_checks():
 FAKE_HOST_PROGRAM = r"""#!/usr/bin/env python3
 import json
 import os
+import signal
 import stat
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 root = Path(os.environ["FAKE_HOST_DIR"])
@@ -292,6 +296,12 @@ def answer(text="", code=0):
     if text:
         print(text)
     sys.exit(code)
+
+def hang_until_killed():
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    (root / "hung-probe.pid").write_text(str(os.getpid()))
+    while True:
+        time.sleep(60)
 
 services = state["services"]
 ids = {name: f"{index:012x}" for index, name in enumerate(services, start=1)}
@@ -360,6 +370,10 @@ if command == "docker":
         if "config" in args:
             answer("AGENT_HOST: nested-probe.example")
         if "ps" in args:
+            if state.get("hang_compose_ps"):
+                hang_until_killed()
+            if state.get("compose_ps_rc"):
+                answer(code=state["compose_ps_rc"])
             if "--all" in args:
                 answer("\n".join(f"{name}|{ids[name]}|{status}" for name, status in services.items()))
             if "--services" in args:
@@ -374,13 +388,32 @@ if command == "docker":
             if tail[0] == "-T":
                 tail = tail[1:]
             service, action = tail[0], tail[1:]
+            if state.get("hang_docker_service") == service:
+                hang_until_killed()
             if service == "browser" and "healthcheck" in action:
                 answer(code=state.get("browser_health_rc", 0))
             if service == "browser" and "-c" in action:
                 host, port = action[-2:]
-                answer(code=0 if host == "example.com" else state.get("browser_probe_rc", 42))
+                answer(code=state.get("browser_egress_rc", 0) if host == "example.com" else state.get("browser_probe_rc", 42))
             if service == "sandbox" and "curl" in action:
-                answer(code=0 if any("example.com" in arg for arg in action) else 7)
+                if state.get("hang_sandbox_command") and "http://core:8080/healthz" in action:
+                    # Simulate an exec'd command with the real in-container timeout,
+                    # replacing only curl with a disposable child that ignores TERM.
+                    child = [sys.executable, "-c", '''
+import os, signal, time
+from pathlib import Path
+root = Path(os.environ["FAKE_HOST_DIR"])
+signal.signal(signal.SIGTERM, lambda *_: (root / "probe-term").touch())
+(root / "hung-probe.pid").write_text(str(os.getpid()))
+while True:
+    time.sleep(60)
+''']
+                    prefix = action[:action.index("curl")]
+                    status = subprocess.call(prefix + child)
+                    (root / "probe-exited").write_text(str(status))
+                    answer(code=status)
+                answer(code=state.get("sandbox_egress_rc", 0) if any("example.com" in arg for arg in action)
+                       else state.get("sandbox_probe_rc", 7))
             if service == "model":
                 answer(code=0 if "healthcheck" in action else 1)
             if service == "core" and action[:2] == ["ls", "-l"]:
@@ -862,6 +895,99 @@ def test_browser_isolation_rejects_connect_success_and_probe_errors(tmp_path, co
     assert result.returncode != 0
     assert f"probe exit {code}; expected blocked connection" in result.stderr
     assert "all checks passed" not in result.stdout
+
+
+@pytest.mark.parametrize("code", [6, 7, 28])
+def test_sandbox_isolation_accepts_only_network_block_errors(tmp_path, code):
+    repo, env, state = fake_deploy_host(tmp_path)
+    state["sandbox_probe_rc"] = code
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, "--server")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok fail: curl core by name\n" in result.stdout
+    assert "all checks passed" in result.stdout
+
+
+@pytest.mark.parametrize("code", [0, 1, 22, 52, 56, 124, 125, 126, 127, 137])
+def test_sandbox_isolation_rejects_success_http_errors_and_broken_probes(tmp_path, code):
+    repo, env, state = fake_deploy_host(tmp_path)
+    state["sandbox_probe_rc"] = code
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, "--server")
+    assert result.returncode != 0
+    assert f"probe exit {code}; expected blocked connection" in result.stderr
+    assert "ok fail: curl core by name" not in result.stdout
+    assert "all checks passed" not in result.stdout
+
+
+@pytest.mark.parametrize("service", ["sandbox", "browser"])
+@pytest.mark.parametrize("code", [7, 124, 137])
+def test_isolation_rejects_failed_or_timed_out_egress(tmp_path, service, code):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state[f"{service}_egress_rc"] = code
+    update_fake_state(env, state)
+    result = run_fake_isolation(repo, env, "--server")
+    assert result.returncode != 0
+    label = "curl example.com" if service == "sandbox" else "browser to example.com:443"
+    assert f"FAIL isolation: {label} unexpectedly failed" in result.stderr
+    assert "all checks passed" not in result.stdout
+
+
+def cleanup_hung_fake_probe(env):
+    """Clean up only the child this fixture created if an old script left it behind."""
+    pid_file = Path(env["FAKE_HOST_DIR"]) / "hung-probe.pid"
+    if pid_file.exists():
+        try:
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def test_isolation_stops_a_term_ignoring_command_inside_sandbox(tmp_path):
+    repo, env, state = fake_deploy_host(tmp_path)
+    state["hang_sandbox_command"] = True
+    update_fake_state(env, state)
+    try:
+        result = run_fake_isolation(repo, env, "--ci")
+        assert result.returncode != 0
+        assert "probe exit 137; expected blocked connection" in result.stderr
+        assert "ok fail: curl core by name" not in result.stdout
+        assert "all checks passed" not in result.stdout
+        fixture = Path(env["FAKE_HOST_DIR"])
+        assert (fixture / "probe-term").exists(), "the simulated container command received TERM"
+        assert (fixture / "probe-exited").read_text() == "137", "inner timeout killed it before Docker's deadline"
+    finally:
+        cleanup_hung_fake_probe(env)
+
+
+@pytest.mark.parametrize("service", ["sandbox", "browser"])
+def test_isolation_kills_a_stuck_docker_exec_and_fails(tmp_path, service):
+    repo, env, state = fake_deploy_host(tmp_path, browser=True)
+    state["hang_docker_service"] = service
+    update_fake_state(env, state)
+    try:
+        result = run_fake_isolation(repo, env, "--ci")
+        assert result.returncode != 0
+        assert "probe exit 137; expected blocked connection" in result.stderr
+        assert "all checks passed" not in result.stdout
+        assert (Path(env["FAKE_HOST_DIR"]) / "hung-probe.pid").exists()
+    finally:
+        cleanup_hung_fake_probe(env)
+
+
+@pytest.mark.parametrize("failure", ["error", "hang"])
+def test_isolation_fails_if_listing_compose_services_breaks_or_hangs(tmp_path, failure):
+    repo, env, state = fake_deploy_host(tmp_path)
+    state["compose_ps_rc"] = 1 if failure == "error" else 0
+    state["hang_compose_ps"] = failure == "hang"
+    update_fake_state(env, state)
+    try:
+        result = run_fake_isolation(repo, env, "--ci")
+        assert result.returncode != 0
+        assert "FAIL isolation: cannot list running Compose services" in result.stderr
+        assert "all checks passed" not in result.stdout
+    finally:
+        cleanup_hung_fake_probe(env)
 
 
 @pytest.mark.parametrize(

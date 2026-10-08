@@ -26,6 +26,8 @@ Live screen and human sign-in (M7), persona and training pipeline (M8), and the 
 
 **File-use prompt follow-up (pending Contabo deploy):** the model is told to use files only when Roland asks to use them or names one, keep no unsolicited notes, and treat missing files as empty. Tests cover chats and jobs with the browser off/on at the host context budget. This is a short prompt rule; file tools, their policies and approvals are unchanged. Roland still needs to deploy and check the model's live behaviour.
 
+**Verification follow-up (pending host update):** `make verify` stalled at a sandbox network probe. The same probe finished with the expected blocked connection when its timeout ran inside the sandbox. `isolation.sh` now bounds those commands and stuck Docker clients, reports the active check, and fails when a probe breaks or exceeds its deadline. Regression tests cover actual stuck fixture processes and unexpected exit codes. Roland must rerun `sudo make verify` after updating; one blocked probe does not complete M6 acceptance.
+
 ## Develop
 
 ```bash

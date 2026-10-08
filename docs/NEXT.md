@@ -169,6 +169,7 @@ M6 was split into PRs to `v2`.
 - **Contabo evidence:** pre-step memory PASS after #43, browser enabled and smoke-tested, then `sudo env APPLY=1 make deploy` completed at `23fd1fc`. The supplied `WATCH=600 make memory-report` ends with **A6.5 PASS**; exact peaks and smoke results are below.
 - **Still open:** completed `make verify` / A6.4 isolation, repeat form smoke after #46/#47, and Roland's final M6 confirmation.
 - **File-use prompt follow-up (implemented in this PR; not yet deployed):** the short rule in `agent/core.py` limits file use to when Roland asks to use files or names one, forbids unsolicited notes, and treats missing files as empty. Added prompt text is 114 characters including its newline, estimated at 38 tokens by the repo's conservative counter (within the 40-token budget). The regression test checks the actual model-bound prompt for chats/jobs with the browser off/on and a full fact store at `MODEL_CTX=3072`; file tools remain available. Tool policies and approval behaviour are unchanged. This addresses the unrequested `notes/title.txt`, `notes/car_engine_explanation.txt`, `notes/last_form_submission.txt`, and `notes/battery_chemistry_notes.txt` calls that cost about 30–60 s each on Contabo and pushed form tasks into `MAX_TOOL_STEPS`. Roland deploys and checks the model's behaviour before claiming the live issue resolved. **Stop and report after this PR; do not start M7 until Roland confirms M6 is done.**
+- **Verification follow-up (implemented in this PR; not yet on the host):** `make verify` stalled in the isolation probes. Docker could run `/bin/echo EXEC_OK`; an in-container timeout let the first sandbox-to-core curl finish with expected connection error 7. The script now bounds sandbox commands inside the container, adds forced termination around Docker clients and service discovery, shows the active probe, and rejects non-network errors and deadline expiry as verification failures. Tests cover genuine TERM-ignoring fixture commands, stuck Docker exec/discovery, failed egress, and HTTP/missing-command/timeout errors. After merging #48 then this follow-up, Roland updates/deploys and supplies a completed `sudo make verify` result, then repeats the form smoke and checks the file-use rule. A single blocked probe does not accept M6; M7 remains on hold.
 
 #### Goal
 
@@ -309,7 +310,7 @@ Code Shipper (Grok) smoke on Contabo (after deploy with `BROWSER_ENABLED=true`):
 | Caddy peak | 16.46 MiB | 96 MiB |
 | Minimum host available | 3553 MiB | — |
 
-The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap usage is zero in the supplied samples. This is measured usage, not the sum of service caps. No completed `make verify` result is supplied, so A6.4 and final acceptance remain open; no verification failure is claimed.
+The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap usage is zero in the supplied samples. This is measured usage, not the sum of service caps. `make verify` did not finish; its isolation trace stopped at the first sandbox-to-core curl. That probe returned connection error 7 promptly when bounded inside the sandbox. No completed verification verdict is supplied, so A6.4 and final acceptance remain open; rerun after the bounded probe follow-up reaches the host.
 
 #### Production flags
 
