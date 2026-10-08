@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`4d0f703`** (#57). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **M7 is the current milestone: both parts are merged and deployed and the screen is on on Contabo. Next: merge and deploy the sign-in follow-up, then A7.4 with Roland.**
+> Snapshot: 8 Oct 2026. Deployed code baseline, Contabo checkout and rebuilt app image **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **Next: merge and deploy the chat-refresh fix, then M8 (Codex's draft #56 has to be rebased on `v2` first).**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -90,7 +90,7 @@ Before writing any code:
 | Item | Value |
 |---|---|
 | Repository | https://github.com/rolandmraiha-cmd/roland-agent |
-| Integration branch | `v2`; Contabo checkout and app image **`4d0f703`** (#57). M6, fixes #43–#53 and M7 (#55, #57) are live; verification passed normally. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
+| Integration branch | `v2`; Contabo checkout and app image **`2de54f4`** (#58). M6, fixes #43–#53 and M7 (#55, #57, #58) are live; verification passed normally. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
 | `main` | Untouched since v1; do not push until M9 |
 | Live URL | https://37-60-226-214.sslip.io/ |
 | Host | Contabo VPS, Ubuntu 24.04, ~4 vCPU / ~8 GB RAM, IPv4 `37.60.226.214` |
@@ -340,7 +340,7 @@ The report ends with **A6.5 PASS** and records no OOM kills or restarts; swap us
 
 **Spec:** §6.6, §6.7, §6.8, §8.2 (screen/sign-in endpoints), §8.4 (`/v1/user-mode`, `/v1/vnc/disconnect`), M7 in §12.
 
-#### Status: both parts merged and deployed; screen on on Contabo; sign-in follow-up written; A7.4 open (8 Oct 2026)
+#### Status: accepted by Roland (8 Oct 2026)
 
 M7 is split into PRs to `v2`, like M6.
 
@@ -352,8 +352,11 @@ M7 is split into PRs to `v2`, like M6.
   - A real browser (Chromium, phone and desktop width) against the production compose file with Caddy, core, the relay, the browser container and a scripted stand-in for the model: sign-in card, sign-in screen, typing a user name on the picture and a password through the phone typing box, I'm done, the agent's answer from the signed-in page; then Watch, Take control, Hand back, and logout cutting a watcher. No script or CSP error. The typed password reached the test site and appeared in no container log. Peak memory of the relay: 32 MiB of its 64.
   - The CI edge job runs the screen phase without a browser container (see A7.3).
 - **On Contabo (8 Oct 2026):** deployed at `4d0f703` in the two steps below. Screen off: verify 12 / 0 / 2, 3806 MiB available. Screen on: verify 13 / 0 / 1, 3746 MiB available, with the screen server check and the noVNC isolation probes. The smoke test (steps 1 to 3 of the list under "Tests / acceptance") passed in a logged-in desktop browser.
-- **Sign-in follow-up: written** after Roland's first try on the server (next list).
-- **Not done:** A7.4. Roland's first try did not count: he pressed I'm done without signing in.
+- **Sign-in follow-up: merged (#58) and deployed** after Roland's first try on the server (next list).
+- **Second try, after #58 (22:37–22:39):** the plain "log in to https://www.kotipizza.fi/" produced the card after one model call; Roland opened the sign-in screen, clicked Kirjaudu, signed in and pressed I'm done; the agent was handed the page and answered "Signed in successfully. The page shows the Kotipizza homepage with available menu items and order options."; Close returned him to the chat. The audit log has `signin_requested`, `screen_session_start` / `end` (128 s, `signin_done`) and `signin_resolved`, and nothing typed. The answer names nothing on the page that shows he is signed in, so he then asked "Take a snapshot of the page and tell me whose name is shown in the top bar."; the agent took a snapshot and answered "The name shown in the top bar is 'Roland'." It was done on his PC in a desktop app's browser pane, not on the phone (see the DNS note under "Known issues").
+- **Chat refresh: written** (item 5 of the next list).
+- **After #58:** `make verify` ended 13 / 0 / 1 with 3488 MiB available. The password check over the logs of browser, novnc, core and caddy found nothing: with the command in the deploy notes (22:57) his password was received and was in 0 of 527 log lines, and the e-mail address he signed in with was not there either. Earlier runs, with a prompt that showed nothing, printed 0 and, when Enter was pressed with nothing typed, 506: an empty search matches every line.
+- **Accepted:** at about 23:04 Roland said to record M7 as finished: the browser screen works to the standard he wants, no password was saved, and other faults can be fixed later if they come. (His first try did not count: he pressed I'm done without signing in.) Known and left as they are: the sign-in was done on his PC, not the phone (the phone could not look up the server's name on mobile data that evening); the agent opens the address it is given and does not look for the site's sign-in form; a new tab and the address bar's suggestion box show "This page is blocked"; and a form that posts into a new tab leaves a blank tab behind. No code change is pending for M7 beyond the chat-refresh fix.
 
 **Found by running the real thing, and fixed in part 2:**
 
@@ -364,12 +367,13 @@ M7 is split into PRs to `v2`, like M6.
 5. **The screen showed the wrong tab.** A tab browserd cannot see had opened in front of the agent's. browserd now puts the agent's tab in front after every action and whenever core says who has the browser.
 6. **A live M6 test expected `request_signin` among the browser tools** of an agent without the screen. Corrected.
 
-**Found on the server by Roland's first sign-in try (8 Oct 2026), and fixed in the sign-in follow-up:**
+**Found on the server by Roland's sign-in tries (8 Oct 2026). Items 1 to 4 are from the first try and were handled in the sign-in follow-up (#58); item 5 is from the second:**
 
 1. **The model refused "log in to this site https://www.kotipizza.fi/"** with "I can't assist with logging into websites" and no tool call. In grammar mode the prompt lists tools by name and argument types only, so the one sentence about `request_signin` in the browser note was all it had. One line next to the tool list now says what to do when Roland asks to log in (`SIGNIN_HINT`, `agent/models/context.py`); the browser note is plainer too. "use sign in tool for the site" had worked.
 2. **After I'm done the agent said "successfully signed in" without looking**, and Roland had not signed in. The tool result said "Roland says he finished signing in… Take a snapshot to confirm" and the model stopped there. The result now says the button proves nothing and carries the page as it is, read by core once the browser is back (`page_now` in `agent/tools_browser.py`). A sign-in form that is still showing is called out, and the model is told not to ask again unless Roland does. If the page can't be read, the model is told to take a snapshot. The card's end state reads "You pressed I'm done", not "Signed in".
 3. **Close on the screen page shut the tab that held the chat.** In the app pane Roland used, the sign-in screen loaded in the chat's own tab, not a new one. Close now goes back to the chat when the tab has shown another page before (`history.length` above 1) and only shuts a tab opened for the screen.
 4. **The screen showed the site's front page, not its sign-in form.** That is how the tool works: it opens the address it is given and does not look for the form. Finding the form would cost three or four more model calls (about a minute each on Contabo) and often an approval card for the Log in button. Not changed; the card and the screen now say that the sign-in form may have to be opened on the site first. Roland can ask for the other behaviour.
+5. **Back in the chat it said "The agent is still answering here… reopen the chat in a moment"** and stayed that way. With Close now returning to the chat in the same tab, the chat is reloaded while the agent is still working, and a reloaded chat cannot join the running answer. The chat page now asks again every three seconds while the chat is busy and redraws when the answer, an approval card or a sign-in card is new (`watchBusyChat` in `app.js`); the note says so.
 
 The wording for 1 and 2 was tried against the real model before it was sent: the pinned `Qwen3-4B-Instruct-2507-Q4_K_M.gguf` (SHA-256 checked) under the pinned llama.cpp image with the production flags, `MODEL_CTX=3072`, grammar mode and six tool steps, driving the real agent loop with canned browser results. Before: the plain request was refused 2 times out of 2, and once more with only the browser note reworded. After: 12 sign-in requests out of 12 called `request_signin` first ("log in to this site …", "sign in to …", "can you log me into …", "use sign in tool …", "check my order history on …", and one in Finnish). With the sign-in form still showing it answered "You are not signed in yet"; with an account page, that he is signed in; after Cancel, that it was cancelled. Three ordinary requests (open a page and read its heading, list items from a page, a sum) behaved as before and did not ask for a sign-in. This is a small sample on one model file, not a guarantee.
 
@@ -468,8 +472,8 @@ Code Shipper (Grok) smoke on Contabo, then **ping Roland** for the manual part (
 1. Without logging in, `curl -I https://37-60-226-214.sslip.io/screen/novnc/vnc.html` → 401. *(Passed 8 Oct 2026: `make verify` reports the screen routes as 401 / 401.)*
 2. Logged in: open Watch; confirm the visible page is the agent's current tab (same browser). *(Passed 8 Oct 2026; clicks and key presses while watching did nothing.)*
 3. Take control, then ask the agent to snapshot. Expect "Roland is using the browser right now". *(Passed 8 Oct 2026 by calling the Browser tab's screenshot route instead of a chat turn: 423 `user_mode`, and browserd reported mode `user`.)*
-4. **A7.4 (Roland):** ask the agent to check something behind a login on a site Roland chooses; sign-in card appears; Roland takes control on the phone, logs in, presses I'm done; agent continues and reads the logged-in page. Audit shows `signin_requested`, `screen_session_start`/`end`, `signin_resolved` and no keystroke data. `docker compose logs browser novnc core caddy | grep -i <password>` finds nothing.
-5. `make verify` passes. *(13 / 0 / 1 on 8 Oct 2026, before A7.4.)*
+4. **A7.4 (Roland):** *(Second try on 8 Oct 2026 went through on his PC, see Status; the password check found nothing; Roland confirmed M7 the same evening.)* ask the agent to check something behind a login on a site Roland chooses; sign-in card appears; Roland takes control on the phone, logs in, presses I'm done; agent continues and reads the logged-in page. Audit shows `signin_requested`, `screen_session_start`/`end`, `signin_resolved` and no keystroke data. `docker compose logs browser novnc core caddy | grep -i <password>` finds nothing.
+5. `make verify` passes. *(13 / 0 / 1 on 8 Oct 2026 when the screen was switched on, and again after #58 with 3488 MiB available.)*
 
 #### Off in the repo; on on Contabo since 8 Oct 2026
 
@@ -477,7 +481,7 @@ Code Shipper (Grok) smoke on Contabo, then **ping Roland** for the manual part (
 
 #### Contabo deploy notes
 
-Roland runs these himself. Two steps, so that the code is on the server and verified before anything is switched on. **Both were done on 8 Oct 2026** at `4d0f703`, with the results each step says to expect (3806 MiB available after step 1, 3746 MiB after step 2). The sign-in follow-up needs only the usual `git pull --ff-only`, deploy and verify; no setting changes.
+Roland runs these himself. Two steps, so that the code is on the server and verified before anything is switched on. **Both were done on 8 Oct 2026** at `4d0f703`, with the results each step says to expect (3806 MiB available after step 1, 3746 MiB after step 2). The sign-in follow-up (#58) was deployed the same evening (core restarted at 22:34) and the chat refresh needs the same: the usual `git pull --ff-only`, deploy and verify; no setting changes.
 
 **Step 1, after part 2 is merged: deploy with the screen still off.** Core mounts the two VNC secret files from this version on, so `make secrets` comes first. It creates what is missing and changes nothing that exists.
 
@@ -503,7 +507,11 @@ Notes:
 2. Memory: the relay is capped at 64 MiB (13 MiB idle, 32 MiB at its busiest in the test runs). x11vnc runs inside the browser container's existing 1280 MiB cap. Re-measure headroom with a screen session open (`make memory-report`).
 3. On a phone the screen page starts zoomed in: drag to move around, Fit screen to see the whole browser. Typing goes through the Keyboard button.
 4. For A7.4, ask in plain words ("log in to <site>"). The screen opens on the address the agent was given, often the front page: open the site's sign-in form there, sign in, press I'm done. The agent then reports what the page shows.
-5. For A7.4, look for the typed password afterwards with `docker compose logs browser novnc core caddy | grep -c -F '<password>'` (expect 0), as the acceptance asks.
+5. For A7.4, look for the typed password afterwards, as the acceptance asks. Use this. It keeps the password out of the shell history and off the screen (nothing shows while it is typed), says how many characters it received and how many log lines there are, and searches only if something was typed. An empty search matches every line, which is how a run on 8 Oct 2026 printed 506. Expect the password's length and `log lines containing it: 0`:
+
+   ```
+   cd /opt/roland-agent && read -rsp "Type the password (nothing shows while you type), then press Enter once: " P; echo; L=$(sudo docker compose logs browser novnc core caddy 2>&1); echo "received ${#P} characters; log lines in total: $(printf '%s\n' "$L" | wc -l)"; if [ -n "$P" ]; then echo "log lines containing it: $(printf '%s\n' "$L" | grep -c -F -- "$P")"; else echo "nothing was typed, so nothing was searched"; fi; unset P L
+   ```
 
 ---
 

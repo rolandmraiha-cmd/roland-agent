@@ -119,8 +119,45 @@ function scrollDown() {
   box.scrollTop = box.scrollHeight;
 }
 
+// A chat opened while the agent is still answering in it (after a reload, or on coming back
+// from the screen page in the same tab) can't join that answer's stream. So it asks again
+// every few seconds and redraws when something changed: the answer, or a card for Roland.
+const BUSY_POLL_MS = 3000;
+let busyWatch = null;
+
+function stopBusyWatch() {
+  if (busyWatch !== null) clearInterval(busyWatch);
+  busyWatch = null;
+}
+
+function chatMark(data) {
+  const ids = (rows) => (Array.isArray(rows) ? rows : []).map((row) => [row.id, row.status]);
+  return JSON.stringify([
+    !!data.busy, Array.isArray(data.messages) ? data.messages.length : 0,
+    ids(data.pending_approvals), ids(data.pending_signins),
+  ]);
+}
+
+function watchBusyChat(id, load, mark) {
+  let asking = false;
+  busyWatch = setInterval(async () => {
+    if (load !== chatLoad || currentChat !== id) { stopBusyWatch(); return; }
+    if (asking || sending) return;
+    asking = true;
+    try {
+      const data = await (await api(`/api/chats/${id}/messages`)).json();
+      if (load === chatLoad && currentChat === id && !sending && chatMark(data) !== mark) openChat(id);
+    } catch (_) {
+      // A request that failed just waits for the next round.
+    } finally {
+      asking = false;
+    }
+  }, BUSY_POLL_MS);
+}
+
 async function openChat(id) {
   if (sending) return;
+  stopBusyWatch();
   const load = ++chatLoad;
   currentChat = id;
   showView("chat");
@@ -155,7 +192,10 @@ async function openChat(id) {
     }
   }
   setComposerLocked(hasPending);
-  if (data.busy) addMessage("note", "The agent is still answering here… reopen the chat in a moment.");
+  if (data.busy) {
+    addMessage("note", "The agent is still answering here. This page updates by itself when it has finished.");
+    watchBusyChat(id, load, chatMark(data));
+  }
   const chats = await loadChats();
   if (load !== chatLoad || sending) return;
   const c = chats.find((x) => x.id === id);
