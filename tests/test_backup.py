@@ -15,6 +15,7 @@ from agent.backup import backup_now, prune_backups, restore, workspace_snapshot
 from agent.config import Config
 from agent.locking import LockBusy, database_lock
 from agent.memory import Memory
+from agent.migrations import latest_version
 from agent.migrations.backup import database_snapshot
 from agent.scheduler import run_backup_if_due
 
@@ -296,7 +297,7 @@ def test_restore_runs_migrations_on_the_staged_copy(tmp_path):
         snapshot = database_snapshot(db, tmp_path / "v1.db.gz")
     restore(config, snapshot)
     restored = Memory(config.db_path)
-    assert restored.schema_version == 2 and restored.facts()[0][1] == "V1 fact"
+    assert restored.schema_version == latest_version() and restored.facts()[0][1] == "V1 fact"
     assert Audit(restored).verify()["ok"]
     restored.close()
 
@@ -397,13 +398,13 @@ def test_unversioned_v1_is_snapshotted_before_its_first_upgrade(tmp_path):
         db.executescript((Path(__file__).parent / "fixtures/v1_4fb0950.sql").read_text())
         db.execute("INSERT INTO facts(text,created) VALUES ('Before upgrade',1)")
     memory = Memory(old, backup_dir=folder)
-    snapshots = list((folder / "db").glob("pre-migrate-v0-to-v2-*.db.gz"))
+    snapshots = list((folder / "db").glob(f"pre-migrate-v0-to-v{latest_version()}-*.db.gz"))
     assert len(snapshots) == 1
     with unpack(snapshots[0], tmp_path / "before.db") as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 0
         assert db.execute("SELECT text FROM facts").fetchone()[0] == "Before upgrade"
         assert "origin" not in {row[1] for row in db.execute("PRAGMA table_info(facts)")}
-    assert memory.schema_version == 2
+    assert memory.schema_version == latest_version()
     memory.close()
 
 

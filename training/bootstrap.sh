@@ -4,6 +4,7 @@ set -euo pipefail
 train_commit=$(sed -n 's/^commit=//p' docker/model/VERSION)
 [[ $train_commit =~ ^[a-f0-9]{40}$ ]] || exit 2
 python -m venv .training-venv
+# shellcheck source=/dev/null
 source .training-venv/bin/activate
 pip install --require-hashes --extra-index-url https://download.pytorch.org/whl/cu128 -r training/requirements-train.lock
 git init .llama.cpp

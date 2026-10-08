@@ -25,7 +25,11 @@ from trainerd.server import create_app
 
 
 def run(*args):
-    return subprocess.run(args, check=True, capture_output=True, text=True, timeout=180)
+    try:
+        return subprocess.run(args, check=True, capture_output=True, text=True, timeout=180)
+    except subprocess.CalledProcessError as error:
+        print(error.stdout + error.stderr, file=sys.stderr)
+        raise
 
 
 def passing(version):

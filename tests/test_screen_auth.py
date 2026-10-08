@@ -208,8 +208,8 @@ def test_vnc_password_not_in_logs_or_audit(tmp_path, fake, caplog):
 
 
 def test_screen_routes_do_not_exist_while_the_screen_is_off(tmp_path, fake):
-    for settings in (dict(screen_enabled=False), dict(browser_enabled=False)):
-        agent = screen_agent(tmp_path / str(len(settings)) / str(settings), fake, **settings)
+    for index, settings in enumerate((dict(screen_enabled=False), dict(browser_enabled=False))):
+        agent = screen_agent(tmp_path / str(index), fake, **settings)
         with caddy(agent) as client:
             login(client)
             assert client.get("/screen").status_code == 404

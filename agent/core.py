@@ -555,7 +555,7 @@ class Agent:
                             done, _pending = await asyncio.wait(
                                 waiters, timeout=15.0, return_when=asyncio.FIRST_COMPLETED,
                             )
-                            if event_wait is not None and event_wait in done:
+                            if event_wait is not None and event_wait.done() and not event_wait.cancelled():
                                 yield event_wait.result()
                             elif event_wait is not None and not event_wait.done():
                                 event_wait.cancel()
@@ -566,6 +566,13 @@ class Agent:
                                 try:
                                     await task
                                 except asyncio.CancelledError:
+                                    pass
+                                # Sign-in cancellation closes the screen and emits its final
+                                # event during tool cleanup. Deliver it before ending the chat.
+                                try:
+                                    while True:
+                                        yield run.events.get_nowait()
+                                except asyncio.QueueEmpty:
                                     pass
                                 result = "Not done: the run was stopped."
                                 break

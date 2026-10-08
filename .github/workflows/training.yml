@@ -2,7 +2,7 @@ name: Training CPU and model switch
 on:
   pull_request:
   push:
-    branches: [v2, 'v2-*']
+    branches: [v2]
 permissions:
   contents: read
 concurrency:
