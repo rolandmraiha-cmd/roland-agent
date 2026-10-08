@@ -4,6 +4,7 @@ Passing reports below are explicit test fixtures for exercising the switch mecha
 The pipeline's real tiny-model report remains in candidate.tar and is never promoted.
 """
 
+import asyncio
 import json
 import os
 import shutil
@@ -19,6 +20,8 @@ import httpx
 from agent.eval.runner import load_cases, suite_hash
 from agent.models.registry import ROOT, Registry
 from agent.training.files import atomic_write, encode, sha256
+from agent.training.tokens import mint
+from trainerd.server import create_app
 
 
 def run(*args):
@@ -94,6 +97,36 @@ def main(archive_path):
         token_file = scratch / "token"
         token_file.write_text(token)
         token_file.chmod(0o644)
+        trainer_token = "synthetic_ci_only_trainer_token_" + "x" * 32
+        trainer_app = create_app(
+            {"models": str(models), "runs": str(scratch / "runs"), "max_mb": 32}, trainer_token
+        )
+
+        def trainer_request(path, *, status=200, **kwargs):
+            async def send():
+                transport = httpx.ASGITransport(app=trainer_app, client=("10.77.7.10", 1234))
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    base_url="http://trainer",
+                    headers={"Authorization": "Bearer " + trainer_token},
+                ) as client:
+                    return await client.post(path, **kwargs)
+
+            response = asyncio.run(send())
+            assert response.status_code == status, (path, response.status_code, response.text)
+            return response.json()
+
+        def promote(result, *, authorized=True):
+            identifier, digest = result["version_id"], result["sha256"]
+            return trainer_request(
+                "/v1/promote",
+                status=200 if authorized else 403,
+                json={
+                    "version_id": identifier,
+                    "sha256": digest,
+                    "request_token": mint(trainer_token, "promote", identifier, digest) if authorized else "",
+                },
+            )
 
         def share():
             # Synthetic fixtures only: readable by production uid 1000, writable by CI runner.
@@ -130,7 +163,7 @@ def main(archive_path):
                 for item in directory.rglob("*"):
                     if item.is_file():
                         bundle.add(item, arcname=str(item.relative_to(directory)))
-            return store.import_candidate(output)
+            return trainer_request("/v1/import", content=output.read_bytes())
 
         def serving(identifier, timeout=180):
             deadline = time.monotonic() + timeout
@@ -218,22 +251,45 @@ def main(archive_path):
                 "/run-model.sh",
             )
             assert serving("ci-tiny-base"), "Actual CPU-trained GGUF did not load in the production image"
+            started = run("docker", "inspect", "--format", "{{.State.StartedAt}}", name).stdout
             result = add("ci-tiny-b")
+            share()
             assert store.read()["current"] == "ci-tiny-base", "Import switched the model"
-            store.promote("ci-tiny-b", result["sha256"], requested_by="roland")
+            promote(result, authorized=False)
+            assert store.read()["current"] == "ci-tiny-base", "Missing human token switched the model"
+            promote(result)
             share()
             assert serving("ci-tiny-b"), "Supervisor did not reload B"
-            store.rollback(requested_by="roland")
+            assert run("docker", "inspect", "--format", "{{.State.StartedAt}}", name).stdout == started
+            trainer_request(
+                "/v1/rollback",
+                json={
+                    "version_id": "ci-tiny-base",
+                    "from_version_id": "ci-tiny-b",
+                    "request_token": mint(trainer_token, "rollback", "ci-tiny-base", "ci-tiny-b"),
+                },
+            )
             share()
             assert serving("ci-tiny-base"), "Rollback did not restore A"
+            assert run("docker", "inspect", "--format", "{{.State.StartedAt}}", name).stdout == started
             result = add("ci-corrupt-b", corrupt=True)
-            store.promote("ci-corrupt-b", result["sha256"], requested_by="roland")
+            share()
+            promote(result)
             share()
             assert not serving("ci-corrupt-b", timeout=35), "Corrupt model unexpectedly served"
             store.rollback(requested_by="automatic_health_failure", expected_current="ci-corrupt-b")
             share()
             assert serving("ci-tiny-base"), "Failed-model rollback did not restore serving"
-            print("CPU SFT/DPO artifact loaded; real supervisor A/B swap and corrupt-B rollback passed.")
+            print(
+                "CPU SFT/DPO artifact loaded; authenticated API import, A/B swap, "
+                "missing-human-token refusal and corrupt-B rollback passed."
+            )
+        except BaseException:
+            diagnostics = subprocess.run(
+                ["docker", "logs", "--tail", "80", name], capture_output=True, text=True, check=False
+            )
+            print(diagnostics.stdout + diagnostics.stderr, file=sys.stderr)
+            raise
         finally:
             subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
             subprocess.run(["docker", "network", "rm", name], capture_output=True, check=False)

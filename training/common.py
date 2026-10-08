@@ -72,12 +72,17 @@ def tiny_base(destination: Path) -> Path:
         model_type="bpe",
         # llama.cpp's SPM tokenizer needs bytes for newlines and unseen characters.
         byte_fallback=True,
+        add_dummy_prefix=False,
         character_coverage=1.0,
         shuffle_input_sentence=False,
         num_threads=1,
         minloglevel=2,
     )
-    tokenizer = LlamaTokenizer(vocab_file=str(destination / "tokenizer.model"))
+    # Keep the template's assistant prefix literal. An injected leading space can
+    # make pinned llama.cpp discard its first prefill token before grammar setup.
+    tokenizer = LlamaTokenizer(
+        vocab_file=str(destination / "tokenizer.model"), legacy=False, add_prefix_space=False
+    )
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.chat_template = "{% for message in messages %}{{ message['role'] + ': ' + message['content'] + '\\n' }}{% endfor %}{% if add_generation_prompt %}{{ 'assistant: ' }}{% endif %}"
     tokenizer.save_pretrained(destination)

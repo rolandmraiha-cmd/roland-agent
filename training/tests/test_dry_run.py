@@ -60,6 +60,18 @@ def test_tiny_tokenizer_preserves_unseen_characters(tokenizer):
     assert tokenizer.decode(tokens, skip_special_tokens=True) == text
 
 
+def test_tiny_generation_prefix_has_no_artificial_space(tokenizer):
+    messages = [{"role": "user", "content": "Reply ok."}]
+    without = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    with_prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    prefix = with_prompt[len(without) :]
+    ids = tokenizer.encode(prefix, add_special_tokens=False)
+    first_piece = tokenizer.convert_ids_to_tokens(ids[0]).replace("▁", " ")
+    # Pinned llama.cpp drops a whitespace-prefixed first token for a nonspace prefix.
+    assert prefix.startswith("assistant:")
+    assert not first_piece.startswith(" ")
+
+
 def test_private_context_with_different_target_is_never_trained(tmp_path, tokenizer):
     dataset = tmp_path / "dataset"
     synthetic_dataset(dataset)

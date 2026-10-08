@@ -30,6 +30,7 @@ async def eval_model(model: Path, source: Path, *, identifier: str, dry_run=Fals
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
+    server_log = tempfile.TemporaryFile() if dry_run else None
     process = subprocess.Popen(
         [
             str(source / "build/bin/llama-server"),
@@ -51,7 +52,7 @@ async def eval_model(model: Path, source: Path, *, identifier: str, dry_run=Fals
             "--jinja",
         ],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=server_log if server_log is not None else subprocess.DEVNULL,
     )
     brain = LlamaCppBrain(
         f"http://127.0.0.1:{port}", "current", "", temperature=0, seed=42, max_new_tokens=256
@@ -76,9 +77,12 @@ async def eval_model(model: Path, source: Path, *, identifier: str, dry_run=Fals
             if dry_run:
                 # Only this public synthetic suite is logged, never private eval content.
                 await error.response.aread()
+                server_log.seek(0, os.SEEK_END)
+                server_log.seek(max(0, server_log.tell() - 16000))
+                diagnostic = server_log.read().decode("utf-8", errors="replace")
                 raise ValueError(
                     f"Synthetic public evaluation rejected ({error.response.status_code}): "
-                    f"{error.response.text[:2000]}"
+                    f"{error.response.text[:2000]}\nPinned server diagnostics:\n{diagnostic}"
                 ) from error
             raise
         if private:
@@ -92,6 +96,8 @@ async def eval_model(model: Path, source: Path, *, identifier: str, dry_run=Fals
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+        if server_log is not None:
+            server_log.close()
 
 
 def synthetic_dataset(path: Path):
