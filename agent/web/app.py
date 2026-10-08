@@ -34,6 +34,7 @@ from .auth import (
     cookie_name,
     csrf_token,
     password_ok,
+    token_hash,
 )
 from .middleware import (
     AuthMiddleware,
@@ -52,8 +53,10 @@ from .routes_approvals import build_router as build_approvals_router
 from .routes_browser import browser_status
 from .routes_browser import build_router as build_browser_router
 from .routes_files import build_router as build_files_router
+from .routes_screen import build_router as build_screen_router
 
 STATIC = Path(__file__).parent / "static"
+SCREEN_TICK_S = 10  # how often idle screen sessions are ended and browserd's mode is checked
 
 
 class SendBody(BaseModel):
@@ -101,6 +104,14 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             log.info("marked %s unfinished job run(s) as failed", n)
         agent.audit.write("system", "startup", detail={"scheduler": run_scheduler})
         loop_task = asyncio.create_task(scheduler_loop(agent)) if run_scheduler else None
+        screen_task = None
+        if agent.screens.available:
+            # Nothing from before the restart is still waiting or watching. Records first;
+            # the loop then tells browserd, so starting never waits for it.
+            if n := agent.signins.reset_on_startup():
+                log.info("cancelled %s waiting sign-in(s) on startup", n)
+            agent.screens.reset_on_startup()
+            screen_task = asyncio.create_task(screen_loop())
         try:
             yield
         finally:
@@ -108,9 +119,19 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             pending = list(tasks)
             if loop_task:
                 pending.append(loop_task)
+            if screen_task:
+                pending.append(screen_task)
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
+
+    async def screen_loop() -> None:
+        while True:
+            try:
+                await agent.screens.tick()
+            except Exception:  # housekeeping must survive one bad round
+                log.exception("screen housekeeping failed")
+            await asyncio.sleep(SCREEN_TICK_S)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -143,12 +164,16 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         app.routes.append(_route)
     for _route in build_browser_router(agent).routes:
         app.routes.append(_route)
+    # Before the /internal stub below, so the real screen-auth route answers first.
+    for _route in build_screen_router(agent, sessions, cookie, STATIC).routes:
+        app.routes.append(_route)
 
 
     @app.api_route("/internal", methods=["GET", "POST", "HEAD", "OPTIONS"])
     @app.api_route("/internal/{rest:path}", methods=["GET", "POST", "HEAD", "OPTIONS"])
     async def internal_stub(request: Request):
-        # AuthMiddleware has already checked the original proxy peer. M7 wires screen auth.
+        # AuthMiddleware has already checked the original proxy peer. GET /internal/screen-auth
+        # is answered by routes_screen; everything else under /internal stays closed.
         return JSONResponse(
             {"error": "unavailable"}, status_code=403 if request.url.path == "/internal/screen-auth" else 404
         )
@@ -237,8 +262,13 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
 
     @app.post("/logout")
     async def logout(request: Request):
+        token = request.cookies.get(cookie)
+        if token:
+            # His screen ends with his login: the page is cut off and the agent gets the
+            # browser back, unless a sign-in is still waiting for him.
+            await agent.screens.end_for_login(token_hash(token))
         with agent.memory.transaction():
-            sessions.end(request.cookies.get(cookie))
+            sessions.end(token)
             agent.audit.write("roland", "logout")
         response = JSONResponse({"ok": True})
         response.delete_cookie(
@@ -266,7 +296,9 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             "pending_approvals": agent.memory.count_pending_approvals(),
             "last_backup_ok": agent.memory.get_meta("last_backup_ok"),
             "last_backup_error": agent.memory.get_meta("last_backup_error"),
+            "pending_signins": len(agent.signins.active()),
             "browser": {"enabled": browser["enabled"], "mode": browser.get("mode"), "url": browser.get("url")},
+            "screen": {"enabled": agent.screens.available},
         }
 
     @app.get("/api/chats")
@@ -291,6 +323,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
             "events": events,
             "busy": chat_id in busy,
             "pending_approvals": agent.memory.approvals(status="pending", chat_id=chat_id),
+            "pending_signins": agent.signins.active(chat_id),
         }
 
     @app.delete("/api/chats/{chat_id}")

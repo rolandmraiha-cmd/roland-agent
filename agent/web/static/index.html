@@ -112,6 +112,14 @@
             <dt>Title</dt><dd id="browser-title"></dd>
             <dt>Address</dt><dd id="browser-address"></dd>
           </dl>
+          <div id="browser-screen" class="browser-screen" hidden>
+            <p class="hint">See the browser live. Watching leaves the agent working; taking control pauses it until you hand the browser back.</p>
+            <div class="job-actions">
+              <a id="browser-watch" class="button ghost" href="/screen?mode=watch" target="_blank" rel="noopener">Watch screen</a>
+              <a id="browser-control" class="button ghost" href="/screen?mode=control" target="_blank" rel="noopener">Take control</a>
+            </div>
+            <div id="browser-signins"></div>
+          </div>
           <h3>Tabs</h3>
           <ul id="browser-tabs" class="browser-tabs" aria-label="Browser tabs"></ul>
           <div class="browser-preview">

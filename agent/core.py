@@ -17,8 +17,10 @@ from .gate import ALREADY_REJECTED, POLICIES, Gate, RunState
 from .memory import Job, Memory
 from .models.context import ACTION_PROMPT_START, action_prompt, fit_messages, schemas_for_prompt
 from .schedule import now_text, today
+from .screen import Screens
+from .signin import SignIns
 from .tools import ToolContext, call_tool, clip, describe, prompt_facts, schemas
-from .tools_browser import BROWSER_TOOLS
+from .tools_browser import BROWSER_TOOLS, SCREEN_TOOLS
 
 _MARKER = re.compile(r"tool_output", re.IGNORECASE)
 _NOT_NAME = re.compile(r"[^A-Za-z0-9_.-]")
@@ -68,8 +70,18 @@ BROWSER_NOTE = """You also have a real web browser. browser_open loads a page an
 shows it as text, with a ref like [e3] on each link, button and field. Pass that ref to
 browser_click, browser_type or browser_select, and take a new snapshot after the page changes.
 You can't see pictures. Never type passwords, card numbers or one-time codes: if a page needs
-a sign-in, stop and tell Roland.
+a sign-in, {signin}.
 """
+SIGNIN_TELL = "stop and tell Roland"
+SIGNIN_ASK = "call request_signin and Roland signs in himself"
+JOB_NOTE = (
+    "\n\nYou are running a scheduled background job. Nobody is watching live; "
+    "your final answer is saved as the job's result."
+)
+# Nobody is there to sign in during a job, so it ends with a result Roland can act on.
+JOB_SIGNIN_NOTE = (
+    " If a page needs a sign-in, stop and answer \"Needs sign-in to\" and the site's name."
+)
 
 
 class LimitReached(Exception):
@@ -135,23 +147,41 @@ class Agent:
                 action_timeout=config.browser_action_timeout_s,
                 nav_timeout=config.browser_nav_timeout_s,
             )
+        # Off unless SCREEN_ENABLED=true and the browser is on (M7). While Roland controls the
+        # browser or a sign-in waits, the client refuses the agent's own calls.
+        self.screens = Screens(memory, self.audit, config, browser)
+        self.signins = SignIns(memory, self.audit, config, self.screens)
+        if browser is not None:
+            browser.locked = self.screens.roland_has_browser
         self.ctx = ToolContext(
             memory, config.workspace, config.timezone, self.allow_shell,
             audit=self.audit, gate=self.gate, config=config, shell=shell, browser=browser,
+            signins=self.signins,
         )
         self._token_cache: dict[str, int] = {}
         self._chat_runs: dict[int, RunState] = {}
         self._chat_tasks: dict[int, asyncio.Task] = {}
         config.workspace.mkdir(parents=True, exist_ok=True)
 
-    def system_prompt(self, extra: str = "") -> str:
-        shell_note = "" if self.allow_shell else "Shell commands are turned off right now.\n"
-        excluded = set()
+    def unavailable_tools(self) -> set[str]:
+        """Tools that would only be refused here, so they aren't offered or described."""
+        excluded: set[str] = set()
         if not self.allow_shell:
             excluded.add("run_shell")
         if self.ctx.browser is None:
             excluded |= BROWSER_TOOLS
+        if not self.screens.available:
+            excluded |= SCREEN_TOOLS
+        return excluded
+
+    def system_prompt(self, extra: str = "", exclude: set[str] = frozenset()) -> str:
+        shell_note = "" if self.allow_shell else "Shell commands are turned off right now.\n"
+        excluded = self.unavailable_tools() | set(exclude)
         action_note = action_prompt(schemas(excluded)) if self.config.model_tool_mode != "native" else ""
+        browser_note = ""
+        if self.ctx.browser is not None:
+            can_ask = "request_signin" not in excluded
+            browser_note = BROWSER_NOTE.format(signin=SIGNIN_ASK if can_ask else SIGNIN_TELL)
 
         def render(facts: str) -> str:
             return SYSTEM.format(
@@ -160,7 +190,7 @@ class Agent:
                 tz=self.config.timezone,
                 facts=facts,
                 shell_note=shell_note,
-                browser_note=BROWSER_NOTE if self.ctx.browser is not None else "",
+                browser_note=browser_note,
             ) + extra + action_note
 
         # Reserve room for the actual tool catalogue without raising the context cap.
@@ -298,10 +328,10 @@ class Agent:
     ) -> AsyncIterator[dict]:
         """Runs the tool loop. Yields events: text, tool, done (with the full reply) or error."""
         ctx = ctx or self.ctx
-        if not self.allow_shell:  # don't offer a tool that would only be refused
-            tool_exclude = set(tool_exclude) | {"run_shell"}
+        # Don't offer a tool that would only be refused.
+        tool_exclude = set(tool_exclude) | self.unavailable_tools()
         if ctx.browser is None:
-            tool_exclude = set(tool_exclude) | BROWSER_TOOLS
+            tool_exclude |= BROWSER_TOOLS
         tools = schemas(tool_exclude)
         reply = ""
         request = next((str(m.get("content") or "") for m in reversed(messages) if m.get("role") == "user"), "")
@@ -638,20 +668,19 @@ class Agent:
 
     async def run_job(self, job: Job) -> tuple[bool, str]:
         """Runs one background job with no chat history. Returns (ok, output)."""
+        # A job can't create more jobs, so a bad prompt can't multiply itself, and it can't
+        # wait for Roland at the screen: every tool marked in_jobs=False is left out.
+        not_in_jobs = {name for name, policy in POLICIES.items() if not policy.in_jobs}
         # The job's name and text stay out of the system prompt; only its own message carries them.
-        extra = (
-            "\n\nYou are running a scheduled background job. Nobody is watching live; "
-            "your final answer is saved as the job's result."
-        )
+        extra = JOB_NOTE + (JOB_SIGNIN_NOTE if self.ctx.browser is not None else "")
         messages = [
-            {"role": "system", "content": self.system_prompt(extra)},
+            {"role": "system", "content": self.system_prompt(extra, exclude=not_in_jobs)},
             {"role": "user", "content": job.prompt},
         ]
         out, tools_used, ok = "", [], True
         run, ctx = self._begin_run("job", job_id=job.id)
         try:
-            # A job can't create more jobs, so a bad prompt can't multiply itself.
-            async for event in self.run(messages, tool_exclude={"schedule_job"}, run=run, ctx=ctx):
+            async for event in self.run(messages, tool_exclude=not_in_jobs, run=run, ctx=ctx):
                 if event["type"] == "done":
                     out = event["reply"]
                 elif event["type"] == "tool":

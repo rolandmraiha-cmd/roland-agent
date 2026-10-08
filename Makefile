@@ -20,7 +20,7 @@ fmt-check:
 
 test:
 	pytest -q
-	node --test tests/frontend/chat.test.cjs tests/frontend/snapshot.test.cjs
+	node --test tests/frontend/chat.test.cjs tests/frontend/snapshot.test.cjs tests/frontend/screen.test.cjs
 
 test-integration:
 	bash tests/integration/edge.sh

@@ -311,6 +311,8 @@ def _build_policies() -> dict[str, ToolPolicy]:
         "browser_wait": _safe_policy(taints=True),
         "browser_upload": _browser_policy("browser_upload"),
         "browser_downloads": _safe_policy(taints=True),
+        # Screen (M7). Roland signs in himself; nothing from the page comes back with the answer.
+        "request_signin": _safe_policy(taints=False, in_jobs=False),
     }
 
 

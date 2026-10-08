@@ -842,3 +842,183 @@ test('send finally unlocks composer after stream ends without approval_resolved'
   assert.equal(f.run('composerLocked'), false);
   assert.equal(f.get('composer').classes.has('locked'), false);
 });
+
+// ---------- M7: sign-in cards and the screen buttons ----------
+const signin = {
+  id: 'sig-1', site: 'shop.example', url: 'https://shop.example/login',
+  reason: 'to read your orders', status: 'pending', expires: Date.now() / 1000 + 600, chat_id: 1,
+};
+
+function signinFixture() {
+  const f = fixture();
+  f.posts = [];
+  f.fail = null;
+  f.context.api = async (url, options = {}) => {
+    f.posts.push({ url, method: options.method, body: options.body });
+    if (f.fail && url.includes(f.fail)) throw new Error('that sign-in is no longer waiting');
+    if (url.startsWith('/api/signin')) return { json: async () => (url.includes('?') ? [signin] : { status: 'done' }) };
+    if (url.endsWith('/messages')) return { json: async () => ({ messages: [], pending_approvals: [], pending_signins: [signin] }) };
+    return { json: async () => ({}) };
+  };
+  f.context.loadStatus = async () => {};
+  return f;
+}
+const actionsOf = (card) => card.children.find((c) => c.className === 'actions').children;
+
+test('sign-in card shows the site as text and its buttons call only the sign-in routes', async () => {
+  const f = signinFixture();
+  const hostile = { ...signin, site: '<img src=x onerror=alert(1)>', reason: '<b>trust me</b>', url: 'javascript:alert(1)' };
+  const card = f.run('renderSigninCard(' + JSON.stringify(hostile) + ')');
+  assert.equal(card.children.find((c) => c.className === 'summary').textContent, 'Sign in to <img src=x onerror=alert(1)>');
+  const dl = card.children.find((c) => c.tagName === 'DL');
+  assert.deepEqual(dl.children.map((c) => c.textContent), ['page', 'javascript:alert(1)', 'why', '<b>trust me</b>']);
+  const [open, done, cancel] = actionsOf(card);
+  // The link goes to this app's own screen page, never to the address the agent named.
+  assert.equal(open.tagName, 'A');
+  assert.equal(open.href, '/screen?mode=control&signin=sig-1');
+  assert.equal(open.rel, 'noopener');
+  assert.equal(done.textContent, "I'm done");
+  await done.onclick();
+  assert.deepEqual(f.posts.map((p) => [p.url, p.method]), [['/api/signin/sig-1/done', 'POST']]);
+  assert.equal(done.disabled, true);
+  assert.equal(cancel.disabled, true);
+  assert.equal(open.hidden, true);
+  assert.equal(open.href, undefined);
+  assert.equal(card.children[card.children.length - 1].textContent, 'Signed in.');
+  assert.equal(f.run('composerLocked'), false);
+
+  const second = f.run('renderSigninCard(' + JSON.stringify({ ...signin, id: 'sig/2?x' }) + ')');
+  await actionsOf(second)[2].onclick();
+  assert.equal(f.posts[1].url, '/api/signin/sig%2F2%3Fx/cancel');
+  assert.equal(second.children[second.children.length - 1].textContent, 'Cancelled.');
+});
+
+test('a failed Done leaves the sign-in card usable and says why', async () => {
+  const f = signinFixture();
+  f.fail = '/done';
+  const card = f.run('renderSigninCard(' + JSON.stringify(signin) + ')');
+  const [open, done, cancel] = actionsOf(card);
+  await done.onclick();
+  assert.equal(done.disabled, false);
+  assert.equal(cancel.disabled, false);
+  assert.equal(open.hidden, undefined);
+  assert.equal(card.children[card.children.length - 1].textContent, 'that sign-in is no longer waiting');
+});
+
+test('a finished sign-in renders without buttons', () => {
+  const f = signinFixture();
+  for (const [status, text] of [['done', 'Signed in.'], ['cancelled', 'Cancelled.'], ['expired', 'Ran out of time.'], ['odd', 'Status: odd']]) {
+    const card = f.run('renderSigninCard(' + JSON.stringify({ ...signin, status }) + ')');
+    assert.equal(card.children.some((c) => c.className === 'actions'), false);
+    assert.equal(card.children[card.children.length - 1].textContent, text);
+  }
+});
+
+test('the composer is locked while a sign-in waits, and typing "done" sends nothing', async () => {
+  const f = signinFixture();
+  f.run('currentChat = 1');
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let step = 0;
+  const events = [
+    { type: 'signin_required', signin },
+    { type: 'signin_resolved', id: 'sig-1', status: 'done' },
+    { type: 'done', reply: 'Signed in, thanks.' },
+  ];
+  const encoder = new TextEncoder();
+  f.context.api = async (url, options = {}) => {
+    f.posts.push({ url, method: options.method });
+    if (url.endsWith('/send')) {
+      return { body: { getReader: () => ({ read: async () => {
+        if (step === 1) await gate;  // the agent waits here for Roland
+        if (step >= events.length) return { done: true };
+        return { value: encoder.encode(`data: ${JSON.stringify(events[step++])}\n\n`), done: false };
+      } }) } };
+    }
+    if (url.endsWith('/messages')) return { json: async () => ({ messages: [] }) };
+    return { json: async () => ({}) };
+  };
+  const sent = f.run('send("check my orders")');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(f.run('composerLocked'), true);
+  assert.equal(f.get('input').disabled, true);
+  const card = f.get('messages').children.find((c) => c.className.includes('signin-card'));
+  assert.ok(card);
+  f.get('input').value = 'done';
+  f.get('composer').onsubmit({ preventDefault() {} });
+  assert.equal(f.posts.filter((p) => p.url.endsWith('/send')).length, 1);
+  assert.equal(f.get('input').value, 'done');
+  release();
+  await sent;
+  assert.equal(f.run('composerLocked'), false);
+  assert.equal(actionsOf(card)[1].disabled, true);
+  assert.equal(card.children[card.children.length - 1].textContent, 'Signed in.');
+});
+
+test('reopening a chat shows its waiting sign-in and keeps the composer locked', async () => {
+  const f = signinFixture();
+  await f.run('openChat(1)');
+  const cards = f.get('messages').children.filter((c) => c.className.includes('signin-card'));
+  assert.equal(cards.length, 1);
+  assert.equal(f.run('composerLocked'), true);
+});
+
+test('Watch and Take control appear only while the screen is switched on', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '../../agent/web/static/index.html'), 'utf8');
+  assert.match(html, /<a id="browser-watch"[^>]*href="\/screen\?mode=watch"[^>]*rel="noopener"/);
+  assert.match(html, /<a id="browser-control"[^>]*href="\/screen\?mode=control"[^>]*rel="noopener"/);
+  assert.match(html, /<div id="browser-screen" class="browser-screen" hidden>/);
+  const f = browserFixture();
+  await f.run('loadBrowserStatus()');
+  assert.equal(f.get('browser-screen').hidden, true);
+  assert.equal(f.calls.some((c) => c.url.startsWith('/api/signin')), false);
+
+  const on = browserFixture();
+  const api = on.context.api;
+  on.context.api = async (url, options) => (url === '/api/signin?status=pending' ? { json: async () => [signin] } : api(url, options));
+  on.run('screenEnabled = true');
+  await on.run('loadBrowserStatus()');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(on.get('browser-screen').hidden, false);
+  assert.equal(on.get('browser-signins').children.length, 1);
+  // Off or unreachable, there is nothing to watch.
+  on.state = { enabled: true, reachable: false };
+  await on.run('loadBrowserStatus()');
+  assert.equal(on.get('browser-screen').hidden, true);
+});
+
+test('a sign-in shown in the chat and on the Browser tab is finished in both places', async () => {
+  const f = signinFixture();
+  const inChat = f.run('renderSigninCard(' + JSON.stringify(signin) + ')');
+  const onTab = f.run('renderSigninCard(' + JSON.stringify(signin) + ', "browser")');
+  // Drawing the Browser tab's copy again (it polls) must not orphan the chat's card.
+  const redrawn = f.run('renderSigninCard(' + JSON.stringify(signin) + ', "browser")');
+  f.run('finishSigninCard("sig-1", "done")');
+  for (const card of [inChat, redrawn]) {
+    assert.equal(actionsOf(card)[1].disabled, true);
+    assert.equal(actionsOf(card)[0].hidden, true);
+    assert.equal(card.children[card.children.length - 1].textContent, 'Signed in.');
+  }
+  assert.equal(actionsOf(onTab)[1].disabled, false);  // the replaced copy is off the page
+  assert.equal(f.run('signinCards.size'), 0);
+});
+
+test('the Browser tab leaves its sign-in cards alone while the list is unchanged', async () => {
+  const f = browserFixture();
+  let rows = [signin];
+  const api = f.context.api;
+  f.context.api = async (url, options) => (url === '/api/signin?status=pending' ? { json: async () => rows } : api(url, options));
+  f.run('screenEnabled = true');
+  await f.run('loadBrowserSignins()');
+  const first = f.get('browser-signins').children[0];
+  await f.run('loadBrowserSignins()');
+  assert.equal(f.get('browser-signins').children[0], first);
+  rows = [];
+  await f.run('loadBrowserSignins()');
+  assert.equal(f.get('browser-signins').children.length, 0);
+  // Leaving the tab forgets the list, so coming back draws it afresh.
+  rows = [signin];
+  await f.run('loadBrowserSignins()');
+  f.run('showView("chat")');
+  assert.equal(f.get('browser-signins').children.length, 0);
+});

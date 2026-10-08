@@ -24,3 +24,8 @@ def test_chat_frontend():
 def test_browser_page_script():
     """browserd/snapshot.js: secret fields, form facts, and nothing but its three jobs."""
     run_node_tests("snapshot.test.cjs")
+
+
+def test_screen_page_script():
+    """agent/web/static/screen.js: the session, the password's short life, keys and hand-back."""
+    run_node_tests("screen.test.cjs")
