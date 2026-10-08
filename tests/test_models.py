@@ -146,6 +146,55 @@ async def test_ollama_request_has_format_schema():
     assert "oneOf" in payload["format"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [400, 422])
+async def test_streamed_schema_errors_allow_only_constrained_fallback(status):
+    seen = []
+
+    async def handler(request):
+        if request.url.path == "/props":
+            return httpx.Response(200, json={})
+        payload = json.loads(request.content)
+        seen.append(payload)
+        if "response_format" in payload or "json_schema" in payload:
+            return httpx.Response(status, stream=httpx.ByteStream(b"json_schema is not supported"))
+        assert payload.get("grammar")
+        body = 'data: {"content":"{\\"action\\":\\"reply\\",\\"text\\":\\"hi\\"}"}\n\ndata: [DONE]\n\n'
+        return httpx.Response(200, content=body)
+
+    brain = LlamaCppBrain("http://127.0.0.1:8080", "current", "")
+    await brain.aclose()
+    brain._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        items = [item async for item in brain.stream([{"role": "user", "content": "hi"}], [])]
+    finally:
+        await brain.aclose()
+    assert isinstance(items[-1], Step) and items[-1].text == "hi"
+    assert len(seen) == 3
+
+
+@pytest.mark.asyncio
+async def test_streamed_non_schema_error_does_not_retry():
+    seen = []
+
+    async def handler(request):
+        if request.url.path == "/props":
+            return httpx.Response(200, json={})
+        seen.append(request)
+        return httpx.Response(400, stream=httpx.ByteStream(b"prompt exceeds context size"))
+
+    brain = LlamaCppBrain("http://127.0.0.1:8080", "current", "")
+    await brain.aclose()
+    brain._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            _ = [item async for item in brain.stream([{"role": "user", "content": "hi"}], [])]
+        assert error.value.response.text == "prompt exceeds context size"
+    finally:
+        await brain.aclose()
+    assert len(seen) == 1
+
+
 def llamacpp_with(chunks: list[str], finish_reason: str | None, seen: list | None = None) -> LlamaCppBrain:
     """A llama.cpp brain whose server streams `chunks` and then stops for `finish_reason`."""
 

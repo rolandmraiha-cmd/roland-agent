@@ -175,8 +175,9 @@ class LlamaCppBrain:
         async with self._client.stream(
             "POST", f"{self.chat_root}/chat/completions", json=payload
         ) as response:
-            if self._response_format_rejected(response):
+            if response.status_code in {400, 422}:
                 await response.aread()
+            if self._response_format_rejected(response):
                 raise _FormatRejected(response.status_code, response.text[:200])
             response.raise_for_status()
             async for piece, truncated in self._iter_sse_content(response):
@@ -206,8 +207,9 @@ class LlamaCppBrain:
         if self.seed is not None:
             body["seed"] = self.seed
         async with self._client.stream("POST", f"{self.server_root}/completion", json=body) as response:
-            if json_schema is not None and self._response_format_rejected(response):
+            if json_schema is not None and response.status_code in {400, 422}:
                 await response.aread()
+            if json_schema is not None and self._response_format_rejected(response):
                 raise _FormatRejected(response.status_code, response.text[:200])
             response.raise_for_status()
             async for piece, truncated in self._iter_completion_content(response):
