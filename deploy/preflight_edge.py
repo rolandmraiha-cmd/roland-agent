@@ -1,7 +1,7 @@
 """Read-only checks of the resolved Compose configuration; no deployment or firewall changes.
 
-Covers caddy, core, model and sandbox, the browser service when its profile is on (M6), and
-the screen relay (novnc) when its profile is on (M7).
+Covers caddy, core, model and sandbox, the browser (M6), screen relay (M7) and optional
+trainer (M8) when their profiles are on.
 """
 
 from __future__ import annotations
@@ -36,9 +36,26 @@ def configuration_errors(config: dict) -> list[str]:
     """Inspect resolved Compose JSON without printing environment values."""
     errors = []
     services = config.get("services", {})
-    known = {"caddy", "core", "model", "sandbox", "browser", "novnc"}
+    known = {"caddy", "core", "model", "sandbox", "browser", "novnc", "trainer"}
     if not {"caddy", "core", "model", "sandbox"} <= set(services) <= known:
-        return ["The stack must contain caddy, core, model and sandbox, and may add only browser and novnc"]
+        return ["The stack must contain caddy, core, model and sandbox, and may add only browser, novnc and trainer"]
+    trainer = services.get("trainer")
+    trainer_url = services["core"].get("environment", {}).get("TRAINER_URL", "")
+    if bool(trainer) != bool(trainer_url):
+        errors.append("COMPOSE_PROFILES=training and TRAINER_URL must be enabled together")
+    if trainer:
+        if (trainer_url != "http://10.77.7.70:7200" or trainer.get("ports")
+                or set(trainer.get("networks", {})) != {"trainer_ctl", "trainer_egress"}):
+            errors.append("Trainer must use only its private control address and egress network")
+        mounts = {mount.get("target"): mount for mount in trainer.get("volumes", [])}
+        if (not mounts.get("/training-data", {}).get("read_only") or "/models" not in mounts
+                or mounts["/models"].get("read_only") or "/training-runs" not in mounts
+                or any(path in mounts for path in ("/data", "/workspace", "/profile"))):
+            errors.append("Trainer may read training data and write only its runs and model registry")
+        if config.get("networks", {}).get("trainer_ctl", {}).get("internal") is not True:
+            errors.append("Trainer control network must be internal")
+        if any(trainer.get("environment", {}).get(name) for name in SECRET_ENV):
+            errors.append("Use mounted trainer secrets")
     for name, service in services.items():
         if (
             service.get("user") != "1000:1000"
@@ -309,10 +326,14 @@ def path_errors(config: dict) -> list[str]:
     secrets = config.get("secrets", {})
     # Every secret a container mounts. Compose can't start a service whose secret file is
     # missing, so a missing one must stop a deploy here, before anything is recreated.
-    for name in (
+    required = {
         "agent_password_hash", "model_server_token", "sandbox_api_token", "browser_api_token",
-        "vnc_password", "vnc_view_password",
-    ):
+        "vnc_password", "vnc_view_password", "trainer_api_token",
+    } | {
+        secret["source"] for service in config["services"].values()
+        for secret in service.get("secrets", []) if isinstance(secret, dict) and secret.get("source")
+    }
+    for name in sorted(required):
         # Core mounts the two screen passwords since M7, whether or not the screen is on.
         # `make secrets` creates any that are missing and never changes one that exists.
         hint = " (run: sudo env APPLY=1 make secrets)" if name in VNC_SECRETS else ""
@@ -348,8 +369,14 @@ def main() -> int:
         )
         if version(engine) < (28, 0, 0) or version(compose) < (2, 33, 1):
             raise ValueError("Require Docker Engine >= 28 and Compose >= 2.33.1 for gateway priority")
+        command = ["docker", "compose", "-f", str(ROOT / "docker-compose.yml")]
+        # Compose overrides for explicitly configured credentials are checked as well.
+        import os
+        mode = os.environ.get("TRAINING_COMPOSE_OVERRIDE", "")
+        if mode in {"ssh", "hook"}:
+            command += ["-f", str(ROOT / ("docker-compose.training-" + mode + ".yml"))]
         output = subprocess.check_output(
-            ["docker", "compose", "-f", str(ROOT / "docker-compose.yml"), "config", "--format", "json"],
+            command + ["config", "--format", "json"],
             cwd=ROOT,
             text=True,
             stderr=subprocess.PIPE,

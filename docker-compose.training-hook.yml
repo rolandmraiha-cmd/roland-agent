@@ -1,0 +1,12 @@
+# Hook mode is explicitly provisioned by Roland; no provider or credentials are included.
+services:
+  trainer:
+    secrets: [training_provider_token]
+    volumes:
+      - type: bind
+        source: ${TRAINING_PROVIDER_HOOKS:?Set a reviewed provider hook directory}
+        target: /app/training/providers/${TRAINING_PROVIDER:?Set a provider name}
+        read_only: true
+        bind: { create_host_path: false }
+secrets:
+  training_provider_token: { file: ./secrets/training_provider_token }

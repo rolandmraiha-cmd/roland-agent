@@ -180,7 +180,7 @@ class CSRFMiddleware:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
             scope["type"] == "http"
-            and scope["method"] not in {"GET", "HEAD", "OPTIONS"}
+            and (scope["method"] not in {"GET", "HEAD", "OPTIONS"} or scope["path"] == "/api/training/export")
             and not internal_path(scope["path"])
         ):
             headers = Headers(scope=scope)

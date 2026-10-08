@@ -180,7 +180,7 @@ def test_every_setting_can_be_loaded(clean_env, tmp_path, monkeypatch):
     for setting in fields(Config):
         name = setting.metadata.get("env", setting.name.upper())
         default = getattr(Config(), setting.name)
-        if setting.name in {"data_dir", "workspace_dir", "workspace_host_dir", "backup_dir"}:
+        if setting.name in {"data_dir", "workspace_dir", "workspace_host_dir", "backup_dir", "training_data_dir"}:
             value = str(tmp_path / setting.name)
             parsed = Path(value)
         elif isinstance(default, bool):

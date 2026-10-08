@@ -13,14 +13,14 @@ export HOST REF APPLY FORCE PULL S
 # Pass them explicitly when set: WORKSPACE_HOST_DIR=/path make …
 
 lint:
-	ruff check agent browserd tests deploy
+	ruff check agent browserd trainerd training tests deploy
 
 fmt-check:
 	ruff format --check agent tests deploy
 
 test:
 	pytest -q
-	node --test tests/frontend/chat.test.cjs tests/frontend/snapshot.test.cjs tests/frontend/screen.test.cjs
+	node --test tests/frontend/*.test.cjs
 
 test-integration:
 	bash tests/integration/edge.sh
@@ -111,3 +111,19 @@ model-fetch:
 
 model-install:
 	bash deploy/model.sh install
+
+.PHONY: model-import model-promote model-rollback model-list model-eval training-secrets test-training
+model-import:
+	bash deploy/training.sh import
+model-promote:
+	bash deploy/training.sh promote
+model-rollback:
+	bash deploy/training.sh rollback
+model-list:
+	bash deploy/training.sh list
+model-eval:
+	bash deploy/training.sh eval
+training-secrets:
+	bash deploy/secrets.sh
+test-training:
+	bash tests/integration/training.sh

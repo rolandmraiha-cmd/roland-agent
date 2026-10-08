@@ -15,6 +15,8 @@ COPY requirements.lock ./
 RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY pyproject.toml README.md ./
 COPY agent ./agent
+COPY training ./training
+COPY docker/model/VERSION ./docker/model/VERSION
 # Repo pyproject also lists sandboxd for local/dev installs; core image ships agent only.
 RUN sed -i 's/, "sandboxd"//' pyproject.toml     && pip install --no-cache-dir --no-deps --no-build-isolation --no-index .
 
@@ -25,6 +27,7 @@ RUN useradd --create-home --uid 1000 agent \
     && mkdir -p /data /backups /workspace \
     && chown -R agent:agent /data /backups /workspace \
     && chmod 0700 /data /backups /workspace
+RUN mkdir -p /training-data && chown agent:agent /training-data && chmod 0700 /training-data
 USER agent
 ENV DATA_DIR=/data HOME=/tmp/home PYTHONNOUSERSITE=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 VOLUME /data

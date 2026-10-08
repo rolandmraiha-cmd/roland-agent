@@ -1,0 +1,22 @@
+base_model: Qwen/Qwen3-4B-Instruct-2507
+revision: cdbee75f17c01a7cc42f958dc650907174af0554
+quant: Q4_K_M
+max_seq_len: 4096
+seed: 42
+seed_ratio: 0.3
+min_sft: 50
+min_pairs: 20
+sft:
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+  learning_rate: 0.0002
+  epochs: 2
+  batch_size: 1
+  gradient_accumulation_steps: 16
+  warmup_ratio: 0.03
+dpo:
+  learning_rate: 0.000005
+  epochs: 1
+  beta: 0.1

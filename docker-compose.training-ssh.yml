@@ -1,0 +1,15 @@
+# Explicit optional secrets, so the default/manual stack needs no SSH key or host key.
+services:
+  trainer:
+    secrets: [training_ssh_key]
+    environment:
+      TRAINING_SSH_KEY_FILE: /run/secrets/training_ssh_key
+      TRAINING_SSH_KNOWN_HOSTS: /run/config/training_known_hosts
+    volumes:
+      - type: bind
+        source: ${TRAINING_SSH_KNOWN_HOSTS:?Set a reviewed known_hosts file}
+        target: /run/config/training_known_hosts
+        read_only: true
+        bind: { create_host_path: false }
+secrets:
+  training_ssh_key: { file: ./secrets/training_ssh_key }

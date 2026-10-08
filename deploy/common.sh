@@ -32,7 +32,13 @@ have_docker() {
 }
 
 compose() {
-    docker compose --project-directory "$deploy_repo" -f "$deploy_repo/docker-compose.yml" "$@"
+    local extra=()
+    case ${TRAINING_COMPOSE_OVERRIDE:-} in
+        '') ;;
+        ssh|hook) extra=(-f "$deploy_repo/docker-compose.training-${TRAINING_COMPOSE_OVERRIDE}.yml") ;;
+        *) die "TRAINING_COMPOSE_OVERRIDE must be ssh or hook" ;;
+    esac
+    docker compose --project-directory "$deploy_repo" -f "$deploy_repo/docker-compose.yml" "${extra[@]}" "$@"
 }
 
 is_truthy() {

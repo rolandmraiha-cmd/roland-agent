@@ -61,16 +61,23 @@ def test_screen_auth_requires_active_screen_session(tmp_path, fake):
         assert auth(client) == 403 and auth(client, "ws", Origin=ORIGIN) == 403
         session = start(client)
         assert auth(client) == 200 and auth(client, "ws", Origin=ORIGIN) == 200
-        assert client.post("/api/screen/release", json={"id": session["id"]}).json() == {"ok": True, "ended": True}
+        assert client.post("/api/screen/release", json={"id": session["id"]}).json() == {
+            "ok": True,
+            "ended": True,
+        }
         assert auth(client) == 403
         # Idle past SCREEN_SESSION_IDLE_MIN without a heartbeat: over, and the page is told.
         session = start(client)
-        agent.memory._exec("UPDATE screen_sessions SET last_seen = ? WHERE id = ?", (time.time() - 31 * 60, session["id"]))
+        agent.memory._exec(
+            "UPDATE screen_sessions SET last_seen = ? WHERE id = ?", (time.time() - 31 * 60, session["id"])
+        )
         assert auth(client) == 403
         assert client.post("/api/screen/heartbeat", json={"id": session["id"]}).status_code == 410
         # A heartbeat keeps a session alive, and only its own login may send it.
         session = start(client)
-        agent.memory._exec("UPDATE screen_sessions SET last_seen = ? WHERE id = ?", (time.time() - 29 * 60, session["id"]))
+        agent.memory._exec(
+            "UPDATE screen_sessions SET last_seen = ? WHERE id = ?", (time.time() - 29 * 60, session["id"])
+        )
         beat = client.post("/api/screen/heartbeat", json={"id": session["id"]})
         assert beat.status_code == 200 and beat.json()["expires"] > time.time() + 29 * 60
         assert auth(client) == 200
@@ -85,7 +92,14 @@ def test_ws_origin_must_match(tmp_path, fake):
         start(client)
         client.headers.pop("Origin")
         assert auth(client, "ws", Origin=ORIGIN) == 200
-        for origin in ("https://evil.test", f"http://{HOST}", f"https://{HOST}.evil.test", f"{ORIGIN}/path", "null", ""):
+        for origin in (
+            "https://evil.test",
+            f"http://{HOST}",
+            f"https://{HOST}.evil.test",
+            f"{ORIGIN}/path",
+            "null",
+            "",
+        ):
             assert auth(client, "ws", Origin=origin) == 403, origin
         assert auth(client, "ws") == 403  # no Origin at all
         # Static noVNC files are plain GETs and carry no Origin.
@@ -178,17 +192,24 @@ def test_vnc_password_not_in_logs_or_audit(tmp_path, fake, caplog):
             rows = agent.memory._all(f"SELECT * FROM {table}")  # noqa: S608 -- fixed table names
             assert all(secret not in str(tuple(row)) for row in rows), table
     # What the audit does say: who, when, which mode, how long. Nothing typed, nothing seen.
-    events = [(row["event"], row["detail"]) for row in reversed(agent.memory.audit_rows(limit=50)) if row["event"].startswith("screen_")]
+    events = [
+        (row["event"], row["detail"])
+        for row in reversed(agent.memory.audit_rows(limit=50))
+        if row["event"].startswith("screen_")
+    ]
     assert [event for event, _ in events] == ["screen_session_start", "screen_session_end"] * 2
     assert all(set(detail) <= {"mode", "duration_s", "reason"} for _, detail in events)
     # Even if a password did reach an audit detail by mistake, it would be blanked out.
     agent.audit.write("system", "config_warning", detail={"note": f"oops {VNC_FULL} and {VNC_VIEW}"})
-    assert agent.memory.audit_rows(event="config_warning")[0]["detail"]["note"] == "oops [redacted] and [redacted]"
+    assert (
+        agent.memory.audit_rows(event="config_warning")[0]["detail"]["note"]
+        == "oops [redacted] and [redacted]"
+    )
 
 
 def test_screen_routes_do_not_exist_while_the_screen_is_off(tmp_path, fake):
-    for settings in (dict(screen_enabled=False), dict(browser_enabled=False)):
-        agent = screen_agent(tmp_path / str(len(settings)) / str(settings), fake, **settings)
+    for index, settings in enumerate((dict(screen_enabled=False), dict(browser_enabled=False))):
+        agent = screen_agent(tmp_path / str(index), fake, **settings)
         with caddy(agent) as client:
             login(client)
             assert client.get("/screen").status_code == 404
@@ -205,9 +226,17 @@ def test_bad_session_requests_are_refused(tmp_path, fake):
     agent = screen_agent(tmp_path, fake)
     with caddy(agent) as client:
         login(client)
-        for body in ({}, {"mode": "admin"}, {"mode": "watch", "signin_id": ""}, {"mode": "watch", "signin_id": "x" * 65}):
+        for body in (
+            {},
+            {"mode": "admin"},
+            {"mode": "watch", "signin_id": ""},
+            {"mode": "watch", "signin_id": "x" * 65},
+        ):
             assert client.post("/api/screen/session", json=body).status_code == 422, body
-        assert client.post("/api/screen/session", json={"mode": "control", "signin_id": "nope"}).status_code == 409
+        assert (
+            client.post("/api/screen/session", json={"mode": "control", "signin_id": "nope"}).status_code
+            == 409
+        )
         assert agent.memory.screen_sessions() == []
         # Without the CSRF token nothing starts, and the page itself needs the login.
         token = client.headers.pop("X-CSRF-Token")
@@ -241,8 +270,13 @@ async def test_the_agent_is_locked_out_while_roland_has_control(tmp_path, fake):
     session = await agent.screens.start(login_hash, "control")
     fake.mode = "agent"  # browserd lost it
     before = len(fake.calls)
-    for attempt in (browser.snapshot(2000), browser.screenshot(), browser.navigate("https://example.com/"),
-                    browser.describe("e1"), browser.click("e1", "f" * 16, "safe")):
+    for attempt in (
+        browser.snapshot(2000),
+        browser.screenshot(),
+        browser.navigate("https://example.com/"),
+        browser.describe("e1"),
+        browser.click("e1", "f" * 16, "safe"),
+    ):
         with pytest.raises(BrowserLocked, match="Roland is using the browser right now"):
             await attempt
     assert len(fake.calls) == before  # nothing reached browserd
