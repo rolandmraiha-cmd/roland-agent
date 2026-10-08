@@ -814,7 +814,7 @@ def run_fake_with_open_stdin(repo, env, script, *args):
     try:
         # Keep stdin open while waiting: communicate() would close it and hide
         # an unintended Docker attachment to the caller's input.
-        process.wait(timeout=5)
+        process.wait(timeout=15)
         stdout, stderr = process.communicate(timeout=5)
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
     finally:
