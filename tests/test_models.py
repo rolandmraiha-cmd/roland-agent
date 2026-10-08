@@ -207,6 +207,32 @@ async def test_a_reply_written_inside_a_reply_shows_only_the_text(finish_reason)
     assert step.text == (expected + CUT_OFF_NOTE if finish_reason == "length" else expected)
 
 
+def test_streamer_joins_escaped_surrogate_pairs_even_across_chunks():
+    """An emoji in JSON is two \\u escapes; each half alone can't be sent as UTF-8."""
+    from agent.models.parse import TextFieldStreamer
+
+    streamer = TextFieldStreamer()
+    out = []
+    for chunk in ['{"action":"reply","text":"ok \\ud83d', "\\ude00 \\ud83d x \\ude00", ' end"}']:
+        out.extend(streamer.feed(chunk))
+    assert "".join(out) == streamer.emitted == "ok \U0001f600 � x � end"
+    streamer.emitted.encode("utf-8")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["stop", "length"])
+async def test_an_emoji_in_a_nested_reply_survives(finish_reason):
+    inner = '{"action": "reply", "text": "smile \\ud83d\\ude00 and a lone \\ud83d'
+    if finish_reason == "stop":
+        inner += '"}'
+    outer = '{"action": "reply", "text": ' + json.dumps(inner)
+    outer = outer + "}" if finish_reason == "stop" else outer[:-1]
+    step = await final_step(llamacpp_with([outer], finish_reason))
+    assert step.parse_error is None
+    assert step.text.startswith("smile \U0001f600 and a lone")
+    step.text.encode("utf-8")  # no half pairs left
+
+
 @pytest.mark.asyncio
 async def test_ollama_keeps_a_cut_off_reply_too():
     async def handler(request: httpx.Request) -> httpx.Response:

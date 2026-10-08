@@ -14,6 +14,7 @@ CUT_OFF_NOTE = '\n\n[The answer was cut off at the length limit. Send "continue"
 
 # A reply action as the schema makes the model write it: "action" first.
 _REPLY_START = re.compile(r'\s*\{\s*"action"\s*:\s*"reply"\s*,')
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 
 ESCAPE_MAP = {
     '"': '"',
@@ -228,7 +229,15 @@ def unwrap_reply_text(text: str) -> str:
     """The model sometimes writes a whole reply action as its reply text. Keep only the text."""
     if not _REPLY_START.match(text):
         return text
-    inner = TextFieldStreamer()
+    blob = first_object(text)
+    if blob is not None:  # complete: let the JSON parser decode it
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict) and isinstance(data.get("text"), str) and data["text"].strip():
+            return data["text"]
+    inner = TextFieldStreamer()  # cut off: decode as far as it got
     inner.feed(text)
     return inner.emitted if inner.emitted.strip() else text
 
@@ -242,15 +251,20 @@ def finish_step(raw: str, schema: dict, offered: set[str], *, truncated: bool, s
     """
     if truncated:
         if _REPLY_START.match(strip_fences(raw)) and streamed.strip():
-            return Step(text=unwrap_reply_text(streamed).rstrip() + CUT_OFF_NOTE)
+            return Step(text=_whole_characters(unwrap_reply_text(streamed)).rstrip() + CUT_OFF_NOTE)
         return parse_action(raw, schema, offered, truncated=True)
     step = parse_action(raw, schema, offered)
     if step.parse_error is None and not step.tool_calls:
         if streamed:
             # Prefer streamed text if parse produced the same reply.
             step.text = streamed
-        step.text = unwrap_reply_text(step.text)
+        step.text = _whole_characters(unwrap_reply_text(step.text))
     return step
+
+
+def _whole_characters(text: str) -> str:
+    """json.loads keeps a lone half of a surrogate pair, which UTF-8 can't encode."""
+    return _LONE_SURROGATE.sub("�", text)
 
 
 class TextFieldStreamer:
@@ -261,7 +275,33 @@ class TextFieldStreamer:
         self._phase = "seek"  # seek | colon | value | done
         self._escape = False
         self._unicode: list[str] | None = None
+        self._high: int | None = None  # first half of a 😀-style pair
         self.emitted = ""
+
+    def _put(self, text: str, out: list[str]) -> None:
+        if self._high is not None:  # a first half with no second half
+            self._high = None
+            out.append("�")
+            self.emitted += "�"
+        if text:
+            out.append(text)
+            self.emitted += text
+
+    def _put_code(self, code: int, out: list[str]) -> None:
+        # JSON writes characters outside the BMP (emoji) as two \u escapes. A lone half
+        # can't be encoded as UTF-8 and would break the reply stream, so join or replace.
+        if 0xD800 <= code <= 0xDBFF:
+            self._put("", out)
+            self._high = code
+        elif 0xDC00 <= code <= 0xDFFF:
+            if self._high is None:
+                self._put("�", out)
+            else:
+                pair = chr(0x10000 + ((self._high - 0xD800) << 10) + (code - 0xDC00))
+                self._high = None
+                self._put(pair, out)
+        else:
+            self._put(chr(code), out)
 
     def feed(self, chunk: str) -> list[str]:
         self.buf += chunk
@@ -306,9 +346,9 @@ class TextFieldStreamer:
                     self._unicode.append(ch)
                     i += 1
                     if len(self._unicode) == 4:
-                        out.append(chr(int("".join(self._unicode), 16)))
-                        self.emitted += out[-1]
+                        code = int("".join(self._unicode), 16)
                         self._unicode = None
+                        self._put_code(code, out)
                     continue
                 if self._escape:
                     self._escape = False
@@ -320,8 +360,7 @@ class TextFieldStreamer:
                     if mapped is None:
                         self._phase = "done"
                         break
-                    out.append(mapped)
-                    self.emitted += mapped
+                    self._put(mapped, out)
                     i += 1
                     continue
                 if ch == "\\":
@@ -329,11 +368,11 @@ class TextFieldStreamer:
                     i += 1
                     continue
                 if ch == '"':
+                    self._put("", out)  # a first half right before the end
                     self._phase = "done"
                     i += 1
                     break
-                out.append(ch)
-                self.emitted += ch
+                self._put(ch, out)
                 i += 1
                 continue
             break
