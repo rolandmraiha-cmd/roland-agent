@@ -105,6 +105,8 @@ Before writing any code:
 
 `MODEL_CTX` was lowered from 4096 to 3072 on Contabo after the model container was OOM-killed at 4096 with the 3840m limit. Do not "fix" this by raising memory.
 
+It was still killed at 3072 on 8 Oct 2026, because llama.cpp's host prompt cache (`--cache-ram`, default 8192 MiB) grew with each new chat. `docker/model/run.sh` now passes `--cache-ram 0`. Keep it off. If the model still climbs toward 3840 MiB across new chats with it off, the cap question goes back to Roland.
+
 Shipped milestones on `v2`: v1 (#1–#6), M0, M1a, M1, M2 web/edge/model/providers/deploy, **M3 gate (#29, #30)**, **M4 sandbox (#31)**, **M5 workspace and files (#32; A5.4 green on Contabo)**. See `docs/AGENT.md` §3 for the full table.
 
 ## 4. Architecture already live
@@ -477,7 +479,7 @@ Restore drill on a **copy** only (`make restore-test FILE=…`), never over live
 
 ## 6. Open decisions for Roland
 
-1. **Model context vs memory.** Contabo runs `MODEL_CTX=3072` because 4096 OOM'd under `MODEL_MEM_LIMIT=3840m`. Options:
+1. **Model context vs memory.** Contabo runs `MODEL_CTX=3072` because 4096 OOM'd under `MODEL_MEM_LIMIT=3840m`. Part of those kills was the host prompt cache, now off (`--cache-ram 0`); re-measure before choosing. Options:
    - (a) keep 3072 and change the repo default (`docker-compose.yml`, `.env.example`, `docs/AGENT.md`) to 3072 so repo and host agree;
    - (b) raise `MODEL_MEM_LIMIT` (needs Roland's OK and costs browser headroom);
    - (c) upgrade the VPS (e.g. ~12 GB) before M6.

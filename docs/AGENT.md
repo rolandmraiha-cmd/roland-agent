@@ -146,6 +146,7 @@ Config caps total 5600 MiB, or 6880 MiB with the browser. Caps are not measured 
 | Context on Contabo | **`MODEL_CTX=3072`** in host `.env` (lowered after an OOM kill at 4096) |
 | Context repo default | 4096 in compose/`.env.example`; hard cap 6144 in `docker/model/run.sh` |
 | Mem limit | **`MODEL_MEM_LIMIT=3840m`** — never raise without Roland's OK |
+| Prompt cache | **`--cache-ram 0`** in `docker/model/run.sh` (llama.cpp's 8192 MiB host prompt cache grew per chat and OOM-killed the model at 3072 on 8 Oct 2026). Never remove it to speed up chat switching. |
 | Isolation | No published port, no egress, digest-pinned, read-only weights |
 
 **Open decision (Roland):** keep 3072 and align the repo default, raise the memory limit (costs browser headroom), or move to a larger VPS. Until decided, keep 3072/3840m.
@@ -196,6 +197,7 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 ### Gotchas
 
 - `MODEL_CTX=4096` with `MODEL_MEM_LIMIT=3840m` OOM-killed the model on Contabo.
+- At `MODEL_CTX=3072` the model was still killed at exactly 3840 MiB (8 Oct 2026): llama.cpp's host prompt cache (`--cache-ram`, default 8192 MiB) grew with each new chat. `run.sh` now passes `--cache-ram 0`; memory should stay flat around 3.1–3.2 GiB.
 - sandboxd leftover reap must run only inside its container; on a host it kills the machine.
 - A chat "yes" must never bypass the approval UI.
 - `_pin` in tool args is reserved for classifiers (`Decision.pinned`). `call_tool` drops a model-supplied one; browser handlers refuse to act without it.

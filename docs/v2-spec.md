@@ -288,7 +288,7 @@ Every service sets `memswap_limit` equal to `mem_limit`, so containers never swa
 
 | Service | mem_limit (MiB) | cpus | pids_limit | other |
 |---|---|---|---|---|
-| model (llama.cpp, 4B Q4_K_M) | 3840 | 3.00 | 128 | `--threads 3`, `--ctx-size 4096` (shipping Contabo default; ceiling 6144), f16 KV cache, flash attention off, `--ubatch-size 256`, weights loaded without mmap, `--parallel 1`; `oom_score_adj: 300` |
+| model (llama.cpp, 4B Q4_K_M) | 3840 | 3.00 | 128 | `--threads 3`, `--ctx-size 4096` (shipping Contabo default; ceiling 6144), f16 KV cache, flash attention off, `--ubatch-size 256`, weights loaded without mmap, `--parallel 1`, host prompt cache off (`--cache-ram 0`); `oom_score_adj: 300` |
 | browser | 1280 (includes shm) | 2.00 | 512 | `shm_size: 320m`, tmpfs `/tmp` 256m, `BROWSER_MAX_TABS=2`, `oom_score_adj: 500` |
 | sandbox | 1024 | 1.50 | 256 | tmpfs `/tmp` 384m, `oom_score_adj: 800`, nofile 1024 |
 | core | 640 | 1.00 | 256 | tmpfs `/tmp` 96m |
@@ -319,6 +319,8 @@ Why these settings (each one measured; peak = allocated buffers, not just the pa
 | **f16 KV, no flash attention, 6,144, micro-batch 256** | **≈ 3,500 MiB** | **19.8 / ~12** | **~3.6** | **Chosen** |
 
 Repacking stays on (it's what makes prompts ~11% faster than `--no-repack`); loading without mmap is what stops the double count. Older llama.cpp builds spell `--load-mode none` as `--no-mmap`.
+
+The host-RAM prompt cache MUST stay off (`--cache-ram 0`). Newer llama.cpp builds (including the pinned `b11434`) default `--cache-ram` to 8192 MiB and save each idle slot into it when a new chat starts (`--cache-idle-slots`), so memory climbs with every new chat until the cgroup limit kills the model. The table above does not count it. On 8 Oct 2026 Contabo killed the model at exactly 3,840 MiB with `MODEL_CTX=3072`, where the budget is ≈ 3.1 GiB. Turning it off costs a fresh prompt prefill when switching chats; `--cache-reuse 256` still reuses the live slot.
 
 `--ctx-size` MUST NOT be raised above 6144 on this host, and flash attention and a quantised KV cache MUST NOT be turned on here, without re-measuring speed and memory. M2 acceptance records the real `docker stats` peak (A2.8). If the peak is above 3,600 MiB, set `MODEL_CTX=4096` rather than raising `MODEL_MEM_LIMIT`.
 
@@ -818,7 +820,7 @@ Vanilla JS only. All dynamic text goes in with `textContent` (never `innerHTML`)
 - **Image:** `ghcr.io/ggml-org/llama.cpp:server-b<build>@sha256:<pin>` (CPU). The build number is pinned and recorded in `docker/model/VERSION`. The same llama.cpp commit is used by the training pipeline's GGUF conversion and quantisation (§6.11.4), so the formats always match.
 - **Entrypoint:** `docker/model/run.sh` (bash, mounted read-only), a small supervisor:
   - It resolves `/models/current/model.gguf` and checks it against `/models/current/model.sha256`. On a mismatch it refuses to start and logs why.
-  - It starts `llama-server --model … --host 10.77.6.60 --port 8080 --api-key-file /run/secrets/model_server_token --ctx-size ${MODEL_CTX:-4096} --parallel 1 --threads ${MODEL_THREADS:-3} --threads-batch ${MODEL_THREADS:-3} --batch-size 512 --ubatch-size 256 --flash-attn off --load-mode none --jinja --no-webui --cache-reuse 256`. No `--mlock`, no `--host 0.0.0.0`, no `--metrics`, no `--slots` endpoint, no `--props` writes. Check each flag against the pinned build's `--help`. If a flag differs, use the equivalent and note it in the PR.
+  - It starts `llama-server --model … --host 10.77.6.60 --port 8080 --api-key-file /run/secrets/model_server_token --ctx-size ${MODEL_CTX:-4096} --parallel 1 --threads ${MODEL_THREADS:-3} --threads-batch ${MODEL_THREADS:-3} --batch-size 512 --ubatch-size 256 --flash-attn off --load-mode none --jinja --no-webui --cache-reuse 256 --cache-ram 0`. No `--mlock`, no `--host 0.0.0.0`, no `--metrics`, no `--slots` endpoint, no `--props` writes. Check each flag against the pinned build's `--help`. If a flag differs, use the equivalent and note it in the PR.
   - Every 15 s it checks whether the `current` symlink target changed (promotion or rollback). If so, it sends SIGTERM to llama-server, waits for exit (≤ 30 s, then SIGKILL) and restarts it on the new target. No Docker socket is needed for model swaps.
 - **Compose:** `user: "1000:1000"`, `read_only: true`, `cap_drop: [ALL]`, `no-new-privileges`, `models:/models:ro`, tmpfs `/tmp:size=64m`, `secrets: [model_server_token]`, network `model` (10.77.6.60) only, `mem_limit: ${MODEL_MEM_LIMIT:-3840m}`, `memswap_limit` the same, `cpus: ${MODEL_CPUS:-3.0}`, `pids_limit: 128`, `oom_score_adj: 300`, `stop_grace_period: 30s`, and `healthcheck: curl -fsS http://10.77.6.60:8080/health` (the image ships `curl`; if it doesn't, use bash `/dev/tcp` plus an HTTP GET in `run.sh healthcheck`), with `start_period: 120s` (loading 2.4 GB from disk).
 - **Ollama alternative:** `docker-compose.ollama.yml` replaces the service with `ollama/ollama:<pin>@sha256:<pin>`, `OLLAMA_HOST=10.77.6.60:11434`, `OLLAMA_MODELS=/models/ollama` (that subtree is read-write), `OLLAMA_NOPRUNE=1` and the same limits and network. The GGUF is imported with a Modelfile (`FROM /models/current/model.gguf`). Ollama has no API-key option, so the internal network and the core peer rules are the protection there. Documented, not default.

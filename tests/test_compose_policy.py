@@ -209,6 +209,7 @@ def test_model_is_pinned_isolated_and_readonly():
         "--no-webui",
         "--no-agent",
         "--no-slots",
+        "--cache-ram 0",
     ):
         assert setting in script
 

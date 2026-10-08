@@ -245,3 +245,19 @@ def test_supervisor_refuses_bad_sha_before_starting(fixture, tmp_path):
     process, log = supervisor(tmp_path, root)
     _, error = process.communicate(timeout=3)
     assert process.returncode != 0 and "SHA-256 mismatch" in error and not log.exists()
+
+
+def test_supervisor_passes_cache_ram_0_to_the_server(fixture, tmp_path):
+    # llama-server's host-RAM prompt cache defaults to 8192 MiB and grows with
+    # each new chat until the 3840m cgroup kills the model; it must stay off.
+    root, source, entry = fixture
+    store.install(root, "test-tiny", entry, source=source)
+    process, log = supervisor(tmp_path, root)
+    try:
+        args = wait_for_starts(process, log, 1, 3)[0]["args"]
+        assert args[args.index("--cache-ram") + 1] == "0"
+        assert args.count("--cache-ram") == 1
+        assert args[args.index("--cache-reuse") + 1] == "256"
+    finally:
+        process.send_signal(signal.SIGTERM)
+        process.wait(timeout=5)
