@@ -68,6 +68,10 @@ async def test_file_use_rule_reaches_model_within_host_prompt_budget(make_agent,
     assert estimate_tokens(rule + "\n") <= 40
     assert agent._budget() == 3072 - 768 - 256
     assert estimate_tokens(system + request) <= agent._budget()
+    assert estimate_tokens(system) <= agent.config.model_system_prompt_budget
+    assert "write_file(path:string, content:string, append?:boolean)" in system
+    assert ("browser_snapshot(max_chars?:integer, start?:integer)" in system) is browser_enabled
+    assert ("schedule_job(" in system) is not background
     assert ("You also have a real web browser" in system) is browser_enabled
     # This is prompt guidance; ordinary file tools remain available in chats and jobs.
     assert {"read_file", "write_file"}.issubset(agent.brain.tools[0])
@@ -215,7 +219,7 @@ async def test_job_name_not_in_system_prompt(make_agent):
 
 @pytest.mark.asyncio
 async def test_max_tool_steps(make_agent):
-    loop = [("", [call("list_files")])] * 10
+    loop = [("", [call("remember", '{"fact":"tool cap proof"}')])] * 10
     agent = make_agent(loop, max_tool_steps=2)
     events = await collect(agent.chat(agent.memory.new_chat(), "go"))
     assert events[-1]["type"] == "error" and "tool steps" in events[-1]["message"]
@@ -275,7 +279,10 @@ def test_strip_markers_is_linear_on_whitespace_runs():
 async def test_tool_calls_never_exceed_max_tool_steps(make_agent, monkeypatch):
     from agent import core
 
-    agent = make_agent([("", [call("list_files")])] * 5, max_tool_steps=2)
+    agent = make_agent(
+        [("", [call("remember", json.dumps({"fact": f"proof {i}"}))]) for i in range(5)],
+        max_tool_steps=2,
+    )
     calls = []
     original = core.call_tool
 
@@ -284,9 +291,11 @@ async def test_tool_calls_never_exceed_max_tool_steps(make_agent, monkeypatch):
         return await original(ctx, name, args)
 
     monkeypatch.setattr(core, "call_tool", spy)
-    events = await collect(agent.chat(agent.memory.new_chat(), "list"))
-    assert calls == ["list_files", "list_files"]
+    events = await collect(agent.chat(agent.memory.new_chat(), "remember these"))
+    assert calls == ["remember", "remember"]
+    assert [text for _, text in agent.memory.facts()] == ["proof 0", "proof 1"]
     assert len(agent.brain.seen) == 3
+    assert agent.brain.tools[-1] == []
     assert events[-1] == {"type": "error", "message": "Stopped after 2 tool steps (MAX_TOOL_STEPS)."}
 
 
