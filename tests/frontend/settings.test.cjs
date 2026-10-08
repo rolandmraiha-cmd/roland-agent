@@ -69,6 +69,12 @@ test('a failed clear keeps the saved vote pressed and shows the error',async()=>
   assert.equal(error.textContent,'Could not clear the vote');
   assert.equal(editor.hidden,false);assert.notEqual(state.textContent,'Vote cleared');
 });
+test('a pressed thumb has its own visible style',()=>{
+  const css=fs.readFileSync(path.join(__dirname,'../../agent/web/static/style.css'),'utf8');
+  const rule=css.match(/\.feedback button\[aria-pressed="true"\]\s*\{([^}]*)\}/);
+  assert.ok(rule,'style.css must style .feedback button[aria-pressed="true"]');
+  assert.match(rule[1],/background:/);assert.match(rule[1],/border-color:/);
+});
 test('model promotion requires exact typed id and a second delayed click',async()=>{
   const f=fixture();f.context.api=async(url,options={})=>{
     f.calls.push({url,options});
