@@ -403,16 +403,22 @@ function renderApprovalCard(approval, { compact } = {}) {
     approveBtn.textContent = "Approve";
   };
   approveBtn.onclick = async () => {
-    if (approval.needs_confirm && !confirmArmed) {
-      confirmArmed = true;
-      confirmArmedAt = Date.now();
-      approveBtn.textContent = "Tap again to confirm";
-      confirmTimer = setTimeout(disarm, CONFIRM_WINDOW_MS);
-      return;
+    if (approval.needs_confirm) {
+      const sinceArmed = Date.now() - confirmArmedAt;
+      // The timer that disarms can run late (a background tab, a busy page), so the click
+      // checks the window itself: a tap after it starts over.
+      if (!confirmArmed || sinceArmed > CONFIRM_WINDOW_MS) {
+        if (confirmTimer) clearTimeout(confirmTimer);
+        confirmArmed = true;
+        confirmArmedAt = Date.now();
+        approveBtn.textContent = "Tap again to confirm";
+        confirmTimer = setTimeout(disarm, CONFIRM_WINDOW_MS);
+        return;
+      }
+      // Both clicks of a double-click land within a few hundred milliseconds. The second tap
+      // has to be a separate decision, so it only counts after a pause.
+      if (sinceArmed < CONFIRM_MIN_GAP_MS) return;
     }
-    // Both clicks of a double-click land within a few hundred milliseconds. The second tap
-    // has to be a separate decision, so it only counts after a pause.
-    if (approval.needs_confirm && Date.now() - confirmArmedAt < CONFIRM_MIN_GAP_MS) return;
     if (confirmTimer) clearTimeout(confirmTimer);
     approveBtn.disabled = true;
     rejectBtn.disabled = true;

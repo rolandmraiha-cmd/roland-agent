@@ -727,6 +727,36 @@ test('a double-click does not count as the confirming second tap', async () => {
   assert.equal(approveCalls, 1);
 });
 
+test('a second tap after the window starts over even if the timer ran late', async () => {
+  // The fixture's setTimeout never fires, like a timer held back in a background tab.
+  const f = fixture();
+  let approveCalls = 0;
+  f.context.api = async (url) => {
+    if (url.includes('/approve')) { approveCalls++; return { json: async () => ({ status: 'approved' }) }; }
+    return { json: async () => [] };
+  };
+  f.context.loadApprovals = async () => {};
+  f.context.loadStatus = async () => {};
+  let clock = 1_000_000;
+  f.context.Date = { now: () => clock };
+  const approval = {
+    id: 'appr5', tool: 'browser_click', category: 'payment', summary: 'Click “Pay”',
+    details: {}, args_hash: 'e'.repeat(64), needs_confirm: true, status: 'pending', args: { ref: 'e2' }, tainted: true,
+  };
+  const card = f.run('renderApprovalCard(' + JSON.stringify(approval) + ')');
+  const approveBtn = card.children.find((c) => c.className === 'actions').children[0];
+  await approveBtn.onclick();
+  clock += 6000;
+  await approveBtn.onclick();  // too late: arms again
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 0);
+  assert.match(approveBtn.textContent, /Tap again/);
+  clock += 1200;
+  await approveBtn.onclick();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(approveCalls, 1);
+});
+
 test('a failed confirmed approval starts over at the first tap', async () => {
   const f = fixture();
   let approveCalls = 0;
