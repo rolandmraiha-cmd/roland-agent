@@ -105,6 +105,8 @@ Before writing any code:
 
 `MODEL_CTX` was lowered from 4096 to 3072 on Contabo after the model container was OOM-killed at 4096 with the 3840m limit. Do not "fix" this by raising memory.
 
+**8 Oct 2026, M6 pre-step under load:** the model was OOM-killed again, at 3072. The kernel log showed `Memory cgroup out of memory: Killed process (llama-server) anon-rss:3921812kB`, and Docker restarted the model. The cause was not the context size: llama-server keeps a RAM prompt cache (`--cache-ram`, default 8192 MiB in this build). It copies earlier conversations' KV state into that cache inside the 3840 MiB limit. A fresh model sat at 2915 MiB; before the kill it was at 3806 MiB. `docker/model/run.sh` now passes `--cache-ram 0`. `make memory-report` passed that run anyway, because Docker clears `OOMKilled` on restart. It now fails when a service restarts or a process in it is killed for lack of memory during the observation. Re-measure under load with this fix before deciding §6 item 1; keep 3072/3840m until then.
+
 Shipped milestones on `v2`: v1 (#1–#6), M0, M1a, M1, M2 web/edge/model/providers/deploy, **M3 gate (#29, #30)**, **M4 sandbox (#31)**, **M5 workspace and files (#32; A5.4 green on Contabo)**. See `docs/AGENT.md` §3 for the full table.
 
 ## 4. Architecture already live
@@ -477,7 +479,7 @@ Restore drill on a **copy** only (`make restore-test FILE=…`), never over live
 
 ## 6. Open decisions for Roland
 
-1. **Model context vs memory.** Contabo runs `MODEL_CTX=3072` because 4096 OOM'd under `MODEL_MEM_LIMIT=3840m`. Options:
+1. **Model context vs memory.** Contabo runs `MODEL_CTX=3072` because 4096 OOM'd under `MODEL_MEM_LIMIT=3840m`. 3072 OOM'd too on 8 Oct, and the cause was llama-server's RAM prompt cache, now off (`--cache-ram 0`, see §1). The 4096 kill was probably the same cache. Measure again under load first; 4096 may then fit without touching the limit. Options:
    - (a) keep 3072 and change the repo default (`docker-compose.yml`, `.env.example`, `docs/AGENT.md`) to 3072 so repo and host agree;
    - (b) raise `MODEL_MEM_LIMIT` (needs Roland's OK and costs browser headroom);
    - (c) upgrade the VPS (e.g. ~12 GB) before M6.

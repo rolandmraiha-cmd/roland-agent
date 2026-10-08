@@ -320,6 +320,8 @@ Why these settings (each one measured; peak = allocated buffers, not just the pa
 
 Repacking stays on (it's what makes prompts ~11% faster than `--no-repack`); loading without mmap is what stops the double count. Older llama.cpp builds spell `--load-mode none` as `--no-mmap`.
 
+The server's RAM prompt cache is off (`--cache-ram 0`). It is not in the table above. Its default is 8192 MiB, and on Contabo (2026-10-08) it grew until the cgroup killed llama-server. Without it, the current conversation's context is still reused between turns (`cache_prompt`, `--cache-reuse`). Switching between conversations or jobs processes the prompt again.
+
 `--ctx-size` MUST NOT be raised above 6144 on this host, and flash attention and a quantised KV cache MUST NOT be turned on here, without re-measuring speed and memory. M2 acceptance records the real `docker stats` peak (A2.8). If the peak is above 3,600 MiB, set `MODEL_CTX=4096` rather than raising `MODEL_MEM_LIMIT`.
 
 Rules:

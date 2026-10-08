@@ -220,6 +220,9 @@ def test_supervisor_reloads_current_and_reaps_children(fixture, tmp_path):
     try:
         rows = wait_for_starts(process, log, 1, 3)
         assert str(root / "versions" / a / "model.gguf") in rows[0]["args"]
+        # No RAM prompt cache: its 8192 MiB default doesn't fit the model's memory limit.
+        args = rows[0]["args"]
+        assert args[args.index("--cache-ram") + 1] == "0"
         replacement = root / "next"
         replacement.symlink_to(f"versions/{b}")
         replacement.replace(root / "current")
