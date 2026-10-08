@@ -21,6 +21,12 @@ def action_prompt(tools: list[dict]) -> str:
     if not tools:
         return note + "No tools are available. Answer using the existing results."
     lines = ["Available tools (argument types; ? means optional):"]
+    if any(entry.get("function", entry).get("name") == "browser_snapshot" for entry in tools):
+        lines.append(
+            "Browser refs are labels from the latest snapshot, not element numbers. Match the "
+            "target's name and role; never guess. If it is missing, use the snapshot's next "
+            "start number or omit max_chars for a fuller view."
+        )
     for entry in tools:
         fn = entry.get("function", entry)
         params = fn.get("parameters", {})

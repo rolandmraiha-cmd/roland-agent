@@ -591,6 +591,32 @@ async def test_approved_click_runs_once_in_approved_mode(tmp_path, fake):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+async def test_rejection_ends_turn_before_other_targets_or_batch_side_effects(tmp_path, fake, batch):
+    first = [click("e5")]
+    if batch:
+        first.append(call("remember", json.dumps({"fact": "should never be stored"})))
+    agent = browser_agent(tmp_path, fake, [
+        ("", first), ("", [click("e4")]), "I stopped after your rejection.",
+    ])
+    events = await chat_and_decide(agent, reject(agent))
+    assert events[-1]["type"] == "done"
+    assert "stopped this turn" in events[-1]["reply"]
+    assert agent.brain.tools[-1] == [] and len(agent.brain.seen) == 2
+    assert fake.paths("/v1/click") == [] and fake.posts == []
+    assert [body.get("ref") for _, path, body in fake.calls if path == "/v1/describe"] == ["e5"]
+    assert agent.memory.facts() == []
+    assert len(agent.memory.approvals(status="all")) == 1
+    # Even a native multi-call response has a closing result for every unexecuted call.
+    results = [m for m in agent.brain.seen[-1] if m.get("role") == "tool"]
+    assert {m["tool_call_id"] for m in results} == {c.id for c in first}
+    # A separate user request can still be approved normally.
+    agent.brain = FakeBrain([("", [click("e5")]), "Submitted."])
+    await chat_and_decide(agent, approve(agent))
+    assert fake.posts == [f"{SITE}/order"]
+
+
+@pytest.mark.asyncio
 async def test_chat_text_never_approves_a_browser_action(tmp_path, fake):
     agent = browser_agent(tmp_path, fake, [("", [click("e5")]), "Waiting."])
     chat_id = agent.memory.new_chat()
@@ -670,6 +696,44 @@ async def test_snapshot_never_shows_sensitive_values(tmp_path, fake):
     ]}
     text = format_snapshot(leaky, 4000)
     assert SECRET not in text and 'value="roland@example.org"' in text
+
+
+def test_small_snapshot_keeps_all_form_control_refs_when_compacting_fits():
+    names = ["Customer name:", "Telephone:", "E-mail address:", "Small", "Medium", "Large",
+             "Bacon", "Extra Cheese", "Onion", "Mushroom", "Preferred delivery time:",
+             "Delivery instructions:", "Submit order"]
+    controls = [
+        {"ref": f"e{i}", "tag": "button" if i == 13 else "input", "name": name,
+         "type": "submit" if i == 13 else "text", "in_form": True,
+         "form_method": "post", "form_action": "https://httpbin.org/post",
+         "value": "Codex M6 Retest" if i == 1 else "", "depth": 2}
+        for i, name in enumerate(names, 1)
+    ]
+    answer = {"url": "https://httpbin.org/forms/post", "title": "", "text": "Pizza form " * 50,
+              "elements": [{"role": "form", "name": "Pizza", "depth": 0}, *controls]}
+    out = format_snapshot(answer, 500)
+    assert len(out) <= 500
+    assert "compact controls" in out
+    assert '[e13] button "Submit order" (submits)' in out
+    assert all(f"[e{i}] " in out for i in range(1, 14))
+    assert "Codex M6 Retest" not in out and "--- page text ---" not in out
+    detailed = format_snapshot(answer, 4000)
+    assert 'value="Codex M6 Retest"' in detailed and "POST httpbin.org/post" in detailed
+
+
+def test_compact_snapshot_preserves_sensitive_disabled_and_checked_states():
+    answer = {"url": SITE, "title": "", "text": "long page " * 100, "elements": [
+        *[{"role": "heading", "name": "A long heading " * 5} for _ in range(10)],
+        {"ref": "e1", "tag": "input", "type": "password", "name": "Password", "value": SECRET},
+        {"ref": "e2", "tag": "button", "type": "button", "name": "Next", "disabled": True},
+        {"ref": "e3", "tag": "input", "type": "checkbox", "name": "Remember", "checked": True},
+    ]}
+    out = format_snapshot(answer, 500)
+    assert len(out) <= 500 and "compact controls" in out
+    assert SECRET not in out
+    assert '[e1] textbox "Password" (sensitive, value hidden)' in out
+    assert '[e2] button "Next" (disabled)' in out
+    assert '[e3] checkbox "Remember" (checked)' in out
 
 
 def test_snapshot_keeps_room_for_elements_and_says_what_was_cut():

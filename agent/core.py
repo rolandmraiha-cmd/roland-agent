@@ -433,8 +433,15 @@ class Agent:
                     ],
                 }
             )
-            asked_again_after_reject = False
+            finish_after_reject = False
             for call in step.tool_calls:
+                if finish_after_reject:
+                    # Close native tool-call batches without executing any remaining action.
+                    messages.append({
+                        "role": "tool", "tool_call_id": call.id,
+                        "content": "Not done: this turn ended after Roland rejected an action.",
+                    })
+                    continue
                 tool_attempted = True
                 name = tool_name(call.name)
                 try:
@@ -520,7 +527,9 @@ class Agent:
                             # Do not retain write evidence after something may remove/change it.
                             written_paths.clear()
                         if result == f"Not done: {ALREADY_REJECTED}":
-                            asked_again_after_reject = True
+                            finish_after_reject = True
+                        if run is not None and run.rejected_actions:
+                            finish_after_reject = True
                         if result.startswith("Not done:"):
                             decision_label = "gated"
                         elif policy and policy.taints:
@@ -535,17 +544,16 @@ class Agent:
                     # Extra model-facing cap after strip_markers (§6.2.3).
                     result = clip(result, self.config.model_tool_output_chars)
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": result})
-            if asked_again_after_reject:
-                # The gate refused to ask Roland again for something he rejected. Without this,
-                # the model tends to keep trying until MAX_TOOL_STEPS.
+            if finish_after_reject:
+                # A human rejection ends tool use for this turn, including attempts at other refs.
                 async for event in self._force_text_reply(
                     messages,
                     reply,
                     instruction=(
-                        "Roland rejected that action, so it will not be asked again. Do not call "
-                        "tools again. Tell Roland in plain text what was not done."
+                        "Roland rejected an action. This turn is over: do not call tools or try "
+                        "another target. Tell Roland in plain text what was not done."
                     ),
-                    fallback="Not done: you rejected that action, so I didn't ask for it again.",
+                    fallback="Not done: you rejected an action, so I stopped this turn.",
                     finalize=finalize if check_save else None,
                 ):
                     yield event

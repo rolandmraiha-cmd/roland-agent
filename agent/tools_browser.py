@@ -601,6 +601,20 @@ def element_line(element: dict, page_url: str = "") -> str:
     return line
 
 
+def _compact_control_line(element: dict) -> str:
+    """Keep ref/name/role and safety states when a complete control list can fit."""
+    line = f'[{element["ref"]}] {_label(element)} "{_one_line(element.get("name"), 80)}"'
+    if policy_browser.is_sensitive(element):
+        line += " (sensitive, value hidden)"
+    if element.get("disabled"):
+        line += " (disabled)"
+    if element.get("checked") is True:
+        line += " (checked)"
+    if policy_browser.is_submit_control(element):
+        line += " (submits)"
+    return line
+
+
 def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
     """The page as text for a text-only model: one line per element, then the visible text.
     Values of sensitive fields are dropped here as well, whatever browserd sent. A long page
@@ -629,6 +643,14 @@ def format_snapshot(answer: dict, limit: int, start: int = 0) -> str:
         shown.append(line)
         used += len(line) + 1
     rest = len(lines) - start - len(shown)
+    if rest > 0 and start == 0:
+        # A small request can show only the first fields of an otherwise small form.
+        # Prefer every control's identity over a rich prefix that hides its submit button.
+        compact = [_compact_control_line(item) for item in elements
+                   if isinstance(item, dict) and valid_ref(item.get("ref"))]
+        compact_out = "\n".join(head + compact + ["[compact controls; details and page text omitted]"])
+        if compact and len(compact_out) <= limit:
+            return compact_out
     if start:
         head.append(f"(elements from number {start})")
     if rest > 0:
