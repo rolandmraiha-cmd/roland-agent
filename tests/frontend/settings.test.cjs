@@ -43,6 +43,38 @@ test('a dataset locking a vote during editing keeps buttons disabled',async()=>{
   f.context.window.m8.feedback(node,42,null);await node.children[0].children[0].onclick();
   assert.ok(node.children[0].children.slice(0,3).every(button=>button.disabled));
 });
+test('clearing a thumbs-up unpresses both thumbs without a refresh',async()=>{
+  const f=fixture(),node=f.element();f.context.window.m8.feedback(node,42,null);
+  const [up,down,clear,state]=node.children[0].children;await up.onclick();
+  assert.equal(up.attributes['aria-pressed'],'true');
+  await clear.onclick();
+  assert.equal(f.calls.at(-1).options.method,'DELETE');assert.equal(f.calls.at(-1).url,'/api/messages/42/feedback');
+  assert.equal(up.attributes['aria-pressed'],'false');assert.equal(down.attributes['aria-pressed'],'false');
+  assert.equal(state.textContent,'Vote cleared');
+});
+test('clearing a saved thumbs-down unpresses both thumbs and hides the editor',async()=>{
+  const f=fixture(),node=f.element();f.context.window.m8.feedback(node,42,{rating:-1,correction:'Four.'});
+  const [up,down,clear,state,editor,error]=node.children[0].children;
+  assert.equal(down.attributes['aria-pressed'],'true');editor.hidden=false;error.textContent='Earlier error';
+  await clear.onclick();
+  assert.equal(up.attributes['aria-pressed'],'false');assert.equal(down.attributes['aria-pressed'],'false');
+  assert.equal(editor.hidden,true);assert.equal(state.textContent,'Vote cleared');assert.equal(error.textContent,'');
+});
+test('a failed clear keeps the saved vote pressed and shows the error',async()=>{
+  const f=fixture(),node=f.element();f.context.window.m8.feedback(node,42,{rating:-1,correction:'Four.'});
+  const [up,down,clear,state,editor,error]=node.children[0].children;editor.hidden=false;
+  f.context.api=async()=>{throw new Error('Could not clear the vote');};
+  await clear.onclick();
+  assert.equal(down.attributes['aria-pressed'],'true');assert.equal(up.attributes['aria-pressed'],'false');
+  assert.equal(error.textContent,'Could not clear the vote');
+  assert.equal(editor.hidden,false);assert.notEqual(state.textContent,'Vote cleared');
+});
+test('a pressed thumb has its own visible style',()=>{
+  const css=fs.readFileSync(path.join(__dirname,'../../agent/web/static/style.css'),'utf8');
+  const rule=css.match(/\.feedback button\[aria-pressed="true"\]\s*\{([^}]*)\}/);
+  assert.ok(rule,'style.css must style .feedback button[aria-pressed="true"]');
+  assert.match(rule[1],/background:/);assert.match(rule[1],/border-color:/);
+});
 test('model promotion requires exact typed id and a second delayed click',async()=>{
   const f=fixture();f.context.api=async(url,options={})=>{
     f.calls.push({url,options});

@@ -172,6 +172,8 @@ a.button[hidden], .browser-screen[hidden] { display: none; }
 .training-bar { padding: .5rem 1rem; display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
 .training-bar[hidden] { display: none; }
 .feedback { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
+/* The saved vote must be visible: aria-pressed alone only tells a screen reader. */
+.feedback button[aria-pressed="true"] { background: var(--user); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .feedback-editor { flex-basis: 100%; display: grid; gap: .5rem; }
 .feedback-editor[hidden] { display: none; }
 .correction { width: 100%; min-height: 4rem; }
