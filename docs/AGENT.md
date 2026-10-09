@@ -1,8 +1,15 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-09. Deployed code baseline: **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): the pull, backup, rebuild and deploy succeeded and verification passed 13 / 0 / 1 with 3143 MiB available; schema version 3 and the base model as current are confirmed (§12). Before that the host ran **`e208bbd`** (#56; 13 / 0 / 1 with 3393 MiB available) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58; the five services are healthy and the screen relay `novnc` runs as a sixth. A6.4 isolation and A6.5 memory checks passed. The plain dummy form test passes live at `50767ec` (correctly labelled Submit order card, one approved submission, final answer); rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. **Roland confirmed M7 as done on 8 Oct 2026**: the browser screen works to the standard he wants and no password was kept; faults that turn up later are to be fixed as they come. M8 (#56) is merged and deployed with training off; its first live checks passed, the feedback follow-ups (#61: Clear vote and a visible chosen thumb; #62: the row under the answer and the capture label after a reload) are deployed at `7ef26de`, Roland found the feedback row working on the live page the same evening (§12), and the other page checks passed too, including a sign-in by Roland on the screen from his phone; **Roland accepted M8 on 9 Oct 2026** and put the training data setup and the phone problems off until after 2.0.0 (§4, §12). M9 release preparation is in progress on `v2-m9-release`; host acceptance and final release merge are pending. #63 also fixes a stale persona diff box; that fix is not deployed. Both parts of M7 are merged (#55, #57) and deployed, and Roland switched the screen on on Contabo on 8 Oct 2026 (off by default in the repo). The screen smoke test passed; his first sign-in attempt found three faults, fixed by #58 (merged and deployed); his second try went through from the plain request to the agent's answer. The password check found nothing (0 of 527 log lines). Verify the remote tip before coding.
+> Snapshot: 2026-10-09. Deployed code baseline: **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): the pull, backup, rebuild and deploy succeeded and verification passed 13 / 0 / 1 with 3143 MiB available; schema version 3 and the base model as current are confirmed (§12). Before that the host ran **`e208bbd`** (#56; 13 / 0 / 1 with 3393 MiB available) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58; the five services are healthy and the screen relay `novnc` runs as a sixth. A6.4 isolation and A6.5 memory checks passed. The plain dummy form test passes live at `50767ec` (correctly labelled Submit order card, one approved submission, final answer); rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. **Roland confirmed M7 as done on 8 Oct 2026**: the browser screen works to the standard he wants and no password was kept; faults that turn up later are to be fixed as they come. M8 (#56) is merged and deployed with training off; its first live checks passed, the feedback follow-ups (#61: Clear vote and a visible chosen thumb; #62: the row under the answer and the capture label after a reload) are deployed at `7ef26de`, Roland found the feedback row working on the live page the same evening (§12), and the other page checks passed too, including a sign-in by Roland on the screen from his phone; **Roland accepted M8 on 9 Oct 2026** and put the training data setup and the phone problems off until after 2.0.0 (§4, §12). M9 PR #64 is merged at `720c58c` under Roland's explicit authorization; Contabo acceptance and the final release merge remain pending. #63 also fixes a stale persona diff box; that fix is not deployed. Both parts of M7 are merged (#55, #57) and deployed, and Roland switched the screen on on Contabo on 8 Oct 2026 (off by default in the repo). The screen smoke test passed; his first sign-in attempt found three faults, fixed by #58 (merged and deployed); his second try went through from the plain request to the agent's answer. The password check found nothing (0 of 527 log lines). Verify the remote tip before coding.
 >
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
+
+> **M9 integration update, 9 Oct 2026:** PR #64 is squash-merged into `v2` at
+> **`720c58c`**, following Roland's explicit instruction to merge the candidate and delete
+> its branch. All seven candidate CI jobs passed at `afee233` (links in §12); actual `v2`
+> CI is required before acceptance. Roland will deploy/test and return results before any
+> `v2` → `main` merge. Production remains `7ef26de`; no Contabo action has been performed.
+> The merged branch is being removed by a temporary guarded maintenance job, removed next.
 
 ## 1. What we are building
 
@@ -201,10 +208,10 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 
 ## 8. Next coding order
 
-1. Review the M9 implementation/docs PR (`v2-m9-release` → `v2`); Roland reviews proposed
-   README/master text and Shipper leaves a COMMENT review before merge. External AI may
-   code under Roland's instruction; Grok parking does not block that work.
-2. After reviewed integration merge, all CI jobs must pass at the actual `v2` tip (A9.1).
+1. M9 implementation/docs PR #64 is merged at `720c58c` under Roland's explicit
+   9 October authorization. Candidate CI is green; remove its merged branch and keep NEXT
+   until host acceptance. This authorization does not merge `v2` into `main`.
+2. All CI jobs must pass at the actual `v2` tip (A9.1).
    Roland/Shipper deploys that tip, preserving 3072/3840m, six tool steps and training off.
 3. Run [RUNBOOK's M9 checklist](RUNBOOK.md#m9-server-acceptance-record-each-result): external
    ports/TLS/isolation/logs, backup restore copy, browser load, synthetic speed, soak/restart
@@ -310,7 +317,7 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 | External full TCP + UDP443 scan/TLS | No final release scan supplied | Pending dated external output |
 | Isolation/log rotation | Earlier `verify` 13/0/1, narrower checks at M8 | Pending stricter M9 verify |
 | Soak/restart state recovery | Prior automated persistence tests and M7 browser restart | Pending timed host watch/restart |
-| CI | Post-fix local: 1526 Python passes, 59 skips, 49 live cases excluded; 88 frontend passes. Initial PR GitHub unit/lint/frontend/no-hosted/edge and CPU training/swap passed; browser socket assertion found an IPv6 listener | Pending post-fix GitHub runs and merged `v2` URLs |
+| CI | Candidate `afee233`: all seven GitHub jobs passed; 1584 unit, 88 frontend, 49 live phase passes plus container assertions, actual restore and CPU training/GGUF swap. Local: 1526 Python passes, 59 skips, 49 live cases excluded | Actual merged `v2` CI required (A9.1) |
 | A9.3 | No final release PR reviewed/merged | Pending Shipper COMMENT and Roland merge |
 
 Local M9 validation passed all 39 focused release checks after review, including resolved
@@ -319,8 +326,9 @@ public-model refusal and disposable restore cleanup. Package metadata reports `2
 The full-suite skips comprise 58 missing-Docker-CLI cases and one existing hard-link
 case. The new live browser job found a LibVNCServer IPv6 wildcard listener despite `-no6`;
 `-rfbportv6 0` now disables that independent listener, and CI still checks the actual socket
-tables. Real-container restore/corrupt-input checks and CPU training/GGUF swap passed on
-the initial PR head. Fresh CI is required after these fixes; host acceptance stays pending.
+tables. All seven post-fix candidate jobs passed: [CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37965925710)
+and [CPU training/model swap](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37965925660).
+The merge is `720c58c` (#64); merged-tip CI and actual host acceptance stay separate requirements.
 
 Training capture/loop/trainer stay off. Phone mobile-data and intermittent screen-opening
 issues remain deferred, not claimed fixed. `.release-evidence/` is private and excluded from

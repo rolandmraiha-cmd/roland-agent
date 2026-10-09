@@ -4,6 +4,12 @@
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
+> **M9 integration update, 9 Oct 2026:** PR #64 is merged at **`720c58c`** under
+> Roland's explicit instruction to merge and delete `v2-m9-release`. Candidate CI passed
+> all seven jobs at `afee233`; actual integration-tip CI remains required. The next step
+> is Roland's Contabo deploy and tests, then reviewing any needed improvements before
+> `v2` → `main`. The branch is being removed by a temporary guarded job, removed next.
+
 
 ## 0. Who is who (read this first)
 
@@ -640,9 +646,10 @@ Status on 9 Oct 2026: steps 1 to 3 are done, the `migrate --check` in step 3 aft
 
 **Spec:** §10, §14, M9 in §12.
 
-#### Status: M9 release candidate prepared (9 Oct 2026)
+#### Status: M9 candidate merged; Contabo acceptance next (9 Oct 2026)
 
-Branch `v2-m9-release` starts at verified remote `v2` **`c9d9d3d`**. Prepared changes:
+PR #64 from `v2-m9-release` (based on `c9d9d3d`) is squash-merged at **`720c58c`**.
+Roland explicitly authorized the merge/branch deletion on 9 October. Implemented changes:
 
 - Source package `2.0.0`, unreleased changelog, rewritten README, full security baseline/
   threat/outbound matrix and operational RUNBOOK; existing accepted limits retained.
@@ -664,13 +671,17 @@ host operations for Roland/Shipper. Tests/CI and host evidence are tracked in AG
 final M9 acceptance is not inferred from an earlier milestone or the version bump. Post-fix
 local validation: 1526 Python passes, 59 skips (58 need the unavailable Docker CLI, one
 existing hard-link skip), 49 live cases excluded; 88 frontend passes, ruff/ShellCheck clean.
-All 39 focused release checks pass after resolved-configuration review. On the initial
-PR head, GitHub unit/lint/frontend/no-hosted/edge jobs and CPU training/GGUF swap passed;
-the new live browser job found the IPv6 listener. Fresh CI must pass after the fix.
+All 39 focused release checks pass after resolved-configuration review. All seven post-fix
+candidate CI jobs passed at `afee233`, including actual restore, live browser/screen/sandbox
+and CPU training/GGUF promotion/rollback. Actual merged `v2` CI is required for A9.1.
 
-Proposed README/master text awaits Roland's review before merge. Keep NEXT until final
-release acceptance; fold/archive its completed plan into AGENT at `v2` → `main`, preserving
-Roland's deferred work and decisions. Do not recreate M4/M8 handoff files.
+Roland authorized merging the implementation/docs candidate. He asked for deploy commands
+and tests, then review of any improvements before `v2` → `main`. Follow RUNBOOK: deploy,
+verify/schema/audit, copy-only restore, UI gate/files/browser/screen smoke, benchmark,
+600-second loaded watch, 1800-second soak, planned service restart and external TCP/UDP/TLS
+checks. Return results; fix newly found blockers in reviewed PRs to `v2`. Keep NEXT until
+final acceptance, then fold/archive completed material into AGENT while preserving deferred
+work. Do not recreate M4/M8 handoff files. Training stays off; host settings stay 3072/3840m.
 
 #### Goal
 

@@ -5,9 +5,11 @@ password-protected web page on a phone or computer. The model runs on the same s
 chats, files and browser snapshots are never sent to a hosted inference service.
 
 **2.0.0 release candidate.** M0–M8 are merged on `v2`; Roland accepted M6/M7 on 8 October
-and M8 on 9 October 2026. M9 prepares the release. Production still runs `7ef26de` with
-training off. The M9 server checklist, Shipper review and Roland's final `v2` → `main`
-merge are pending. A version number in the source does not mean those checks passed.
+and M8 on 9 October 2026. Roland authorized merging M9 PR #64 on 9 October; it is merged
+into `v2` at **`720c58c`**. All seven candidate CI jobs passed at `afee233`; CI on the
+updated integration tip is required too. Production still runs `7ef26de` with training off.
+Next: Roland deploys `v2`, completes the M9 server checklist, and supplies results for any
+improvements before the reviewed `v2` → `main` release merge. Host acceptance is pending.
 
 ## What it does
 
@@ -133,10 +135,13 @@ computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
 [Master status and rules](docs/AGENT.md) · [Remaining release work](docs/NEXT.md) ·
 [Technical specification](docs/v2-spec.md) · [Changelog](CHANGELOG.md).
 Every PR updates README, AGENT and NEXT for changed code, plans or deployment state;
-accepted security limits also update SECURITY. M9 documentation is proposed text for
-Roland's review; it is not deployed or finally approved by creating this branch. Local M9
+accepted security limits also update SECURITY. Roland authorized the implementation/docs
+merge on 9 October; actual deployment and final
+release acceptance are still pending. Local M9
 validation after the review fixes passed 1526 Python tests and all 88 frontend tests; 58 Docker CLI checks and
 one existing hard-link check were skipped, with 49 live cases excluded. Ruff/ShellCheck
 pass. Live CI caught an unexpected IPv6 listener in the screen server; M9 closes it and
 retains the strict socket check. Verification reads Compose's resolved feature settings.
-Fresh GitHub results after these fixes are tracked in AGENT before release.
+All seven candidate CI jobs passed after these fixes; see AGENT for evidence and the
+integration-tip acceptance requirement. A temporary guarded maintenance workflow is
+removing the merged `v2-m9-release` branch and will be removed immediately afterwards.
