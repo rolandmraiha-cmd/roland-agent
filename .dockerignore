@@ -10,3 +10,6 @@ data
 .git
 __pycache__
 .pytest_cache
+.release-evidence
+backups
+workspace

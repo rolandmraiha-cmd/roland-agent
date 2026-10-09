@@ -37,7 +37,8 @@ def test_x11vnc_listens_on_the_screen_network_only_and_never_without_a_password(
         return argv[argv.index(flag) + 1]
 
     assert value("-display") == ":99" and value("-rfbport") == "5900"
-    assert value("-listen") == "10.77.5.40" and "-no6" in argv  # one IPv4 address, nothing on IPv6
+    assert value("-listen") == "10.77.5.40" and "-no6" in argv
+    assert value("-rfbportv6") == "0"  # LibVNCServer has its own IPv6 listener, independent of -no6
     assert value("-allow") == "10.77.5.30"                      # only noVNC may connect
     assert value("-passwdfile") == "/tmp/vnc.passwd"
     # The spec's flags (§6.5), each present.

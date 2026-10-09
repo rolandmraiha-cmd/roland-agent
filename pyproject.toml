@@ -1,6 +1,6 @@
 [project]
 name = "roland-agent"
-version = "0.1.0"
+version = "2.0.0"
 description = "Roland's own always-on AI agent: web chat, memory, tools and background jobs with a local model."
 requires-python = ">=3.11"
 dependencies = [

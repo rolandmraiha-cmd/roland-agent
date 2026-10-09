@@ -44,6 +44,20 @@ jobs:
       - run: python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
       - run: pytest -q
 
+  no-hosted-llm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.lock
+      - run: python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
+      - run: pytest -q tests/test_no_hosted_llm.py
+
   frontend:
     runs-on: ubuntu-24.04
     steps:
@@ -68,3 +82,28 @@ jobs:
       - run: python -m pip install --require-hashes -r requirements.lock -r requirements-dev.lock
       - run: shellcheck tests/integration/*.sh deploy/*.sh docker/model/*.sh training/*.sh
       - run: make test-integration
+      - name: Restore a synthetic backup in the real core image
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python tests/integration/restore_probe.py
+
+  browser-integration:
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/v2' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Prepare disposable fixture configuration
+        run: |
+          cp .env.example .env
+          echo 'WORKSPACE_HOST_DIR=./.ci-workspace' >> .env
+          sudo env APPLY=1 bash deploy/secrets.sh
+      - run: sudo make test-browser
+      - name: Run sandbox cases against the same real services
+        run: |
+          sudo docker compose -f docker-compose.yml -f docker-compose.test.yml up -d --wait sandbox fixture-web
+          sudo docker compose -f docker-compose.yml -f docker-compose.test.yml run --rm --no-deps tester \
+            python -m pytest -m integration -q -p no:cacheprovider tests/integration/test_sandbox_live.py
+      - name: Remove the disposable stack
+        if: always()
+        run: sudo docker compose -f docker-compose.yml -f docker-compose.test.yml --profile browser --profile screen down -v --remove-orphans

@@ -36,14 +36,15 @@ RESTART_TIMEOUT_S = 6.0
 def command(display: str, listen: str, peers: tuple[str, ...]) -> list[str]:
     """x11vnc's command line. Checked flag by flag against x11vnc 0.9.16 (the image's build).
 
-    The spec's flags, plus four that only close things: -no6 (this build also listens on
-    IPv6 unless told not to), -allow (only noVNC's address may connect), -safer and -nocmds
-    (no remote control, no reverse connections, no external commands) and -norc (no settings
-    file from /tmp). Never here: -nopw, -localhost, -debug_keyboard, -passwd on the command line.
+    -no6 disables x11vnc's own IPv6 listener; -rfbportv6 0 also disables LibVNCServer's
+    independent IPv6 listener. -allow permits only noVNC's address; -safer and -nocmds
+    close remote control, reverse connections and external commands; -norc prevents a
+    settings file from /tmp. Never here: -nopw, -localhost, -debug_keyboard, -passwd.
     """
     return [
         "x11vnc", "-display", display,
         "-rfbport", str(VNC_PORT), "-listen", listen, "-no6",
+        "-rfbportv6", "0",
         "-allow", ",".join(peers),
         "-forever", "-shared",
         "-passwdfile", str(PASSWD_FILE),

@@ -153,6 +153,12 @@ if is_running browser; then
 else
     printf 'SKIP sandbox to browserd: browser service is not running\n'
 fi
+if target_up model; then
+    must_fail "curl model from sandbox" curl -fsS --connect-timeout 3 http://10.77.6.60:8080/health
+fi
+if is_running trainer; then
+    must_fail "curl trainer from sandbox" curl -fsS --connect-timeout 3 http://10.77.7.70:7200/healthz
+fi
 # The screen server (M7) listens here while the screen is switched on. The sandbox is on
 # neither screen network, so it must not get to it or to the relay in front of it.
 must_fail "curl x11vnc" curl -fsS --connect-timeout 3 http://10.77.5.40:5900
@@ -178,6 +184,9 @@ if is_running browser; then
     browser_must_fail "browser to sandboxd" 10.77.3.20 7000
     if target_up model; then
         browser_must_fail "browser to model" 10.77.6.60 8080
+    fi
+    if is_running trainer; then
+        browser_must_fail "browser to trainer" 10.77.7.70 7200
     fi
     # The browser shares the vnc network with the relay, but connections only go one way:
     # the relay listens on its other address only, and the firewall drops browser -> relay.

@@ -1,68 +1,142 @@
 # roland-agent
 
-Roland's private, always-on AI agent: password-protected web chat, a self-hosted open-weight model only (no hosted LLM), tools with a code-enforced approval gate, a sandboxed terminal, workspace files, and approved background jobs.
+Roland's single-user assistant, running all day on a Contabo VPS. Chat through its own
+password-protected web page on a phone or computer. The model runs on the same server;
+chats, files and browser snapshots are never sent to a hosted inference service.
 
-**Live:** https://37-60-226-214.sslip.io/ (Contabo VPS, Ubuntu 24.04).
-**Branch:** `v2` is the integration branch; deployed code baseline is `7ef26de` (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026, about 17:52 Helsinki time): the pull, backup, rebuild and deploy succeeded and `make verify` ended 13 pass / 0 fail / 1 skip with 3143 MiB available. Before that the host ran `e208bbd` (#56; 13 / 0 / 1 with 3393 MiB available) and `2de54f4` (#58, 8 Oct 2026; 13 / 0 / 1 with 3488 MiB available). M6 browser is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test now passes live: a correctly labelled Submit order card, one approved submission and a final answer. Rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed too. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. **Roland confirmed M7 as done on 8 Oct 2026**: the browser screen works to the standard he wants and no password was kept; faults that turn up later are to be fixed as they come. M8 (persona and training, #56) is merged and deployed with training off; its first live checks passed, two feedback follow-ups (#61, #62) are deployed too and Roland found the feedback row working on the live page, and **Roland accepted M8 on 9 Oct 2026** (see below). Both parts of M7 are merged and deployed, and Roland switched the screen on on Contabo on 8 Oct 2026 (the repo default stays off). The screen smoke test passed there. Roland's first sign-in attempt found three faults, fixed in #58 (merged and deployed). On his second try (22:37–22:39 Helsinki time, after #58 was deployed) the plain "log in to https://www.kotipizza.fi/" produced the sign-in card, he signed in on the screen and pressed I'm done, the agent was handed the page and answered "Signed in successfully. The page shows the Kotipizza homepage with available menu items and order options.", and Close took him back to the chat. Asked afterwards whose name the page shows, the agent took a snapshot and answered "Roland". The password he typed is in none of the 527 log lines of browser, novnc, core and caddy, and neither is the e-mail address he signed in with. He then confirmed the milestone. Confirm the remote tip before coding. `main` is untouched until M9.
+**2.0.0 release candidate.** M0–M8 are merged on `v2`; Roland accepted M6/M7 on 8 October
+and M8 on 9 October 2026. M9 prepares the release. Production still runs `7ef26de` with
+training off. The M9 server checklist, Shipper review and Roland's final `v2` → `main`
+merge are pending. A version number in the source does not mean those checks passed.
 
-**Not the same as Grok:** this app is Contabo-hosted **roland-agent**. Roland also has **Grok Bot** teammates (Crew Chief, Code Builder, Code Shipper, …) in a separate chat; they are not this runtime. If those Grok bots are parked, an outside AI Roland gave this repo to may still work — see [docs/NEXT.md](docs/NEXT.md) §0.
+## What it does
 
-## What works now
+- Streams replies and keeps chats, facts and approved scheduled jobs in SQLite.
+- Runs shell commands in a separate container and offers upload, download and file trash/restore.
+- Drives a persistent Chromium browser, reads pages, fills ordinary fields and takes screenshots.
+- Shows that same browser through a private screen for watching or taking control.
+  Roland types site passwords himself; the agent pauses during sign-in.
+- Offers persona versions and feedback. An opt-in pipeline can scrub labelled examples,
+  train on a separate machine, evaluate a candidate and request a model change.
 
-- Web chat with SQLite memory, jobs, hash-chained audit log and local backups.
-- Docker stack: **Caddy** (only public ports 80/443) → **core** → isolated **llama.cpp** model (Qwen3-4B Q4_K_M on CPU) and **sandbox**.
-- **M3 approval gate:** risky tool calls wait for Approve/Reject in the UI; untrusted content taints the run; chat text never approves.
-- **M4 sandbox:** `run_shell` runs in an isolated `sandboxd` container, not in core.
-- **M5 workspace and files:** Files UI and tools (list, preview, download, move, delete to trash, restore).
-- **M6 browser:** a persistent Chromium in its own container, on as Roland's Contabo trial with Chromium's sandbox enabled. Navigation, rejection and an approved dummy form submission passed live, also from Roland's phone; Roland accepted M6 on 8 Oct 2026.
-- On Contabo the model stays at `MODEL_CTX=3072` / `MODEL_MEM_LIMIT=3840m`. The OOM at 3072 came from llama-server's RAM prompt cache, now disabled (`--cache-ram 0`, #43). The browser-enabled memory watch passed: model peak 3084.29 MiB, browser peak 822.80 MiB, minimum host available 3553 MiB. The context decision stays open. Small CPU model: expect slow, modest answers.
-- Fixes #45–#47 are deployed: preserve length-limited replies, require the confirming tap 1–5 s later, and suppress repeat cards for an action rejected in the same run. The signed-in smoke confirmed double-click protection, rejection without submission, and a separately approved dummy submission.
+The UI uses ordinary HTML/CSS/JavaScript, without a frontend build toolchain. Services,
+state, internal networks, limits, secrets and backups are managed through Docker Compose.
 
-## What does not work yet
+## Safety in plain words
 
-The 2.0.0 release (M9) is next; M8 is accepted. Put off by Roland until after 2.0.0: the training data setup, including where that data is saved, and the phone problems (the browser screen not wanting to open on the phone; the agent opening only on his wifi, not on mobile data). The persona and training pipeline (#56) is deployed; capture, scheduling and the trainer stay off until Roland chooses to enable them after host smoke. The live screen and human sign-in (M7) work and are switched on on Contabo; Roland accepted them on 8 Oct 2026. See [docs/NEXT.md](docs/NEXT.md).
+The model's suggestions are untrusted. Code decides what may run. Consequential actions
+need a specific approval card; payments, messages, public posts and deletion need a second
+tap. Writing “yes” in chat never approves anything. Reading external content escalates
+approval requirements for commands, memory changes and file overwrites. Scheduled jobs
+cannot approve their own actions or ask for a sign-in.
 
-**M8 on the server (accepted by Roland on 9 Oct 2026):** M8 (#56) and its two feedback follow-ups (#61, #62) are deployed at `7ef26de` with training off. In the first live session, on the `e208bbd` build, a thumbs-up, a thumbs-down and a text correction were saved and were still there after a refresh, the chat said "Capture is off / Not captured" throughout, and persona edit, preview and save worked (a test instruction with an example produced the answer "M8TEST 4" and was removed again). Two faults in the feedback row are fixed in #61, which is deployed and **works on the live page (Roland's check, 9 Oct 2026)**: Clear vote removed the saved vote but left the old thumb marked as pressed until a refresh, and a chosen thumb looked the same as the other one, because the mark was only readable by a screen reader. The chosen thumb is now filled, and both are empty straight after Clear vote. A second follow-up (#62), deployed with it, puts the thumbs and Clear vote on their own line under the answer (they sat beside it and stacked in a narrow column next to a long answer or on a phone) and keeps the "Included for training review" label on a captured vote after a reload (it read "Not captured"; this only shows once capture is on). Confirmed on the server after the `7ef26de` deploy: schema version 3, and the base model as the current one with no previous model. Checked by Roland on the live page the same evening, in a desktop browser: the chosen thumb is filled and stays filled after a hard refresh, Clear vote empties both thumbs at once, and the row sits under the answer. Also passed that evening on the same build: persona restore (and back to blank standing instructions), the safety rules shown after the editable text with no field to change them, the database count after voting with capture off (2 votes, 0 training examples), a chat reloaded while the agent was still answering, a long answer at phone width, the screen's Watch, Take control and Hand back, and login and logout on Roland's phone. One small fault seen in the persona test, the diff box keeping the old diff after a restore, is fixed in #63 and goes out with the next deploy. Roland then signed in to a site on the screen from his phone and reports that sign-in and the screen still work. **Roland accepted M8 on 9 Oct 2026.** Roland put two things off until the whole agent is done, that is until after 2.0.0 (M9): the training data setup, including where that data is saved; and the phone problems (the browser screen not wanting to open on the phone, and the agent not opening on mobile data, only on his wifi). Capture, the weekly loop and the trainer stay off until then. The list is in [docs/NEXT.md](docs/NEXT.md) under M8, "Host acceptance record".
+Only Caddy publishes ports. Core, shell, browser, screen relay and model have separate
+containers and networks. The model has no internet connection. Site cookies stay in the
+browser's own volume; screenshots go to Roland's UI rather than the text-only model.
 
-**M8 PR #56, approved for integration (8 Oct 2026):** persona versions, feedback, scrubbed datasets, separate-GPU SFT/DPO, evaluation, human promotion/rollback, optional trainer and a paused system job are implemented. The branch is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59); all five GitHub checks passed on code head `c9a7ef1`, including 1,543 unit tests, 81 frontend tests, edge/isolation and the actual CPU training/model-swap pipeline. Roland then requested the merge and branch removal. CPU evaluation includes corrected handling of streamed schema errors and a tiny model with a 4096-token context and complete byte fallback that can tokenize the public suite. Its generation prefix has no artificial leading space, so pinned grammar initialization can consume it intact. The CPU workflow sets the checkout import path for its standalone probe. The CPU swap probe exercises authenticated API import/promotion/rollback, refusal without a human token, and reload without a container restart. [Model runbook](docs/MODEL.md) · [Training instructions](training/README.md). Training stays off. Roland accepted M7 on 8 Oct 2026. M8 has since been deployed with training off (the paragraph above); finish its host acceptance and confirm M7 still works before M9.
+There are limits: a misleading site can fool a small model or hide consequences behind a
+GET link or a background request. Roland accepted background POSTs on 8 October. A host
+compromise can expose the stored data and browser profile. Read [security details](docs/SECURITY.md)
+before relying on the agent for a consequential task. The approval card needs human judgment.
 
-**M6 is accepted.** **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. The memory watch reports `A6.5 PASS`. Normal verification after rebuilding `50767ec` reports **11 pass / 0 fail / 1 skip**, including every A6.4 isolation probe, with 3730 MiB available at the idle check. The skip is the human login/chat/approval checklist. Signed-in retests passed ordinary chat, existing-file answers, actual requested-note contents, missing-file handling, browser navigation, double-click protection and phone-sized controls (375×812 checked again at `7b09b90`). At `7b09b90` a rejected card ended the turn with one final answer and nothing submitted. At `50767ec` the plain “fill and submit” request produced a correctly labelled Submit order card and one approved submission. Roland then repeated the plain request on his phone after a fresh login (8 Oct 2026, about 17:51–17:53 Helsinki time): the open-page card and the Submit order card were approved there, the agent reported the submission, and the Browser tab showed the echo page with `custname` “Claude M6 Retest”. Repo browser defaults stay off; the host has `COMPOSE_PROFILES=browser` and `BROWSER_ENABLED=true`. M7 may proceed; its flags (`SCREEN_ENABLED`, the `novnc` service, x11vnc, `request_signin`) stay off in production until M7 is merged and smoked. Snapshot: `pre-m6-deploy-2026-10-08`. Roland runs host commands himself; deploy uses `sudo env APPLY=1 make deploy` because of uid-1000 secret permissions.
+## Model and speed
 
-**M7, screen and sign-in (accepted by Roland on 8 Oct 2026; on on Contabo, off by default in the repo):** Roland can watch the agent's browser or take control of it from his own browser or phone, and sign in to sites himself; the agent asks for that with `request_signin` and waits for the I'm done button. Part 1 (#55, merged) is the core side: screen sessions, the sign-in flow, the screen page and the routes Caddy asks. Part 2 (#57, merged) adds the services: x11vnc in the browser container (two passwords, one that may only watch), the `novnc` relay container (websockify 0.13.0 and noVNC 1.7.0, both pinned by hash), the two VNC secrets, and the compose, Caddy, preflight and verify changes. The repo default is off. Turning it on takes `SCREEN_ENABLED=true` and `COMPOSE_PROFILES=browser,screen` in `.env`; the steps are in [docs/NEXT.md](docs/NEXT.md) under M7, "Contabo deploy notes". Core mounts the two VNC secret files from now on, so run `sudo env APPLY=1 make secrets` once before the next deploy (it creates what is missing and changes nothing that exists). Tested off the server against the real services in Docker: the live browser script (`make test-browser`: 34 browser tests, 7 screen tests, container and isolation checks) and a real browser going through Caddy, core, noVNC and x11vnc to the agent's Chromium, phone and desktop width, with a scripted stand-in for the model. On Contabo (8 Oct 2026) it was deployed at `4d0f703` with the screen off (`make verify` 12 / 0 / 2, 3806 MiB available) and then switched on (13 / 0 / 1, 3746 MiB available). The screen smoke test passed there in a logged-in browser: Watch cannot click or type, Take control locks the agent out, Hand back and Switch to watch return the browser, and the screen routes close when the session ends. Roland's first sign-in attempt the same evening found three faults. The model refused a plain "log in to this site" without calling a tool. After I'm done it answered "successfully signed in" without looking, although he had not signed in. And the screen page's Close button shut the tab that held the chat. The sign-in follow-up fixes all three: a line next to the tool list says what to do with a sign-in request, the agent is handed the page as it is after I'm done and must go by it, and Close goes back to the chat when the screen was loaded in the chat's own tab. The wording was tried against the same model file with canned browser results before it was sent (docs/NEXT.md, M7, "Found on the server"). On his second try (22:37–22:39 Helsinki time, after #58 was deployed) the plain "log in to https://www.kotipizza.fi/" produced the sign-in card, he signed in on the screen and pressed I'm done, the agent was handed the page and answered "Signed in successfully. The page shows the Kotipizza homepage with available menu items and order options.", and Close took him back to the chat. Back in the chat he saw "The agent is still answering here… reopen the chat in a moment": a chat opened while the agent is still answering did not refresh. It now looks again every three seconds and redraws when the answer or a card for Roland is there. Asked afterwards whose name the page shows, the agent took a snapshot and answered "Roland". The password he typed is in none of the 527 log lines of browser, novnc, core and caddy, and neither is the e-mail address he signed in with. **Roland confirmed M7 as done on 8 Oct 2026**: the browser screen works to the standard he wants and no password was kept; faults that turn up later are to be fixed as they come. Known and left as they are: the sign-in was done on his PC, not the phone (the phone could not look up the server's name on mobile data that evening); the agent opens the address it is given and does not look for the site's sign-in form; a new tab and the address bar's suggestion box show "This page is blocked"; and a form that posts into a new tab leaves a blank tab behind.
+Default: **Qwen3-4B-Instruct-2507**, Apache-2.0, Unsloth Q4_K_M GGUF (about 2.5 GB),
+served by the pinned llama.cpp image on CPU. Thinking is off by default. It is a small model
+with modest reasoning and tool accuracy; a multi-step task may take minutes.
 
-**Tool-completion follow-up (#51, deployed):** grammar-mode prompts list the offered tools and JSON action format within the existing context budget. Repeated successful file/page reads finish using the existing result; actions invalidate the read cache. English file-save acknowledgements require successful writes in the current run before display/history. One bounded correction is allowed before any tool attempt through the normal loop and approval gate. Live retest read the 87-byte fixture once and answered `PINE-4827`; one write created the requested 17-byte note, independently downloaded and verified as `REQUESTED_NOTE_OK`. `MAX_TOOL_STEPS=6`, context and memory limits stay unchanged.
+Contabo uses **3072 context tokens, 3 threads and a 3840 MiB model cap**. Keep these host
+settings. Repo defaults still specify 4096 context tokens; that higher setting has not been
+accepted on this VPS. RAM prompt caching is disabled. The previous browser-task watch
+recorded model peak 3084.29 MiB, browser peak 822.80 MiB and minimum host available 3553 MiB,
+without observed restarts or OOM kills (8 October). These are earlier M6 measurements.
 
-**Snapshot/rejection follow-up (#52, deployed):** when the model asks for a smaller snapshot than the full size (a small `max_chars`) and every control fits in short form, the snapshot lists all refs, roles and names instead of a rich prefix that hides the submit button. Sensitive, disabled and checked states stay visible; values and link targets are left out, page text is added only if room remains, and the closing note says to omit `max_chars` for the full page. A full-size snapshot is unchanged: it keeps link targets, page text and piece-by-piece reading with `start`, because there is no larger view to go back to. Grammar prompts explain refs and how to read missing targets. The first human rejection ends tools for the turn, closes remaining native batch results without executing them, and requests a final explanation; a different or revised action also waits for a new user message. No approval rule or resource cap is relaxed. Live retest at `7b09b90` (8 Oct 2026, signed-in session): asked to fill and submit the httpbin.org dummy form, the model requested `browser_snapshot` with `max_chars` 200, received the 500-character minimum showing 8 of 13 controls with a “5 more elements not shown” note, typed the dummy name, then asked to click “Telephone:”. That card was rejected: the turn ended with one truthful final answer, no second card, an unlocked composer and nothing submitted. A follow-up message in the same chat was answered from the chat history without a tool call. In a new chat that named the Submit order button and asked for the whole page, the model took a full-size snapshot and asked for “Click “Submit order” (button) on httpbin.org”; after the two-tap approval the audit recorded one click that navigated to `https://httpbin.org/post`, the echo page showed `custname` “Claude M6 Retest”, and the model reported the submission.
+M9 prompt/generation tokens per second and time to first token have **not been measured on
+Contabo yet**. Run the fixed public-prompt benchmark and loaded browser watch in the
+[runbook](docs/RUNBOOK.md), then record results in [master status](docs/AGENT.md).
 
-**Snapshot-minimum follow-up (#53, deployed):** a `max_chars` below 1500 is raised to 1500 (or to the full size when `MODEL_TOOL_OUTPUT_CHARS` makes that smaller; 500 stays the absolute floor). At 500 characters neither the rich list nor the short list could show the 13-control form: the short list needs 558 characters there because browserd marks the four topping tick boxes sensitive (their field name `topping` contains `pin`). At 1500 the whole form is listed with `[e13] button "Submit order" (submits form POST httpbin.org/post)` and its page text. Tests replay the exact live snapshot at 500, the same request raised to 1500, the limit table, and the short view on a 31-control form. Full-size snapshots, approval policies and resource caps are unchanged. Live retest at `50767ec` (8 Oct 2026, signed-in session, new chat, the plain request with no hints): the model asked for `browser_snapshot` with `max_chars` 1000, which was raised to 1500 and listed the whole form; it typed the dummy name and asked for “Click “Submit order” (button) on httpbin.org”. Roland approved that card himself with two taps. The audit recorded one click that navigated to `https://httpbin.org/post`, the echo page showed `custname` “Claude M6 Retest”, and the model reported the submission.
+## Training stays off for this release
 
-**Verification follow-up (#50, verified on Contabo):** scripts close stdin and disable Docker input attachment for sandbox/browser probes. Normal verification now finishes **11 / 0 / 1** without terminal redirection. The earlier killed probe (137) was a verifier input problem, not evidence of an OOM.
+Capture, weekly training, the trainer endpoint and the `training` profile stay off through
+2.0.0, by Roland's decision on 9 October. Training data storage/backup policy, capture/export
+smoke and a paid GPU run wait until afterwards. The pipeline has automated CPU and
+model-switch tests; it has not trained on Roland's data on the host.
 
-**Completion review fixes:** web fetches also use the repeated-read guard. Save checks recognise acknowledgements after introductory words, arbitrary filename extensions and names without extensions. Generic “saved” needs exact evidence for every requested output path; input files and honest partial/failure reports remain distinct. These checks apply to recognised file-write requests; reading file contents and writing ordinary chat text do not require a file save.
+Training uses labelled, scrubbed examples and seed replay on a separate machine. Import
+checks integrity and evaluation against the current model. Import and scheduling never
+switch the serving model. Roland must review and approve every promotion; failed switch
+checks restore the previous version. Pattern scrubbing cannot remove every identifying
+sentence. See [model operations](docs/MODEL.md) and [GPU instructions](training/README.md).
 
-**Merged follow-ups:** #48–#53 landed in `v2` with merge commits. The #48–#51 branches were removed; `v2-m6-live-retest` (#52) and `v2-m6-snapshot-floor` (#53) are merged and can be removed. That docs update started from `50767ec`. The M8 feedback follow-up (#61) starts from `e208bbd` and targets `v2`; #62 is built on top of #61.
+## Deploy and operate
 
-## Develop
+Follow [docs/RUNBOOK.md](docs/RUNBOOK.md) for a fresh install, an update, backup/restore,
+model install, promotion/rollback, domain switch and the release acceptance checklist.
+Host changes require `APPLY=1`. M9 does not change production flags, DNS, memory limits
+or the current model. Known phone screen-opening and mobile-data/DNS problems remain
+deferred until after 2.0.0; they are recorded in [the handoff](docs/NEXT.md).
+
+## Develop without Docker
+
+Use Python 3.12 and Node 20 or newer. Start a local llama.cpp server separately on
+`127.0.0.1:8080` with your owned GGUF. No model is needed for unit tests.
 
 ```bash
-git clone --branch v2 https://github.com/rolandmraiha-cmd/roland-agent.git && cd roland-agent
-python3.12 -m venv .venv && . .venv/bin/activate
+git clone --branch v2 https://github.com/rolandmraiha-cmd/roland-agent.git
+cd roland-agent
+python3.12 -m venv .venv
+. .venv/bin/activate
 pip install --require-hashes -r requirements.lock -r requirements-dev.lock
 pip install --no-deps --no-build-isolation --no-index -e .
-cp .env.example .env            # local HTTP: COOKIE_SECURE=false
+cp .env.example .env
 python -m agent hash-password
-make lint && make test          # unit + frontend; no model needed
-make test-integration           # Docker edge/model fixtures
-make test-browser               # the real browser against a test site, in Docker (not on the server)
 ```
 
-Never set `ALLOW_SHELL=true` on a personal computer. Host-mutating `make` targets require `APPLY=1`.
+Put the hash printed by that command in your private `.env`, then set:
 
-## Docs
+```dotenv
+AGENT_ENV=development
+AGENT_HOST=localhost
+ALLOWED_HOSTS=localhost,127.0.0.1
+HOST=127.0.0.1
+PORT=8000
+COOKIE_SECURE=false
+MODEL_BASE_URL=http://127.0.0.1:8080
+DATA_DIR=./data
+WORKSPACE_DIR=./workspace
+BACKUP_DIR=./backups
+TRAINING_DATA_DIR=./data/training
+ALLOW_SHELL=false
+SHELL_BACKEND=local
+BROWSER_ENABLED=false
+SCREEN_ENABLED=false
+TRAINING_CAPTURE=false
+TRAINING_LOOP_ENABLED=false
+TRAINER_URL=
+COMPOSE_PROFILES=
+```
 
-- [docs/AGENT.md](docs/AGENT.md): living master status, rules, commands, host facts.
-- [docs/NEXT.md](docs/NEXT.md): implementation plan for M6 → M9.
-- [docs/v2-spec.md](docs/v2-spec.md): detailed target design (not an inventory of shipped code).
-- [docs/SECURITY.md](docs/SECURITY.md): accepted security limits so far.
+```bash
+python -m agent                 # open http://localhost:8000
+make lint
+make test                      # Python + frontend; Docker checks need its CLI
+make test-integration          # disposable GitHub CI edge/model/relay fixtures
+make test-browser              # real browser + screen against a local fixture site
+```
 
-**Keep them updated:** every PR, every edit on that branch, and every squash merge must update `docs/AGENT.md`, `docs/NEXT.md`, and this README in that same PR before merge, whenever code, deploy state, plans, or instructions change. Status, instructions, and plans stay in these files, not only in chat. Do not squash-merge a PR whose README or instruction docs are stale. `docs/SECURITY.md` updates in that same PR when an accepted limit changes. After a squash merge, the tip line in this README and in `docs/AGENT.md` must name the new `v2` tip.
+`SHELL_BACKEND=local` runs as your own user when enabled, so leave shell off on a personal
+computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
+`no-hosted-llm`, edge/model/restore, live browser/screen/sandbox and CPU training/model swap.
+
+## Project records
+
+[Master status and rules](docs/AGENT.md) · [Remaining release work](docs/NEXT.md) ·
+[Technical specification](docs/v2-spec.md) · [Changelog](CHANGELOG.md).
+Every PR updates README, AGENT and NEXT for changed code, plans or deployment state;
+accepted security limits also update SECURITY. M9 documentation is proposed text for
+Roland's review; it is not deployed or finally approved by creating this branch. Local M9
+validation after the review fixes passed 1526 Python tests and all 88 frontend tests; 58 Docker CLI checks and
+one existing hard-link check were skipped, with 49 live cases excluded. Ruff/ShellCheck
+pass. Live CI caught an unexpected IPv6 listener in the screen server; M9 closes it and
+retains the strict socket check. Verification reads Compose's resolved feature settings.
+Fresh GitHub results after these fixes are tracked in AGENT before release.

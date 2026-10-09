@@ -185,7 +185,7 @@ for folder in pathlib.Path("/proc").iterdir():
         for flag in (" -nopw", " -passwd ", " -debug_keyboard", " -localhost", " -yesremote"):
             if flag in command + " ":
                 problems.append(f"x11vnc runs with{flag}")
-        for flag in (" -listen 10.77.5.40 ", " -no6 ", " -safer ", " -nocmds ", " -quiet", " -passwdfile /tmp/vnc.passwd "):
+        for flag in (" -listen 10.77.5.40 ", " -no6 ", " -rfbportv6 0 ", " -safer ", " -nocmds ", " -quiet", " -passwdfile /tmp/vnc.passwd "):
             if flag not in command + " ":
                 problems.append(f"x11vnc runs without{flag}")
     if "/chrome " in command or command.rstrip().endswith("/chrome"):

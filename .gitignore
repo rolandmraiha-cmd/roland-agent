@@ -15,3 +15,6 @@ __pycache__/
 build/
 dist/
 .deploy/
+.release-evidence/
+backups/
+workspace/
