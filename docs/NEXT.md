@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 9 Oct 2026. Deployed code baseline **`e208bbd`** (#56, M8 with training off; Roland's deployment log, as recorded in the handoff comment on #56): 13 / 0 / 1 with 3393 MiB available. Before that the host ran **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59) and M8 (#56) are merged and deployed at `e208bbd`, with training off. The feedback follow-up (#61) clears the pressed thumb and makes the chosen vote visible; Roland deploys it. Next: finish M8 host acceptance (M8, "Host acceptance in progress") before M9.**
+> Snapshot: 9 Oct 2026. Deployed code baseline **`e208bbd`** (#56, M8 with training off; Roland's deployment log, as recorded in the handoff comment on #56): 13 / 0 / 1 with 3393 MiB available. Before that the host ran **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59) and M8 (#56) are merged and deployed at `e208bbd`, with training off. Two feedback follow-ups are merged and wait for Roland's deploy: #61 clears the pressed thumb and makes the chosen vote visible; #62 puts the feedback row under the answer and keeps the capture label after a reload. Next: finish M8 host acceptance (M8, "Host acceptance in progress") before M9.**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -90,7 +90,7 @@ Before writing any code:
 | Item | Value |
 |---|---|
 | Repository | https://github.com/rolandmraiha-cmd/roland-agent |
-| Integration branch | `v2`; Contabo checkout and app image **`e208bbd`** (#56; Roland's deployment log, as recorded in the handoff comment on #56, 9 Oct 2026). M6, fixes #43–#53, M7 (#55, #57, #58), the chat refresh (#59) and M8 (#56, training off) are live; verification passed normally (13 / 0 / 1). The feedback follow-up (#61) is merged and not deployed. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
+| Integration branch | `v2`; Contabo checkout and app image **`e208bbd`** (#56; Roland's deployment log, as recorded in the handoff comment on #56, 9 Oct 2026). M6, fixes #43–#53, M7 (#55, #57, #58), the chat refresh (#59) and M8 (#56, training off) are live; verification passed normally (13 / 0 / 1). The feedback follow-ups (#61, #62) are merged and not deployed. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
 | `main` | Untouched since v1; do not push until M9 |
 | Live URL | https://37-60-226-214.sslip.io/ |
 | Host | Contabo VPS, Ubuntu 24.04, ~4 vCPU / ~8 GB RAM, IPv4 `37.60.226.214` |
@@ -531,20 +531,16 @@ Source for points 1 to 3: the handoff comment on #56 (Roland's deployment log an
 2. **Passed live.** A thumbs-up, a thumbs-down and a text correction are saved and kept after a refresh. The chat says "Capture is off / Not captured". Persona edit, preview and save work. The serving model is still `qwen3-4b-q4km-base` with no previous model.
 3. **Found live.** Clear vote removed the saved vote but left the old thumb at `aria-pressed="true"` until a refresh.
 4. **Feedback follow-up (#61, `v2-m8-clear-vote-fix`).** A successful clear sets both thumbs to unpressed and removes an old error line; a failed clear keeps the vote and shows the error. A pressed thumb also had no style of its own, so a saved vote could not be seen on screen; `style.css` now fills it. Regression tests are in `tests/frontend/settings.test.cjs`. Not on the server until Roland deploys.
+5. **Feedback row follow-up (#62, `v2-m8-feedback-row`, on top of #61).** The thumbs and Clear vote sat beside the answer bubble and stacked in a narrow column next to a long answer or on a phone; the row now has its own line under the answer (`style.css`). After a reload a captured vote read "Not captured", because the chat's message list carried the vote but not whether it was captured; `Capture.saved_feedback` now adds `captured` for the message list and `GET /api/messages/{id}/feedback`, and the row shows "Included for training review". Tests are in `tests/test_feedback_capture.py` and `tests/frontend/settings.test.cjs`. Not on the server until Roland deploys.
 
 Open before Roland is asked to accept M8:
 
-- [ ] Deploy the follow-up and repeat the Clear vote test: the chosen thumb is filled after a vote and after a refresh, and both thumbs are empty straight after Clear vote.
+- [ ] Deploy the follow-ups (#61, #62) and repeat the Clear vote test: the chosen thumb is filled after a vote and after a refresh, and both thumbs are empty straight after Clear vote. Look at a long answer on the phone as well: the thumbs and Clear vote are on one line under it.
 - [ ] Persona: restore an earlier version, and check that the safety block is shown last and read-only. Version 6 with blank standing instructions is the present state; the restore click itself was not watched.
 - [ ] `docker compose exec -T core python -m agent migrate --check` shows schema version 3, and `make model-list` shows the base model as current.
 - [ ] With capture off, a thumbs-up writes no `training_examples` row. Only the "Not captured" label was read; the database was not queried.
 - [ ] Ordinary chat, chat refresh, the browser screen and a sign-in by Roland on the M8 build.
-- [ ] Only if Roland chooses it: agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. A rented GPU is optional.
-
-Noticed while fixing, not changed:
-
-1. The feedback row is placed beside the answer bubble. Next to a long answer, and on a phone, the thumbs and Clear vote stack in a narrow column.
-2. After a reload the row reads "Not captured" for every vote a dataset has not used, including one that was captured: the chat's message list carries the vote but not whether it was captured. Look at this before the capture test, or the label will mislead.
+- [ ] Only if Roland chooses it: agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. In that test, reload the chat after the vote: the row must still read "Included for training review". A rented GPU is optional.
 
 Keep capture, the weekly loop, `TRAINER_URL` and the `training` profile off until Roland says otherwise. Roland runs the host commands himself.
 

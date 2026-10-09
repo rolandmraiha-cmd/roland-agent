@@ -3,6 +3,10 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
+
+from agent.web.app import create_app
+from tests.test_files_api import login
 
 
 async def chat(agent, text="hello"):
@@ -36,6 +40,54 @@ async def test_feedback_upsert_and_lock_after_dataset(make_agent):
     agent.memory._exec("UPDATE training_examples SET used_in_dataset='dataset'")
     with pytest.raises(LookupError):
         agent.capture.feedback(message, 1)
+
+
+@pytest.mark.asyncio
+async def test_saved_feedback_says_whether_the_vote_was_captured(make_agent):
+    agent = make_agent(["reply", "reply"])
+    _, off = await chat(agent)
+    assert agent.capture.saved_feedback(off) is None
+    agent.capture.feedback(off, 1)
+    saved = agent.capture.saved_feedback(off)
+    assert saved["rating"] == 1 and saved["captured"] is False
+    agent.memory.set_meta("training_capture", "1")
+    _, on = await chat(agent)
+    agent.capture.feedback(on, -1, "better")
+    saved = agent.capture.saved_feedback(on)
+    assert saved["captured"] is True and saved["correction"] == "better"
+    assert agent.capture.saved_feedback(off)["captured"] is False
+    # An approval label on the same reply is not this vote's example.
+    agent.memory._exec("UPDATE training_examples SET source='approved_call' WHERE message_id=?", (on,))
+    assert agent.capture.saved_feedback(on)["captured"] is False
+    # Deleting the example in the review list leaves the vote, not the capture.
+    agent.memory._exec("DELETE FROM training_examples WHERE message_id=?", (on,))
+    saved = agent.capture.saved_feedback(on)
+    assert saved["rating"] == -1 and saved["captured"] is False
+
+
+def test_reloaded_chat_and_feedback_route_carry_captured(make_agent):
+    agent = make_agent(["reply"])
+    agent.memory.set_meta("training_capture", "1")
+    with TestClient(create_app(agent, False), base_url="https://agent.test") as client:
+        login(client)
+        chat_id = client.post("/api/chats").json()["id"]
+        with client.stream("POST", f"/api/chats/{chat_id}/send", json={"text": "hello"}) as response:
+            "".join(response.iter_text())
+
+        def reply():
+            return client.get(f"/api/chats/{chat_id}/messages").json()["messages"][-1]
+
+        message = reply()
+        route = f"/api/messages/{message['id']}/feedback"
+        assert message["role"] == "assistant" and message["feedback"] is None
+        assert client.get(route).json() == {
+            "message_id": message["id"], "rating": None, "used_in_dataset": None, "captured": False
+        }
+        assert client.post(route, json={"rating": 1}).json()["captured"] is True
+        assert reply()["feedback"]["rating"] == 1 and reply()["feedback"]["captured"] is True
+        assert client.get(route).json()["captured"] is True
+        assert client.delete(route).status_code == 200
+        assert reply()["feedback"] is None and client.get(route).json()["captured"] is False
 
 
 @pytest.mark.asyncio
