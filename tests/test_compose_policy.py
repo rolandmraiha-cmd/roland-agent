@@ -185,12 +185,12 @@ def test_persistent_private_mounts_and_existing_data_volume():
 
 def test_image_pins_and_nonroot_volume_ownership():
     caddy = (ROOT / "docker/caddy/Dockerfile").read_text()
-    assert re.search(r"FROM caddy:2\.11\.7-alpine@sha256:[a-f0-9]{64}\n", caddy)
+    assert re.search(r"FROM public\.ecr\.aws/docker/library/caddy:2\.11\.7-alpine@sha256:[a-f0-9]{64}\n", caddy)
     assert "setcap -r /usr/bin/caddy" in caddy
     assert "chown -R 1000:1000 /data /config" in caddy and "USER 1000:1000" in caddy
     assert COMPOSE["services"]["caddy"]["sysctls"] == {"net.ipv4.ip_unprivileged_port_start": "0"}
     core = (ROOT / "Dockerfile").read_text()
-    assert re.search(r"FROM python:3\.12-slim@sha256:[a-f0-9]{64}\n", core)
+    assert re.search(r"FROM public\.ecr\.aws/docker/library/python:3\.12-slim@sha256:[a-f0-9]{64}\n", core)
     assert "--require-hashes" in core and "--no-build-isolation --no-index" in core
     assert "chown -R agent:agent /data /backups /workspace" in core
     assert "chmod 0700 /data /backups /workspace" in core and "USER agent" in core
@@ -544,7 +544,7 @@ def test_browser_image_is_pinned_and_runs_as_a_normal_user():
     for word in ("remote-debugging", "curl ", "sudo", "ssh", "--no-sandbox", "novnc", "websockify"):
         assert word not in dockerfile, word
     tester = (ROOT / "docker/tester/Dockerfile").read_text()
-    assert re.search(r"^FROM python:3\.12-slim@sha256:[a-f0-9]{64}$", tester, re.M)
+    assert re.search(r"^FROM public\.ecr\.aws/docker/library/python:3\.12-slim@sha256:[a-f0-9]{64}$", tester, re.M)
     assert "--require-hashes" in tester and "USER 1000:1000" in tester
 
 
@@ -696,7 +696,7 @@ def test_novnc_service_is_off_by_default_and_holds_nothing():
 
 def test_novnc_image_is_pinned_down_to_the_release_tarball():
     dockerfile = (ROOT / "docker/novnc/Dockerfile").read_text()
-    core_base = re.search(r"^FROM (python:3\.12-slim@sha256:[a-f0-9]{64})$", (ROOT / "Dockerfile").read_text(), re.M)
+    core_base = re.search(r"^FROM (public\.ecr\.aws/docker/library/python:3\.12-slim@sha256:[a-f0-9]{64})$", (ROOT / "Dockerfile").read_text(), re.M)
     assert core_base and f"FROM {core_base.group(1)}\n" in dockerfile  # the same base as core
     assert "pip install --no-cache-dir --require-hashes --no-deps -r requirements-novnc.lock" in dockerfile
     lock = (ROOT / "requirements-novnc.lock").read_text()

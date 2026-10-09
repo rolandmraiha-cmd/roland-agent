@@ -50,6 +50,16 @@ at the actual release commit. Missing acceptance evidence stays pending.
 | Container/network/resource/log limits | Compose policy tests, pinned images, dropped caps/read-only/non-root/no-new-privileges, firewall; host isolation, exact log inspect, loaded memory/restart watch |
 | Supply-chain pins | Hash-locked Python packages, image digests and full action SHAs; config/model-store/compose policy tests; least-privilege CI `contents: read` |
 
+The Caddy build uses Amazon ECR Public's Docker Official Image copy, pinned to the exact
+official `2.11.7-alpine` index. Registry bytes and the Linux/amd64 manifest were verified
+against Docker's image records; it is the same VPS image as the earlier Docker Hub pin.
+This avoids the observed anonymous Docker Hub pull limit without changing Caddy's version,
+runtime policy or ownership. The six Python-based builds also use that official mirror:
+the existing `3.12-slim` index `dddfd7e0…` is unchanged and its complete manifest hash was
+verified at the mirror after Docker Hub's token endpoint returned 504. Their Python base
+contents remain identical. Compose policy checks require the exact mirror, pinned versions,
+non-root configuration and identical core/relay base.
+
 M9 verification refuses an empty/stopped stack, missing health data, a loopback-published
 internal port, empty backup directory, partial log limits and a Docker/probe error posing as
 model isolation. The restore drill has no production mounts/secrets/network and validates

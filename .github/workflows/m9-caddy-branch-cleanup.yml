@@ -1,0 +1,66 @@
+name: Remove the merged M9 Caddy index branch
+on:
+  pull_request:
+    branches: [v2]
+    types: [closed]
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  remove-merged-branch:
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'v2-m9-caddy-index' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify the merged event and unchanged branch, then remove only the Caddy fix branch
+        env:
+          M9_CADDY_CLEANUP_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          repository = "rolandmraiha-cmd/roland-agent"
+          branch = "v2-m9-caddy-index"
+          root = "https://api.github.com/repos/" + repository
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as source:
+              event = json.load(source)
+          merged = event["pull_request"]
+          assert event["repository"]["full_name"] == repository, "Unexpected repository"
+          assert merged["merged"] and merged["base"]["ref"] == "v2", "Unexpected merge"
+          assert merged["head"]["ref"] == branch, "Unexpected branch"
+          assert merged["head"]["repo"]["full_name"] == repository, "Unexpected head repository"
+          headers = {
+              "Authorization": "Bearer " + os.environ["M9_CADDY_CLEANUP_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          def api(path, method="GET"):
+              request = urllib.request.Request(root + path, headers=headers, method=method)
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  return json.loads(response.read()) if response.status != 204 else None
+
+          pr = api("/pulls/" + str(merged["number"]))
+          assert pr["merged"] and pr["base"]["ref"] == "v2", "Merge is not confirmed"
+          assert pr["merge_commit_sha"] == merged["merge_commit_sha"], "Merge changed"
+          assert pr["head"]["ref"] == branch and pr["head"]["sha"] == merged["head"]["sha"], "PR head changed"
+          read_path = "/git/ref/heads/" + branch
+          try:
+              ref = api(read_path)
+          except urllib.error.HTTPError as error:
+              assert error.code == 404, "Could not inspect branch"
+              print("PASS: merged Caddy fix branch already removed")
+              raise SystemExit(0)
+          assert ref["object"]["sha"] == merged["head"]["sha"], "Branch changed; refusing deletion"
+          api("/git/refs/heads/" + branch, "DELETE")
+          try:
+              api(read_path)
+          except urllib.error.HTTPError as error:
+              assert error.code == 404, "Could not verify branch deletion"
+          else:
+              raise SystemExit("Branch still exists")
+          print("PASS: unchanged merged v2-m9-caddy-index removed")
+          PY

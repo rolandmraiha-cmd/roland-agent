@@ -4,7 +4,7 @@
 # connections only (never --traffic, --record or --verbose) and can reach nothing but x11vnc.
 #
 # Same pinned base as the core image.
-FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+FROM public.ecr.aws/docker/library/python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 WORKDIR /app
 # Hash-checked, like the other images. websockify alone: see requirements-novnc.in.

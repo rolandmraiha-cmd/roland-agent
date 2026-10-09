@@ -201,6 +201,23 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 
 ## 8. Next coding order
 
+Fresh GitHub release builds failed resolving the earlier Caddy OCI index, before application
+checks. The M9 Caddy-index follow-up pins Docker's current official `2.11.7-alpine` index
+`d8542f48…`; old and new indexes reference the same Linux/amd64 image `173b2630…`.
+Registry GET/HEAD and manifest hashes were checked. Docker Hub then returned an anonymous
+pull-limit 429 on the current index. The fix uses Amazon ECR Public's official Docker image
+copy, verified to serve the exact same pinned index and Linux/amd64 manifest. The existing
+policy test still requires that trusted source, Caddy version, digest and non-root rules.
+The Caddy mirror resolved that pull step; the runner then hit a Docker Hub Python-token
+504. All six Python-based builds now use the official mirror with the unchanged `dddfd7e0…`
+index, whose complete manifest bytes were also verified. Core, sandbox, relay, tester,
+installer and optional trainer keep the same Python base contents. Policy checks still
+require the exact source/version/digest and matching core/relay base. The fix must pass CI
+before integration; host policy and resource/training settings are unchanged.
+A one-use workflow will delete only this unchanged feature branch after its verified merge;
+remove the workflow after success. Release PR #66 remains pending final CI and the focused deploy.
+
+
 1. M9 implementation #64 and approved polish #65 are merged into `v2`; their extra
    branches and cleanup workflows are removed. The host acceptance checkpoint is `bb76263`.
 2. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks A9.1:
