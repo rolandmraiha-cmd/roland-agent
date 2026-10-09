@@ -728,8 +728,11 @@ Every §10.2 baseline item has a test or a runbook check. No open high-severity 
 Fresh GitHub release builds failed resolving the earlier Caddy OCI index, before application
 checks. The M9 Caddy-index follow-up pins Docker's current official `2.11.7-alpine` index
 `d8542f48…`; old and new indexes reference the same Linux/amd64 image `173b2630…`.
-Registry GET/HEAD and manifest hashes were checked. The fix must pass CI before integration;
-it changes no host policy, Caddy version, CPU image contents or resource/training settings.
+Registry GET/HEAD and manifest hashes were checked. Docker Hub then returned an anonymous
+pull-limit 429 on the current index. The fix uses Amazon ECR Public's official Docker image
+copy, verified to serve the exact same pinned index and Linux/amd64 manifest. The existing
+policy test still requires that trusted source, Caddy version, digest and non-root rules.
+The fix must pass CI before integration; host policy and resource/training settings are unchanged.
 A one-use workflow will delete only this unchanged feature branch after its verified merge;
 remove the workflow after success. Release PR #66 remains pending final CI and the focused deploy.
 

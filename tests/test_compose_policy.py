@@ -185,7 +185,7 @@ def test_persistent_private_mounts_and_existing_data_volume():
 
 def test_image_pins_and_nonroot_volume_ownership():
     caddy = (ROOT / "docker/caddy/Dockerfile").read_text()
-    assert re.search(r"FROM caddy:2\.11\.7-alpine@sha256:[a-f0-9]{64}\n", caddy)
+    assert re.search(r"FROM public\.ecr\.aws/docker/library/caddy:2\.11\.7-alpine@sha256:[a-f0-9]{64}\n", caddy)
     assert "setcap -r /usr/bin/caddy" in caddy
     assert "chown -R 1000:1000 /data /config" in caddy and "USER 1000:1000" in caddy
     assert COMPOSE["services"]["caddy"]["sysctls"] == {"net.ipv4.ip_unprivileged_port_start": "0"}
