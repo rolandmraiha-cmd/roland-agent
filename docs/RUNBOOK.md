@@ -5,11 +5,13 @@ commands. Commands assume Bash, `/opt/roland-agent`, Docker Engine 28+ with Comp
 2.33.1+, and passwordless sudo for `deploy`. Contabo currently has Ubuntu 24.04, four
 shared vCPUs, about 7.8 GB usable RAM and 2 GB swap at `37.60.226.214`.
 
-**Status, 9 October 2026:** M8 is accepted; host app code is `7ef26de`, schema 3, base model
-current, browser/screen on and training off. The persona diff fix in `c9d9d3d` is not yet
-deployed. M9 changes are a release candidate. Server acceptance and Shipper review remain
-pending. Only Roland merges the final `v2` → `main` PR. External implementers need Roland's
-explicit instruction before SSH/deploy. This runbook does not grant it.
+**Status, 9 October 2026:** M6/M7/M8 are accepted. M9 host checks and restart recovery
+passed at `bb76263`, schema 3, base model current, browser/screen on and training off.
+[The approved acceptance note](releases/m9-acceptance-2026-10-09.md) records measured results
+and known follow-ups. PR #65 polish integration and final release review remain pending.
+Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
+External implementers need Roland's explicit instruction before SSH/deploy; this runbook
+does not grant it.
 
 ## Preserve the current host configuration
 
@@ -205,7 +207,7 @@ Collect results at the actual deployed M9 commit with training still off.
 | Isolation | `sudo bash tests/integration/isolation.sh --server` | Sandbox/browser cannot reach core, model, screen/relay or trainer if enabled; model egress fails in verify |
 | External TCP ports | From a different machine: `nmap -Pn -p- 37.60.226.214` | Only 22, 80, 443 open; retain dated output |
 | External UDP | From that machine: `sudo nmap -sU -p 443 37.60.226.214` | Record open/open\|filtered and confirm the Caddy UDP mapping; UDP silence alone is inconclusive |
-| Certificate | `curl -vI https://37-60-226-214.sslip.io/login` | Valid chain/hostname without `-k`; login 200 |
+| Certificate | `curl -v -o /dev/null -w 'HTTP %{http_code}\n' https://37-60-226-214.sslip.io/login` | Valid chain/hostname without `-k`; GET login 200 |
 | Actual log settings | `sudo docker inspect --format '{{json .HostConfig.LogConfig}}' $(sudo docker compose ps -q)` | Every service has `json-file`, `max-size=10m`, `max-file=3` |
 | Browser/screen sockets | Command below with browser and screen enabled | Exactly browserd and VNC on their intended IPv4 addresses; no IPv6 wildcard VNC listener |
 | Restore | Drill above | PASS on the selected copy; live state retained |
@@ -215,10 +217,14 @@ Collect results at the actual deployed M9 commit with training still off.
 | Recovery/soak | Steps below | State survives; no stale approval/sign-in authority and no restarts/OOM during watch |
 | Human workflow | Steps below | Chat/file/approval/screen work; chat “yes” does not approve |
 
+The login route accepts GET; `curl -I` sends HEAD and returns 405. On Windows, use
+`curl.exe -v -o NUL -w "HTTP %{http_code}\n" https://37-60-226-214.sslip.io/login`.
+
 The benchmark uses a fixed public prompt, 128 output tokens, no tools, no prompt caching,
 three sequential calls and the configured local-only transport. It prints server token rates,
 time to the first nonempty text chunk and total time; it does not print generated text or
-credentials. These synthetic rates are not an estimate of a full tool task. Run during a quiet
+credentials. It stays quiet until all samples finish, then prints the results together.
+These synthetic rates are not an estimate of a full tool task. Run during a quiet
 period; a benchmark competes with chats for CPU. Record production `MODEL_CTX=3072` and
 model version alongside results. It never changes context, limits or the serving model.
 

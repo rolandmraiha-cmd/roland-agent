@@ -4,12 +4,12 @@ Roland's single-user assistant, running all day on a Contabo VPS. Chat through i
 password-protected web page on a phone or computer. The model runs on the same server;
 chats, files and browser snapshots are never sent to a hosted inference service.
 
-**2.0.0 release candidate.** M0–M8 are merged on `v2`; Roland accepted M6/M7 on 8 October
-and M8 on 9 October 2026. Roland authorized merging M9 PR #64 on 9 October; it is merged
-into `v2` at **`720c58c`**. All seven candidate CI jobs passed at `afee233`; CI on the
-updated integration tip is required too. Production still runs `7ef26de` with training off.
-Next: Roland deploys `v2`, completes the M9 server checklist, and supplies results for any
-improvements before the reviewed `v2` → `main` release merge. Host acceptance is pending.
+**2.0.0 release candidate.** M0–M9 implementation is on `v2`. The M9 deployment at
+**`bb76263`** passed the host acceptance checks and restart recovery on 9 October 2026.
+Roland approved publishing the results and merging the final polish in PR #65.
+See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
+Final polish integration and the reviewed `v2` → `main` release merge remain pending;
+training stays off.
 
 ## What it does
 
@@ -49,13 +49,18 @@ with modest reasoning and tool accuracy; a multi-step task may take minutes.
 
 Contabo uses **3072 context tokens, 3 threads and a 3840 MiB model cap**. Keep these host
 settings. Repo defaults still specify 4096 context tokens; that higher setting has not been
-accepted on this VPS. RAM prompt caching is disabled. The previous browser-task watch
-recorded model peak 3084.29 MiB, browser peak 822.80 MiB and minimum host available 3553 MiB,
-without observed restarts or OOM kills (8 October). These are earlier M6 measurements.
+accepted on this VPS. RAM prompt caching is disabled.
 
-M9 prompt/generation tokens per second and time to first token have **not been measured on
-Contabo yet**. Run the fixed public-prompt benchmark and loaded browser watch in the
-[runbook](docs/RUNBOOK.md), then record results in [master status](docs/AGENT.md).
+The M9 fixed-prompt benchmark recorded **18.1–19.8 prompt tokens/s**, **6.7–9.9 generated
+tokens/s**, and **2.2–3.5 seconds to the first token** over three uncached 128-token samples.
+These rates describe that benchmark, not a complete tool task. The loaded ten-minute watch
+and thirty-minute soak recorded minimum available RAM of **3746 MiB** and **3705 MiB**, with
+no OOM kills or container restarts. Full sample timings and service peaks are in
+[the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
+
+A longer chat gave an unsupported browser answer without running a browser tool. Direct
+inspection and a fresh-chat tool test returned the correct result. Model reporting reliability
+is a documented follow-up; the approval gate still needs human judgment.
 
 ## Training stays off for this release
 
@@ -134,14 +139,7 @@ computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
 
 [Master status and rules](docs/AGENT.md) · [Remaining release work](docs/NEXT.md) ·
 [Technical specification](docs/v2-spec.md) · [Changelog](CHANGELOG.md).
-Every PR updates README, AGENT and NEXT for changed code, plans or deployment state;
-accepted security limits also update SECURITY. Roland authorized the implementation/docs
-merge on 9 October; actual deployment and final
-release acceptance are still pending. Local M9
-validation after the review fixes passed 1526 Python tests and all 88 frontend tests; 58 Docker CLI checks and
-one existing hard-link check were skipped, with 49 live cases excluded. Ruff/ShellCheck
-pass. Live CI caught an unexpected IPv6 listener in the screen server; M9 closes it and
-retains the strict socket check. Verification reads Compose's resolved feature settings.
-All seven candidate CI jobs passed after these fixes; see AGENT for evidence and the
-integration-tip acceptance requirement. The merged `v2-m9-release` branch is deleted;
-the temporary maintenance job used for that operation has been removed.
+Every PR updates README, AGENT and NEXT for changed code, plans or deployment state.
+M9 host acceptance is recorded in the approved note. Final polish integration and release
+review remain pending. The model-reporting, phone and training-data follow-ups are listed
+in NEXT; training and the current production limits remain unchanged.

@@ -2,8 +2,10 @@
 
 ## 2.0.0 — Unreleased
 
-M9 release candidate. Final host acceptance, Shipper review and Roland's merge to `main`
-are pending; production still runs the accepted M8 build with training off.
+M9 release candidate. Host acceptance and restart recovery passed at `bb76263` on
+9 October 2026. Final polish integration, release review and the `v2` → `main` merge
+remain pending. Training stays off. See the approved M9 acceptance note and known
+model-reporting, phone and training-data follow-ups in the project records.
 
 ### Added
 

@@ -2756,7 +2756,7 @@ make deploy
 `make verify` (server acceptance checklist) runs and prints PASS/FAIL for each check:
 - [ ] Every service is healthy. `docker ps --format '{{.Names}} {{.Ports}}'` shows ports only for `roland-agent-caddy-1`.
 - [ ] `sudo ss -tulpn` shows no listeners on 8080, 7000, 7100, 5900 or 6080 on host addresses.
-- [ ] TLS: `curl -vI https://37-60-226-214.sslip.io/login 2>&1 | grep -E 'issuer|HTTP/'` shows the Let's Encrypt issuer and 200. HTTP/3: `curl --http3 -I …` if available.
+- [ ] TLS: `curl -v -o /dev/null -w 'HTTP %{http_code}\n' https://37-60-226-214.sslip.io/login` validates the certificate chain/hostname and returns GET status 200. HEAD (`-I`) is not supported on this route and returns 405. HTTP/3: add `--http3` if available.
 - [ ] `tests/integration/isolation.sh --server` passes, including the host and SSH checks and `https://example.com` from the sandbox.
 - [ ] `docker inspect --format '{{.HostConfig.LogConfig}}' $(docker compose ps -q)` shows `max-size:10m max-file:3` for every service.
 - [ ] `docker stats --no-stream` totals are within §5.5. `free -h` shows available memory ≥ 1.2 GiB at idle with the model loaded.
