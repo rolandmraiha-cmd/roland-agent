@@ -27,6 +27,8 @@ are pending; production still runs the accepted M8 build with training off.
 - Restore drill uses only disposable volumes and a private backup copy, without production
   secrets or network; validates schema/audit/integrity and expired sessions before success.
 - Dedicated no-hosted-llm CI and live browser/screen/sandbox plus real-container restore checks.
+- The screen server disables both x11vnc and LibVNCServer IPv6 listeners; CI checks the
+  actual IPv4/IPv6 socket tables before accepting the container.
 
 ### Known limitations and deferred work
 

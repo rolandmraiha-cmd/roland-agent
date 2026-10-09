@@ -647,18 +647,26 @@ Branch `v2-m9-release` starts at verified remote `v2` **`c9d9d3d`**. Prepared ch
 - Source package `2.0.0`, unreleased changelog, rewritten README, full security baseline/
   threat/outbound matrix and operational RUNBOOK; existing accepted limits retained.
 - Verify requires actual healthy services, no internal publication (including loopback), a
-  nonempty backup, exact log driver/limits and a genuine model network-block result.
+  nonempty backup, exact log driver/limits and a genuine model network-block result. Enabled
+  services come from resolved Compose configuration, including interpolation/overrides.
 - Restore drill uses two disposable volumes and a private copy without production secrets
   or network; checks integrity, foreign keys, schema, audit and expired sessions, then cleanup.
 - Fixed public-prompt local-only benchmark reports prompt/generation tok/s and first-token
   latency; it does not print generated text, run tools, change a model or raise limits.
 - Visible `no-hosted-llm` CI, real browser/screen/sandbox checks and actual core-image restore
   checks; sandbox/browser isolation also probes the model and optional trainer.
+- Live CI exposed a LibVNCServer IPv6 wildcard listener that `-no6` did not disable. The
+  screen command now also uses `-rfbportv6 0`; the strict socket-table check is retained.
 
 No Contabo SSH/deploy, external scan, host restore/load/restart, DNS/memory/flag change,
 GPU rental or model promotion was performed by this implementation. The handoff reserves
 host operations for Roland/Shipper. Tests/CI and host evidence are tracked in AGENT §12;
-final M9 acceptance is not inferred from an earlier milestone or the version bump. Local validation: 1522 Python passes, 59 skips (58 need the unavailable Docker CLI, one existing hard-link skip), 49 live cases excluded; all 36 focused release checks and 88 frontend tests pass, ruff/ShellCheck clean. Fresh GitHub container/training jobs remain required.
+final M9 acceptance is not inferred from an earlier milestone or the version bump. Initial
+local validation: 1522 Python passes, 59 skips (58 need the unavailable Docker CLI, one
+existing hard-link skip), 49 live cases excluded; 88 frontend passes, ruff/ShellCheck clean.
+All 39 focused release checks pass after resolved-configuration review. On the initial
+PR head, GitHub unit/lint/frontend/no-hosted/edge jobs and CPU training/GGUF swap passed;
+the new live browser job found the IPv6 listener. Fresh CI must pass after the fix.
 
 Proposed README/master text awaits Roland's review before merge. Keep NEXT until final
 release acceptance; fold/archive its completed plan into AGENT at `v2` → `main`, preserving

@@ -56,6 +56,14 @@ model isolation. The restore drill has no production mounts/secrets/network and 
 actual restored state. New negative tests are in `test_release_checks.py`; CI uses the real
 core image for restore/corrupt-input checks. Neither script alone completes A9.2.
 
+The new live browser CI caught an IPv6 wildcard VNC listener despite `-no6`. x11vnc and
+LibVNCServer have separate listeners: `-rfbportv6 0` now disables the latter too. The live
+socket-table assertion remains strict; the server must expose only its two expected IPv4
+sockets inside the container. The fix still requires a reviewed deploy and host verification.
+Upstream [argument handling](https://github.com/LibVNC/libvncserver/blob/master/src/libvncserver/cargs.c)
+and [socket creation](https://github.com/LibVNC/libvncserver/blob/master/src/libvncserver/sockets.c)
+show why disabling only x11vnc's listener was insufficient.
+
 ## Threat review (§10.3)
 
 | Threats | Controls and residual risk |

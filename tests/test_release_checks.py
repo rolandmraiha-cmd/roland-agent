@@ -29,12 +29,25 @@ def test_compose_inventory_accepts_both_docker_json_formats(array):
     services(json.dumps(rows) if array else "\n".join(json.dumps(row) for row in rows))
 
 
-def test_expected_services_reads_env_as_data_without_shell_execution(tmp_path):
+def test_expected_services_reads_resolved_data_without_shell_execution(tmp_path):
     sentinel = tmp_path / "must-not-exist"
-    env_file = tmp_path / ".env"
-    env_file.write_text(f"BROWSER_ENABLED='$(touch {sentinel})'\n")
-    assert "browser" not in expected_services(env_file)
+    config = {
+        "services": {
+            "core": {
+                "environment": {
+                    "TRAINER_URL": f"$(touch {sentinel})",
+                }
+            }
+        }
+    }
+    assert "trainer" in expected_services(config)
     assert not sentinel.exists()
+
+
+@pytest.mark.parametrize("value", [" true ", "\tON\t", True])
+def test_expected_services_matches_runtime_boolean_normalisation(value):
+    config = {"services": {"core": {"environment": {"BROWSER_ENABLED": value}}}}
+    assert "browser" in expected_services(config)
 
 
 @pytest.mark.parametrize("observation", ["", "[]", "{}", "null", "not JSON"])

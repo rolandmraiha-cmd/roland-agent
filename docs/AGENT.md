@@ -310,10 +310,17 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 | External full TCP + UDP443 scan/TLS | No final release scan supplied | Pending dated external output |
 | Isolation/log rotation | Earlier `verify` 13/0/1, narrower checks at M8 | Pending stricter M9 verify |
 | Soak/restart state recovery | Prior automated persistence tests and M7 browser restart | Pending timed host watch/restart |
-| CI | Local: 1522 Python passes, 59 skips (58 require missing Docker CLI, one existing hard-link skip), 49 integration cases excluded; 88 frontend passes; ruff/ShellCheck clean | Pending fresh GitHub container/training jobs and merged `v2` URLs |
+| CI | Initial local: 1522 Python passes, 59 skips, 49 live cases excluded; 88 frontend passes. Initial PR GitHub unit/lint/frontend/no-hosted/edge and CPU training/swap passed; browser socket assertion found an IPv6 listener | Pending post-fix GitHub runs and merged `v2` URLs |
 | A9.3 | No final release PR reviewed/merged | Pending Shipper COMMENT and Roland merge |
 
-Local M9 validation also passed all 36 focused release checks, including env-file nonexecution, enabled-service absence, public-model refusal and disposable restore cleanup. Package metadata reports `2.0.0`. Docker/container and CPU training were not executed locally; GitHub CI is required.
+Local M9 validation passed all 39 focused release checks after review, including resolved
+Compose data without shell execution, normalized feature switches, enabled-service absence,
+public-model refusal and disposable restore cleanup. Package metadata reports `2.0.0`.
+The initial full-suite skips comprise 58 missing-Docker-CLI cases and one existing hard-link
+case. The new live browser job found a LibVNCServer IPv6 wildcard listener despite `-no6`;
+`-rfbportv6 0` now disables that independent listener, and CI still checks the actual socket
+tables. Real-container restore/corrupt-input checks and CPU training/GGUF swap passed on
+the initial PR head. Fresh CI is required after these fixes; host acceptance stays pending.
 
 Training capture/loop/trainer stay off. Phone mobile-data and intermittent screen-opening
 issues remain deferred, not claimed fixed. `.release-evidence/` is private and excluded from

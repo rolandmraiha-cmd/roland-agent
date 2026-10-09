@@ -281,6 +281,7 @@ import stat
 import subprocess
 import sys
 import time
+import shlex
 from pathlib import Path
 
 root = Path(os.environ["FAKE_HOST_DIR"])
@@ -375,6 +376,14 @@ if command == "docker":
         if "version" in args:
             answer("2.35.0")
         if "config" in args:
+            if "json" in args:
+                values = {}
+                for line in Path.cwd().joinpath(".env").read_text().splitlines():
+                    key, sep, raw = line.partition("=")
+                    if sep and key in {"BROWSER_ENABLED", "SCREEN_ENABLED", "TRAINER_URL"}:
+                        parts = shlex.split(raw, comments=True)
+                        values[key] = parts[0] if len(parts) == 1 else ""
+                answer(json.dumps({"services": {"core": {"environment": values}}}))
             answer("AGENT_HOST: nested-probe.example")
         if "ps" in args:
             if state.get("hang_compose_ps"):

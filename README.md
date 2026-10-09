@@ -137,4 +137,6 @@ accepted security limits also update SECURITY. M9 documentation is proposed text
 Roland's review; it is not deployed or finally approved by creating this branch. Local M9
 validation passed 1522 Python tests and all 88 frontend tests; 58 Docker CLI checks and
 one existing hard-link check were skipped, with 49 live cases excluded. Ruff/ShellCheck
-pass. Fresh GitHub container/training results are tracked in AGENT before release.
+pass. Live CI caught an unexpected IPv6 listener in the screen server; M9 closes it and
+retains the strict socket check. Verification reads Compose's resolved feature settings.
+Fresh GitHub results after these fixes are tracked in AGENT before release.

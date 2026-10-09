@@ -30,14 +30,15 @@ docker() { timeout --kill-after=2s 30s docker "$@"; }
 cd -- "$deploy_repo"
 
 # 1. Include stopped containers; an empty list or missing health data is not success.
-if observations=$(compose ps --all --format json 2>/dev/null); then
-    if problem=$(printf '%s' "$observations" | python3 "$deploy_repo/deploy/verify_state.py" services "$deploy_repo/.env" 2>&1); then
+if required=$(compose config --format json | python3 "$deploy_repo/deploy/verify_state.py" expected 2>/dev/null) && \
+   observations=$(compose ps --all --format json 2>/dev/null); then
+    if problem=$(printf '%s' "$observations" | python3 "$deploy_repo/deploy/verify_state.py" services "$required" 2>&1); then
         result PASS "compose services running and healthy; ports only on caddy"
     else
         result FAIL "$problem"
     fi
 else
-    result FAIL "compose ps unavailable"
+    result FAIL "resolved Compose configuration or service observations unavailable"
 fi
 
 # 2. No internal listeners on host

@@ -3,27 +3,38 @@
 from __future__ import annotations
 
 import json
-import os
-import shlex
 import sys
-from pathlib import Path
 
 
-def expected_services(env_file: Path) -> set[str]:
-    """Read feature switches as data; never source a deployment env file."""
-    values = {}
-    if env_file.is_file():
-        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
-            line = line.strip().removeprefix("export ")
-            key, separator, raw = line.partition("=")
-            if separator and key.strip() in {"BROWSER_ENABLED", "SCREEN_ENABLED", "TRAINER_URL"}:
-                parts = shlex.split(raw, comments=True)
-                values[key.strip()] = parts[0] if len(parts) == 1 else ""
+def expected_services(config: dict) -> set[str]:
+    """Use Compose's resolved environment, including interpolation and overrides."""
+    try:
+        values = config["services"]["core"]["environment"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("missing resolved core configuration") from error
+    if not isinstance(values, dict):
+        raise ValueError("invalid resolved core environment")
     required = {"caddy", "core", "model", "sandbox"}
     for key, name in (("BROWSER_ENABLED", "browser"), ("SCREEN_ENABLED", "novnc")):
-        if os.environ.get(key, values.get(key, "")).lower() in {"1", "true", "yes", "on"}:
+        value = values.get(key, "false")
+        if isinstance(value, bool):
+            enabled = value
+        elif isinstance(value, str) and value.strip().lower() in {
+            "true",
+            "1",
+            "yes",
+            "on",
+            "false",
+            "0",
+            "no",
+            "off",
+        }:
+            enabled = value.strip().lower() in {"true", "1", "yes", "on"}
+        else:
+            raise ValueError("invalid resolved feature switch")
+        if enabled:
             required.add(name)
-    if os.environ.get("TRAINER_URL", values.get("TRAINER_URL", "")).strip():
+    if values.get("TRAINER_URL"):
         required.add("trainer")
     return required
 
@@ -70,15 +81,22 @@ def logs(text: str) -> None:
 
 
 def main() -> None:
-    if len(sys.argv) not in {2, 3} or sys.argv[1] not in {"services", "logs"}:
-        raise SystemExit("Usage: verify_state.py services [env-file]|logs")
+    if len(sys.argv) not in {2, 3} or sys.argv[1] not in {"services", "logs", "expected"}:
+        raise SystemExit("Usage: verify_state.py expected|services [required-json]|logs")
     try:
         text = sys.stdin.read(1024 * 1024 + 1)
         if len(text) > 1024 * 1024:
             raise ValueError("Docker observation too large")
         if sys.argv[1] == "services":
-            required = expected_services(Path(sys.argv[2])) if len(sys.argv) == 3 else None
+            required = None
+            if len(sys.argv) == 3:
+                names = json.loads(sys.argv[2])
+                if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+                    raise ValueError("invalid required services")
+                required = set(names)
             services(text, required)
+        elif sys.argv[1] == "expected":
+            print(json.dumps(sorted(expected_services(json.loads(text)))))
         else:
             logs(text)
     except (ValueError, TypeError, OSError) as error:
