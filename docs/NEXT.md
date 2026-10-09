@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 9 Oct 2026. Deployed code baseline **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): 13 / 0 / 1 with 3143 MiB available; schema version 3 confirmed. Before that the host ran **`e208bbd`** (#56) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59), M8 (#56) and its two feedback follow-ups are merged and deployed at `7ef26de`, with training off: #61 clears the pressed thumb and makes the chosen vote visible; #62 puts the feedback row under the answer and keeps the capture label after a reload. Roland checked the feedback row on the live page on 9 Oct 2026 and it works; the capture label was not part of that, because capture is off. Next: finish M8 host acceptance (M8, "Host acceptance in progress") before M9.**
+> Snapshot: 9 Oct 2026. Deployed code baseline **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): 13 / 0 / 1 with 3143 MiB available; schema version 3 confirmed. Before that the host ran **`e208bbd`** (#56) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59), M8 (#56) and its two feedback follow-ups are merged and deployed at `7ef26de`, with training off: #61 clears the pressed thumb and makes the chosen vote visible; #62 puts the feedback row under the answer and keeps the capture label after a reload. Roland checked the feedback row on the live page on 9 Oct 2026 and it works; the capture label was not part of that, because capture is off. Roland accepted M8 on 9 Oct 2026. Next: M9. Put off by Roland until after 2.0.0: the training data setup, including where that data is saved, and the phone problems (M9, "Put off by Roland until after 2.0.0").**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -523,7 +523,11 @@ Notes:
 
 All ten deliverables are implemented in PR #56. Roland requested its merge and branch removal on 8 Oct 2026; that includes the model runbook (M8.10). The branch is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh and preserving its screen service, routes, browser hand-back, passwords and deployment checks. Screen/trainer profile composition and capture exclusions are covered by combined tests. CI fixes update backup expectations for migration 3, load `TRAINING_DATA_DIR` as a path, require every mounted secret, annotate the generated activation script for ShellCheck, and add hash-locked protobuf to both training environments. CPU training and conversion now complete; model-client handling reads streamed schema-error bodies before constrained fallback, while unrelated HTTP errors still fail immediately. Three real-stream transport regression cases cover both rejection statuses and refusal to retry other errors. The synthetic model now declares 4096 context tokens, matching evaluation; its regression test covers the full public suite plus the output allowance because the pinned server caps slots at the trained context. Complete byte fallback fixes the pinned server tokenizer failure on newlines and unseen characters; a Unicode round-trip regression covers it. A literal assistant prefix avoids artificial whitespace that caused the pinned sampler to discard its first token; a separate prefix regression covers this. Cancellation now delivers the final sign-in event before ending the chat; the existing M7 regression reproduced on the untouched baseline and passes with the fix. The CPU workflow provides the checkout import path to its standalone probe. The actual tiny-GGUF swap probe exercises authenticated API import, promotion and rollback with human request tokens, missing-token refusal, unchanged container start time for valid swaps, and rollback after a corrupt candidate. All five GitHub checks passed on code head `c9a7ef1`: lint, 1,543 unit tests, 81 frontend tests, edge/isolation, and actual CPU training/conversion plus the authenticated pinned-container swap/rollback probe. This final merge-status update changes documentation only. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). At that merge no M8 deployment had been performed; no paid GPU has been rented and no model promoted. Defaults remain off.
 
-#### Host acceptance in progress (9 Oct 2026)
+#### Status: accepted by Roland (9 Oct 2026)
+
+Roland accepted M8 on 9 Oct 2026 at 18:58 Helsinki time, after the host checks below. He put the training data setup, including where that data is saved, off until after 2.0.0; that covers the capture and export test, the backup policy for the training-data volume and A8.10. Capture, the weekly loop, `TRAINER_URL` and the `training` profile stay off until then. See M9, "Put off by Roland until after 2.0.0".
+
+#### Host acceptance record (9 Oct 2026)
 
 Source for points 1 to 3: the handoff comment on #56 (Roland's deployment log and a live session on the agent). The evidence is written out in `docs/AGENT.md` §12. The draft #60 proposed the same handoff as `docs/M8-HANDOFF.md`; it was closed unmerged because §2.6 keeps status in these three documents.
 
@@ -536,7 +540,7 @@ Source for points 1 to 3: the handoff comment on #56 (Roland's deployment log an
 7. **Feedback row checked live (9 Oct 2026, 18:02–18:04 Helsinki time; Roland's screenshots and statement, written out in `docs/AGENT.md` §12).** On the `7ef26de` build in a desktop browser: the row is under the answer; the chosen thumb is filled and, as Roland states, stays so after a hard refresh; 👎 opens the correction editor; Clear vote empties both thumbs at once, shows "Vote cleared" and closes the editor; the chat reads "Capture is off" and the row "Not captured".
 8. **Other page checks (9 Oct 2026, 18:17–18:23 Helsinki time; run in a signed-in browser by Claude at Roland's request, with two results from Roland; written out in `docs/AGENT.md` §12).** Persona restore works in both directions and the persona is left at blank standing instructions (Version 8). The safety rules follow the editable text in the preview and have no field. A chat reloaded while the agent was answering showed the answer by itself. A long answer at an emulated phone width keeps the feedback row on one line under it. The screen's Watch, Take control and Hand back behave as described. Roland's count on the host after voting: `votes: 2 | training examples: 0`. Roland: login and logout work on his phone.
 
-Every item below that can be done with capture off is ticked as of 9 Oct 2026, 18:42. M8 now waits for Roland's decision; the capture and export test stays his choice.
+Every item below that can be done with capture off was ticked by 9 Oct 2026, 18:42, and Roland then accepted M8. The capture and export item is put off until after 2.0.0.
 
 Open before Roland is asked to accept M8:
 
@@ -548,7 +552,7 @@ Open before Roland is asked to accept M8:
 - [x] Ordinary chat, chat refresh and the browser screen on this build (9 Oct 2026, point 8). On the screen only Watch, Take control with a scroll, and Hand back were tried.
 - [x] A sign-in by Roland on the screen (`request_signin`) on this build (9 Oct 2026, 18:38–18:42, from his phone: he reports that sign-in and the screen still work; the audit log has `signin_requested`, the control sessions and `signin_resolved` with `signin_done` for `www.figma.com`; `docs/AGENT.md` §12).
 - [ ] Not blocking, after the next deploy: pick a version in the persona history, restore it, and see the diff box empty afterwards (#63).
-- [ ] Only if Roland chooses it: agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. In that test, reload the chat after the vote: the row must still read "Included for training review". A rented GPU is optional.
+- [ ] Put off by Roland until after 2.0.0 (9 Oct 2026): agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. In that test, reload the chat after the vote: the row must still read "Included for training review". A rented GPU is optional.
 
 Found in the persona test and fixed in #63 (not deployed): after Restore the diff box kept the diff from before the restore, although the restored version was now the active one. `settings.js` now empties `persona-diff` whenever the persona is reloaded (opening Settings, Save new version, Restore). Regression test in `tests/frontend/settings.test.cjs`.
 
@@ -604,10 +608,10 @@ Code Shipper (Grok) smoke on Contabo:
 
 1. Persona: edit, preview, save, restore a previous version; confirm the safety block is shown last and read-only.
 2. With capture off, thumbs-up a message; confirm no `training_examples` row is created.
-3. Turn capture on for one test chat; give feedback; export a dataset; confirm scrubber counts and that a planted fake secret is removed.
+3. Turn capture on for one test chat; give feedback; export a dataset; confirm scrubber counts and that a planted fake secret is removed. (Put off by Roland until after 2.0.0, 9 Oct 2026.)
 4. `make model-list` shows base/current; no promotion happens without the UI request.
 
-Manual (**Roland decides**): **A8.10** — one real loop on a rented GPU. Not required for merge if Roland does not want to rent a GPU yet; A8.5 and A8.9 are required.
+Manual (**Roland decides**): **A8.10** — one real loop on a rented GPU. Not required for merge if Roland does not want to rent a GPU yet; A8.5 and A8.9 are required. Roland put the training data setup off until after 2.0.0 on 9 Oct 2026, and A8.10 with it.
 
 #### Stays OFF until M8 is merged, and then until Roland turns it on
 
@@ -615,7 +619,7 @@ Manual (**Roland decides**): **A8.10** — one real loop on a rented GPU. Not re
 
 #### Next steps after merge
 
-Status on 9 Oct 2026: steps 1 to 3 are done, the `migrate --check` in step 3 after the `7ef26de` deploy; step 4 is partly done. What is still open is listed under "Host acceptance in progress" above.
+Status on 9 Oct 2026: steps 1 to 3 are done, the `migrate --check` in step 3 after the `7ef26de` deploy; step 4 is partly done. The record and what was put off are under "Host acceptance record" above.
 
 1. Roland updates `/opt/roland-agent` to the merged `v2`, including #59 chat refresh and #56 M8. Confirm the fetched remote tip before deploying.
 2. Back up the running database/workspace and create missing mounted secrets with `sudo env APPLY=1 make secrets`; existing secrets are retained. Keep `TRAINING_CAPTURE=false`, `TRAINING_LOOP_ENABLED=false`, `TRAINER_URL` empty and `COMPOSE_PROFILES=browser,screen`; retain the existing model context/memory and tool-step limits.
@@ -642,7 +646,15 @@ A reviewed, measured, documented 2.0.0 release, merged to `main` by Roland.
 
 #### Dependencies
 
-M6, M7, M8 merged on `v2` and smoked on Contabo.
+M6, M7, M8 merged on `v2` and smoked on Contabo. All three are accepted by Roland (M6 and M7 on 8 Oct 2026, M8 on 9 Oct 2026).
+
+#### Put off by Roland until after 2.0.0 (9 Oct 2026)
+
+Roland's decision when he accepted M8: these are later fixes, "after whole ai is done", that is after M9. Do not make M9 depend on them, and do not start them inside M9 without Roland.
+
+1. **The training data setup, including where that data is saved.** That covers the backup policy for the training-data volume (§6, decision 5), the capture and export test on the host, and a GPU run (A8.10; §6, decision 4). Capture, the weekly loop, `TRAINER_URL` and the `training` profile stay off through the release. The pipeline has passed its automated tests only; it has not been used on the host. The release documents (M9.1, M9.2) must say that plainly.
+2. **The browser screen not wanting to open on the phone.** Roland's words; no detail yet on what he saw. The audit log of his phone sign-in on 9 Oct 2026 has control sessions of 25, 3 and 6 seconds before one of 126 seconds, which fits a screen that had to be opened several times; the cause is not known. The sign-in itself went through.
+3. **The agent does not open on the phone's mobile data, only on his wifi.** On 8 Oct 2026 the phone got "site can't be reached" (NXDOMAIN) for the sslip.io name on mobile data while public DNS resolved it, and nothing on the server was involved. A real domain (§6, decision 6) may be the fix; that is not established.
 
 #### Deliverables
 
@@ -678,9 +690,9 @@ Restore drill on a **copy** only (`make restore-test FILE=…`), never over live
    Until Roland decides, keep 3072/3840m on the host and do not change the limit.
 2. **Browser headroom.** If the M6 pre-measurement shows < ~800 MiB available with the browser cap added, Roland chooses between a smaller browser cap, a lower `MODEL_CTX`, or a larger VPS.
 3. **Chromium sandbox** (`BROWSER_CHROMIUM_SANDBOX`, spec Q4): accept `false` with the hardened container as boundary, or require `true` if the M6 experiment succeeds. **Roland decided (8 Oct 2026): on as a trial on Contabo.** Host `.env` has `BROWSER_CHROMIUM_SANDBOX=true` and the pinned seccomp profile. The service is healthy and the main Chromium process has no `--no-sandbox`. Repo defaults remain unchanged; see `docs/SECURITY.md`.
-4. **GPU provider and budget** for A8.10, or stay on manual mode.
-5. **Training data in backups** (include or exclude).
-6. **Real domain** instead of the sslip.io fallback (DNS change needs Roland).
+4. **GPU provider and budget** for A8.10, or stay on manual mode. **Roland (9 Oct 2026): later, after 2.0.0, with the rest of the training data setup.**
+5. **Training data in backups** (include or exclude). **Roland (9 Oct 2026): later, after 2.0.0; capture stays off until then, so there is no training data to back up.**
+6. **Real domain** instead of the sslip.io fallback (DNS change needs Roland). Roland cannot open the agent on his phone's mobile data, only on his wifi, and wants that fixed after 2.0.0 (9 Oct 2026); a real domain may be that fix (M9, "Put off by Roland until after 2.0.0").
 7. **Background POSTs from "safe" clicks (found in M6 part 1).** The spec's POST-navigation guard only stops a click that *navigates* with a POST. A page script that sends a `fetch`/XHR POST when a plain link is clicked is not stopped, and §9.4.1 rule 4 lets plain links through without approval. Options for part 2: (a) keep the spec as is and accept it; (b) in `safe` mode, browserd also blocks non-GET `fetch`/XHR for a few seconds after an action, which closes the gap but breaks pages that load content with POST; (c) gate every link that has a script handler, which means many more approvals. **Roland decided (8 Oct 2026): (a), allow background POSTs (the default).** Keep the switch for (b) off. *Built in #42: (a) is the default, `BROWSER_BLOCK_BACKGROUND_POSTS=true` is (b). Part 2 also stops forms a page submits by itself at any time, which the spec did not ask for.*
 8. **Sensitive-field word list (spec §6.5).** The spec matches `pass`, `pin`, `otp`… as plain substrings of a field's name, so "ship**pin**g address" and "**pass**enger name" count as secret fields and can never be typed into. Options: match whole words instead (recommended), or keep substrings and accept that the agent cannot fill such fields. **Roland decided (8 Oct 2026): keep both rules (the default).** #42 combines the spec's substring rule with a whole-word rule that also reads labels and placeholders. Keep that default; do not switch to `BROWSER_SENSITIVE_MATCH=word`.
 9. **Everyday links that need approval.** By the §9.4.1 keyword rule, links such as "Next", "Reviews", "Share", "Sign up" or any address containing `/post/` ask for approval, some with the two-tap confirm. That is the spec working as written (Q3). If it proves too noisy in the Contabo smoke, Roland may drop words from the list; nobody else may.
