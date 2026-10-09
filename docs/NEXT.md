@@ -1,16 +1,9 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 9 Oct 2026. Deployed code baseline **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): 13 / 0 / 1 with 3143 MiB available; schema version 3 confirmed. Before that the host ran **`e208bbd`** (#56) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59), M8 (#56) and its two feedback follow-ups are merged and deployed at `7ef26de`, with training off: #61 clears the pressed thumb and makes the chosen vote visible; #62 puts the feedback row under the answer and keeps the capture label after a reload. Roland checked the feedback row on the live page on 9 Oct 2026 and it works; the capture label was not part of that, because capture is off. Roland accepted M8 on 9 Oct 2026. M9 release preparation is in progress; final host acceptance and release merge remain pending. Put off by Roland until after 2.0.0: the training data setup, including where that data is saved, and the phone problems (M9, "Put off by Roland until after 2.0.0").**
+> Snapshot: 9 Oct 2026. Production was tested at **`bb76263`** (M9 on `v2`), with schema 3, the base model current, browser/screen on and training off. M6/M7/M8 are accepted. All planned M9 host checks and restart recovery passed; see [the acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publication, the PR #65 merge and branch deletion. The final polish integration and `v2` → `main` release review remain pending. Model reporting in longer chats is a documented follow-up proposed for after 2.0.0; phone and training-data work remain deferred as previously agreed.
+
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
-
-> **M9 integration update, 9 Oct 2026:** PR #64 is merged at **`720c58c`** under
-> Roland's explicit instruction to merge and delete `v2-m9-release`. Candidate CI passed
-> all seven jobs at `afee233`; actual integration-tip CI remains required. The next step
-> is Roland's Contabo deploy and tests, then reviewing any needed improvements before
-> `v2` → `main`. `v2-m9-release` is deleted; its temporary guarded maintenance job succeeded
-> and has been removed.
-
 
 ## 0. Who is who (read this first)
 
@@ -647,7 +640,7 @@ Status on 9 Oct 2026: steps 1 to 3 are done, the `migrate --check` in step 3 aft
 
 **Spec:** §10, §14, M9 in §12.
 
-#### Status: M9 candidate merged; Contabo acceptance next (9 Oct 2026)
+#### Status: M9 host acceptance passed; final release integration next (9 Oct 2026)
 
 PR #64 from `v2-m9-release` (based on `c9d9d3d`) is squash-merged at **`720c58c`**.
 Roland explicitly authorized the merge/branch deletion on 9 October. The branch is deleted
@@ -677,13 +670,25 @@ All 39 focused release checks pass after resolved-configuration review. All seve
 candidate CI jobs passed at `afee233`, including actual restore, live browser/screen/sandbox
 and CPU training/GGUF promotion/rollback. Actual merged `v2` CI is required for A9.1.
 
-Roland authorized merging the implementation/docs candidate. He asked for deploy commands
-and tests, then review of any improvements before `v2` → `main`. Follow RUNBOOK: deploy,
-verify/schema/audit, copy-only restore, UI gate/files/browser/screen smoke, benchmark,
-600-second loaded watch, 1800-second soak, planned service restart and external TCP/UDP/TLS
-checks. Return results; fix newly found blockers in reviewed PRs to `v2`. Keep NEXT until
-final acceptance, then fold/archive completed material into AGENT while preserving deferred
-work. Do not recreate M4/M8 handoff files. Training stays off; host settings stay 3072/3840m.
+Roland completed the M9 host checklist at `bb76263` on 9 October. Verification, copy-only
+restore, external ports/TLS, listener tables, benchmark, ten-minute loaded watch, thirty-minute
+soak and planned restart recovery all passed. Browser tests covered ownership, approvals,
+files, settings and persistent profile state. He approved publishing the summarized evidence
+and merging/deleting the PR #65 branch. The approved note is in
+[releases/m9-acceptance-2026-10-09.md](releases/m9-acceptance-2026-10-09.md).
+
+PR #65 fixes the untitled-page label, environment-backup exclusions and acceptance command
+documentation. Its original seven CI jobs passed; require green CI on the final recorded
+integration tip too. The host remains at the tested `bb76263` until Roland deploys the polish.
+A short post-deploy verify and untitled-page check is sufficient for these narrow changes;
+repeat a longer watch only if new failures or resource concerns appear.
+
+Roland asked whether 2.0.0 can ship with other issues addressed later. Recommendation:
+release after final polish integration/review, retaining training off and recording the model
+reporting limitation. A longer chat claimed a browser result without a tool call; direct
+inspection and a fresh-chat tool run succeeded. After 2.0.0, reproduce this behavior and
+improve truthful reporting of unfinished actions. Do not mark the issue repaired by PR #65.
+Keep the agreed phone and training-data follow-ups. Final `v2` → `main` merge is still pending.
 
 #### Goal
 
@@ -717,9 +722,9 @@ Every §10.2 baseline item has a test or a runbook check. No open high-severity 
 
 #### Tests / acceptance
 
-- [ ] **A9.1** CI green on `v2`: lint, unit, frontend, edge/integration, and `no-hosted-llm`.
-- [ ] **A9.2** Server checklist green: isolation script (model, sandbox, browser, novnc, trainer if enabled); external `nmap -Pn -p- 37.60.226.214` shows only 22, 80, 443 and `nmap -sU -p 443` shows 443/udp; TLS valid; a backup exists and the restore drill passed on a copy; memory headroom recorded during a browser task with the model loaded; log rotation visible in `docker inspect`.
-- [ ] Gate smoke repeated: chat "yes" does not approve; jobs cannot sign in; screenshots not sent to the text model. Automated regressions remain required; host human smoke is still pending.
+- [ ] **A9.1** All seven jobs green on the final `v2` integration tip; earlier deployed/polish tips passed. Final tip confirmation follows the PR #65 merge.
+- [x] **A9.2** Server checklist passed at `bb76263` on 9 Oct 2026 (approved evidence linked above): isolation script (model, sandbox, browser, novnc, trainer if enabled); external `nmap -Pn -p- 37.60.226.214` shows only 22, 80, 443 and `nmap -sU -p 443` shows 443/udp; TLS valid; a backup exists and the restore drill passed on a copy; memory headroom recorded during a browser task with the model loaded; log rotation visible in `docker inspect`.
+- [x] Gate/screen regressions passed in CI; live ownership, rejected/confirmed approval and file/browser smoke passed. Chat composer was disabled during pending approval; the automated chat-approval, job-sign-in and screenshot-boundary regressions remain enforced.
 - [ ] **A9.3** Shipper review comment on the release PR; Roland merges.
 
 #### Contabo deploy notes

@@ -5,11 +5,13 @@ commands. Commands assume Bash, `/opt/roland-agent`, Docker Engine 28+ with Comp
 2.33.1+, and passwordless sudo for `deploy`. Contabo currently has Ubuntu 24.04, four
 shared vCPUs, about 7.8 GB usable RAM and 2 GB swap at `37.60.226.214`.
 
-**Status, 9 October 2026:** M8 is accepted; host app code is `7ef26de`, schema 3, base model
-current, browser/screen on and training off. The persona diff fix in `c9d9d3d` is not yet
-deployed. M9 changes are a release candidate. Server acceptance and Shipper review remain
-pending. Only Roland merges the final `v2` → `main` PR. External implementers need Roland's
-explicit instruction before SSH/deploy. This runbook does not grant it.
+**Status, 9 October 2026:** M6/M7/M8 are accepted. M9 host checks and restart recovery
+passed at `bb76263`, schema 3, base model current, browser/screen on and training off.
+[The approved acceptance note](releases/m9-acceptance-2026-10-09.md) records measured results
+and known follow-ups. PR #65 polish integration and final release review remain pending.
+Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
+External implementers need Roland's explicit instruction before SSH/deploy; this runbook
+does not grant it.
 
 ## Preserve the current host configuration
 
