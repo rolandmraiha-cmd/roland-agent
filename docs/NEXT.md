@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 9 Oct 2026. Production was tested at **`bb76263`** (M9 on `v2`), with schema 3, the base model current, browser/screen on and training off. M6/M7/M8 are accepted. All planned M9 host checks and restart recovery passed; see [the acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publication, the PR #65 merge and branch deletion. PR #65 is merged at `a32bbf8`, all seven jobs passed at `3478d3b`, and the guarded temporary branch cleanup is in progress. Final integration CI and `v2` → `main` release review remain pending. Model reporting in longer chats is a documented follow-up proposed for after 2.0.0; phone and training-data work remain deferred as previously agreed.
+> Snapshot: 9 Oct 2026. Production was tested at **`bb76263`** (M9 on `v2`), with schema 3, the base model current, browser/screen on and training off. M6/M7/M8 are accepted. All planned M9 host checks and restart recovery passed; see [the acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publication, the PR #65 merge and branch deletion. PR #65 is merged at `a32bbf8`, all seven jobs passed at `3478d3b`, and its extra branch and temporary cleanup workflow are removed. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks final integration CI, the focused polish deploy and `v2` → `main` release acceptance. Main remains unchanged. Model reporting in longer chats is a documented follow-up proposed for after 2.0.0; phone and training-data work remain deferred as previously agreed.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
@@ -675,7 +675,9 @@ restore, external ports/TLS, listener tables, benchmark, ten-minute loaded watch
 soak and planned restart recovery all passed. Browser tests covered ownership, approvals,
 files, settings and persistent profile state. He approved publishing the summarized evidence
 and merging/deleting the PR #65 branch. PR #65 is now merged at `a32bbf8`; all seven
-final-head checks passed. The temporary guarded cleanup is in progress. The approved note is in
+final-head checks passed. Guarded cleanup run [37990052474](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37990052474)
+verified the merged head and removed the branch; its temporary workflow is removed. Release
+PR #66 tracks the final CI, focused polish deploy and acceptance. The approved note is in
 [releases/m9-acceptance-2026-10-09.md](releases/m9-acceptance-2026-10-09.md).
 
 PR #65 fixes the untitled-page label, environment-backup exclusions and acceptance command
@@ -723,10 +725,10 @@ Every §10.2 baseline item has a test or a runbook check. No open high-severity 
 
 #### Tests / acceptance
 
-- [ ] **A9.1** All seven jobs green on the final `v2` integration tip; earlier deployed/polish tips passed. Final tip confirmation follows the PR #65 merge.
+- [ ] **A9.1** All seven jobs green on the final `v2` integration tip; earlier deployed/polish tips passed. Exact final-head results are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
 - [x] **A9.2** Server checklist passed at `bb76263` on 9 Oct 2026 (approved evidence linked above): isolation script (model, sandbox, browser, novnc, trainer if enabled); external `nmap -Pn -p- 37.60.226.214` shows only 22, 80, 443 and `nmap -sU -p 443` shows 443/udp; TLS valid; a backup exists and the restore drill passed on a copy; memory headroom recorded during a browser task with the model loaded; log rotation visible in `docker inspect`.
 - [x] Gate/screen regressions passed in CI; live ownership, rejected/confirmed approval and file/browser smoke passed. Chat composer was disabled during pending approval; the automated chat-approval, job-sign-in and screenshot-boundary regressions remain enforced.
-- [ ] **A9.3** Shipper review comment on the release PR; Roland merges.
+- [ ] **A9.3** COMMENT review at the final head of release PR #66; Roland decides and merges. At acceptance, mark CHANGELOG released and archive completed NEXT into AGENT history while retaining deferred work.
 
 #### Contabo deploy notes
 

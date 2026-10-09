@@ -8,7 +8,10 @@ shared vCPUs, about 7.8 GB usable RAM and 2 GB swap at `37.60.226.214`.
 **Status, 9 October 2026:** M6/M7/M8 are accepted. M9 host checks and restart recovery
 passed at `bb76263`, schema 3, base model current, browser/screen on and training off.
 [The approved acceptance note](releases/m9-acceptance-2026-10-09.md) records measured results
-and known follow-ups. PR #65 polish integration and final release review remain pending.
+and known follow-ups. PR #65 is merged at `a32bbf8`; its branch and temporary cleanup workflow
+are removed. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks final
+CI, a focused post-polish deploy check and release acceptance. The tested host checkpoint
+predates PR #65; the full load, restore and restart checks need not be repeated for that narrow patch.
 Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
 External implementers need Roland's explicit instruction before SSH/deploy; this runbook
 does not grant it.

@@ -3,8 +3,9 @@
 ## 2.0.0 — Unreleased
 
 M9 release candidate. Host acceptance and restart recovery passed at `bb76263` on
-9 October 2026. Final polish integration, release review and the `v2` → `main` merge
-remain pending. Training stays off. See the approved M9 acceptance note and known
+9 October 2026. Final polish PR #65 is merged at `a32bbf8`; release PR #66 tracks final
+CI, a focused polish deploy check and the `v2` → `main` review. Release acceptance and
+the main merge remain pending. Training stays off. See the approved M9 acceptance note and known
 model-reporting, phone and training-data follow-ups in the project records.
 
 ### Added
@@ -34,6 +35,9 @@ model-reporting, phone and training-data follow-ups in the project records.
 
 ### Known limitations and deferred work
 
+- Model reporting can claim actions or recovery without supporting tool results, especially
+  in longer chats. Direct browser inspection and a fresh explicit tool run passed; truthful
+  action reporting remains a follow-up and PR #65 does not fix it.
 - Small CPU model speed/quality; 4096-token repo default has not been accepted on the VPS.
 - Accepted browser GET/background-request and page-inspection limits (see SECURITY).
 - Training-data setup/backup/capture/GPU smoke and phone screen/mobile-data faults wait

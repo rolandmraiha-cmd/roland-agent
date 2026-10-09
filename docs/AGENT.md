@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-09. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 is merged at `a32bbf8`, with all seven checks passed at `3478d3b`. The temporary guarded branch cleanup is in progress; final integration CI and release review remain pending. `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
+> Snapshot: 2026-10-09. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 is merged at `a32bbf8`, with all seven checks passed at `3478d3b`. The merged branch and temporary cleanup workflow are removed. Final integration CI, the focused polish deploy and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -62,7 +62,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 - M6.7 Browser tab and authenticated status/thumbnail routes exist (#40). They show the browser's mode, address, tabs and a thumbnail on request; with the browser off the tab says so.
 - Server-side checks exist (#41): sandbox/browser isolation and the read-only memory report. The pre-step and `WATCH=600` memory report passed. After #50, ordinary `sudo timeout --kill-after=5s 180s make verify` completed with **11 pass / 0 fail / 1 skip**, including every isolation probe, with **3640 MiB** available at the idle check. The skip is the human login/chat/approval checklist.
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with checkout `a0dbf22` and app image `ea7e429`; `caddy`, `core`, `model`, `sandbox`, `browser` healthy. Before today's browser deployment the host was `98971cc` (M5 code), not the previously documented `a27b5ff` docs commit.
-- M8's migration takes the DB schema from version **2** to **3** on the first core start after deployment. Confirmed on the host on 9 Oct 2026 after the `7ef26de` deploy: `python -m agent migrate --check` printed `Database version: 3; target: 3; up to date`. Deployed package version remains **0.1.0**. M9 source bumps to **2.0.0**; that source version does not establish deployment or release acceptance.
+- M8's migration takes the DB schema from version **2** to **3** on the first core start after deployment. Confirmed on the host on 9 Oct 2026 after the `7ef26de` deploy: `python -m agent migrate --check` printed `Database version: 3; target: 3; up to date`. That M8 checkpoint used package version **0.1.0**. The M9 deployment tested at `bb76263` uses the **2.0.0** candidate; package version alone does not establish final release acceptance.
 
 ## 4. Release status and accepted limitations
 
@@ -70,7 +70,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 
 - **M8 as merged (implementation #56, approved for integration on 8 Oct 2026):** the pipeline on `v2-m8-model` is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh. Screen and trainer services, required mounted secrets, preflight and edge fixtures are combined. Capture still refuses active sign-ins and every screen session. Backup/configuration expectations, ShellCheck and the missing tokenizer dependency are corrected. Stopping a sign-in now delivers its final cancellation event before the chat ends. Model evaluation reads streamed schema-error bodies before constrained fallback; unrelated HTTP errors are not retried. The synthetic model declares the evaluation context of 4096 tokens; regression tests check that every public prompt plus its output allowance fits and that all 256 byte tokens preserve unseen Unicode. Byte fallback fixes the pinned server failure when tokenizing newlines or unseen characters. The synthetic tokenizer also leaves the assistant prefix literal, preventing the pinned sampler from dropping its first token before grammar initialization. The CPU workflow provides the checkout import path to the standalone probe. The real tiny-GGUF swap probe now uses authenticated trainer API handlers and human request tokens, verifies refusal without a token, and checks that valid promote/rollback does not restart the container. All five GitHub checks passed on code head `c9a7ef1`: 1,543 unit tests, 81 frontend tests, lint, edge/isolation, and CPU training/conversion plus the authenticated model-swap probe. Roland then requested merge and branch removal; this final status update changes documentation only. At that merge no M8 deployment had been performed (it has been since, see the entry above); no paid GPU has been rented and no model promoted. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). Roland accepted M7 on 8 Oct 2026. Training stays off.
 
-- **M9** release candidate on `v2-m9-release`: stricter verification, a disposable restore drill, benchmark, dedicated local-only CI and live browser/screen/sandbox CI, full SECURITY/RUNBOOK, README and changelog are prepared. No host SSH, deploy, restart, domain/limit/flag change, GPU rental or production model switch was performed. Proposed docs await Roland's text review before merge; A9.1–A9.3 remain pending. After 2.0.0, by Roland's decision of 9 Oct 2026: the training data setup and the phone problems (first entry above). Plan and acceptance: [docs/NEXT.md](NEXT.md).
+- **M9:** implementation PR #64 and polish PR #65 are merged into `v2`; both extra branches and their temporary cleanup workflows are removed. Roland completed host acceptance at `bb76263`; the measured evidence is in §12. Final CI, a focused polish deployment check and release acceptance are tracked in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66), `v2` → `main`. Main remains unchanged. Training-data and phone work stay deferred, with model-reporting quality proposed as another follow-up. Plan and acceptance: [docs/NEXT.md](NEXT.md).
 - **M7 is accepted (Roland, 8 Oct 2026)** and no longer belongs under "not done"; the next four points say what it consists of and what was left as it is. Known and left as they are: the sign-in was done on his PC, not the phone (the phone could not look up the server's name on mobile data that evening); the agent opens the address it is given and does not look for the site's sign-in form; a new tab and the address bar's suggestion box show "This page is blocked"; and a form that posts into a new tab leaves a blank tab behind.
 - **M7 part 1, core side (#55, merged):** screen sessions (`agent/screen.py`), the sign-in flow and the `request_signin` tool (`agent/signin.py`), the routes Caddy and the pages use (`agent/web/routes_screen.py`: `/screen`, `/api/screen/*`, `/api/signin/*`, `/internal/screen-auth`), the screen page (`screen.html`, `screen.js`), sign-in cards in the chat and Watch / Take control on the Browser tab. With the flag off the routes answer 404 or 403, the tool is not offered and the buttons are hidden. A7.1 (`tests/test_screen_auth.py`) and A7.2 (`tests/test_signin.py`) pass, with page tests in `tests/frontend/screen.test.cjs` and `chat.test.cjs`.
 - **M7 part 2, the services (#57, merged; on on Contabo, off by default in the repo):** x11vnc started by `browserd/launcher.py` when `SCREEN_ENABLED=true` (`browserd/vnc.py`: command line, password file, cutting connections by replacing x11vnc); `docker/novnc/` and the `novnc` compose service behind the `screen` profile; `vnc_password` / `vnc_view_password` mounted into core and the browser; the Caddy screen routes; `python -m agent` accepts `SCREEN_ENABLED=true` together with the browser; preflight, verify and isolation know the screen. A7.3 passes in the live stack (`tests/integration/test_screen_live.py`, run by `make test-browser`) and in CI for the part that needs no browser (`tests/integration/edge.sh`, second phase). A7.4 passed on Roland's second try (see §12). Known leftovers, visible on the screen: a form that posts into a new tab leaves a blank tab behind that browserd cannot see or close, and a new tab and the address bar's suggestion box show "This page is blocked" (docs/NEXT.md, M7, "Known issues").
@@ -195,25 +195,24 @@ After #43 (`--cache-ram 0`), Roland's pre-step with two chats plus "continue" me
 
 ### Pending
 
-M9 §10 review and SECURITY write-up are prepared; host verification and reviewer acceptance remain pending. The baseline matrix maps every §10.2 item to tests or host checks. M8 live capture/export/GPU use is deferred after 2.0.0 by Roland, with training off; automated pipeline/swap tests do not prove live data handling.
+M9 §10 review and SECURITY write-up are merged; host verification and restart recovery passed at `bb76263`. Final release review/acceptance is tracked in PR #66. The baseline matrix maps every §10.2 item to tests or host checks. M8 live capture/export/GPU use is deferred after 2.0.0 by Roland, with training off; automated pipeline/swap tests do not prove live data handling.
 
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model.
 
 ## 8. Next coding order
 
-1. M9 implementation/docs PR #64 is merged at `720c58c` under Roland's explicit
-   9 October authorization. Candidate CI is green and its merged branch is deleted; keep
-   NEXT until host acceptance. This authorization does not merge `v2` into `main`.
-2. All CI jobs must pass at the actual `v2` tip (A9.1).
-   Roland/Shipper deploys that tip, preserving 3072/3840m, six tool steps and training off.
-3. Run [RUNBOOK's M9 checklist](RUNBOOK.md#m9-server-acceptance-record-each-result): external
-   ports/TLS/isolation/logs, backup restore copy, browser load, synthetic speed, soak/restart
-   and human approval smoke. Record results below and in NEXT/README; fix new blockers
-   in separate reviewed PRs. Earlier M6/M8 observations do not substitute for A9.2.
-4. Open the final `v2` → `main` PR only after acceptance; Shipper comments and **Roland
-   merges** (A9.3). Mark changelog released and archive/fold completed NEXT material then.
-5. After 2.0.0, return to Roland's deferred training-data setup and phone issues. No new
-   training capture, provider rental, domain change or context increase without his decision.
+1. M9 implementation #64 and approved polish #65 are merged into `v2`; their extra
+   branches and cleanup workflows are removed. The host acceptance checkpoint is `bb76263`.
+2. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks A9.1:
+   all seven jobs must pass on its final `v2` head. Record exact head and run URLs there.
+3. Roland deploys the merged polish, retaining context 3072, model memory 3840m, threads 3,
+   six tool steps and training off. Run verify and check the untitled browser-page label.
+   The completed restore/load/soak/restart checks need repetition only if a new concern appears.
+4. Add a COMMENT release review at the final head. Roland decides and merges the release
+   (A9.3), unless he explicitly delegates that merge. At acceptance, mark the changelog
+   released and archive/fold completed NEXT material into this history, retaining follow-ups.
+5. After 2.0.0, return to model-reporting quality and Roland's deferred phone and
+   training-data work. New capture, provider rental, DNS or resource limits need his decision.
 
 ## 9. Host facts
 
@@ -224,7 +223,7 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 | Public IPv4 | `37.60.226.214` |
 | URL | https://37-60-226-214.sslip.io/ |
 | Paths | `/opt/roland-agent`, workspace `/srv/roland-agent/workspace` |
-| Live services / HEAD | caddy, core, model, sandbox, browser, novnc; `7ef26de` (Roland's deployment log, 9 Oct 2026) |
+| Live services / tested HEAD | caddy, core, model, sandbox, browser, novnc; `bb76263` (M9 acceptance, 9 Oct 2026); PR #65 polish awaits deploy |
 | Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`, `COMPOSE_PROFILES=browser,screen`, `BROWSER_ENABLED=true`, `SCREEN_ENABLED=true`, `BROWSER_CHROMIUM_SANDBOX=true`, `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json`, `MAX_TOOL_STEPS=6` |
 | Snapshot | `pre-m6-deploy-2026-10-08` |
 
@@ -301,8 +300,9 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 ### M9 host acceptance (9 October 2026)
 
 PR #65 is merged at `a32bbf8`; final-head runs `37988357752` and `37988357768`
-passed all seven jobs at `3478d3b`. Temporary guarded cleanup removes only the
-unchanged merged `m9-acceptance-polish` branch, then its workflow will be removed.
+passed all seven jobs at `3478d3b`. Guarded cleanup run [37990052474](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37990052474)
+verified the exact merged head and deleted `m9-acceptance-polish`; the temporary workflow
+is removed. Final integration CI and release review are recorded in PR #66.
 
 Roland explicitly approved publication of this summarized evidence on 9 October.
 The actual tested deployment was `bb762630730b50a50f7df381a676d2b96edaf568`;

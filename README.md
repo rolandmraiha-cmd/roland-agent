@@ -7,10 +7,10 @@ chats, files and browser snapshots are never sent to a hosted inference service.
 **2.0.0 release candidate.** M0–M9 implementation is on `v2`. The M9 deployment at
 **`bb76263`** passed the host acceptance checks and restart recovery on 9 October 2026.
 Roland approved publishing the results; PR #65 is merged at `a32bbf8`, with all seven
-checks passed at `3478d3b`. The guarded temporary branch cleanup is in progress.
+checks passed at `3478d3b`. Its merged branch is deleted and the cleanup workflow removed.
 See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
-Final integration CI and the reviewed `v2` → `main` release merge remain pending;
-training stays off.
+Final integration CI and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
+`v2` → `main` has not been merged; training stays off.
 
 ## What it does
 
@@ -141,6 +141,6 @@ computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
 [Master status and rules](docs/AGENT.md) · [Remaining release work](docs/NEXT.md) ·
 [Technical specification](docs/v2-spec.md) · [Changelog](CHANGELOG.md).
 Every PR updates README, AGENT and NEXT for changed code, plans or deployment state.
-M9 host acceptance is recorded in the approved note. Final polish integration and release
-review remain pending. The model-reporting, phone and training-data follow-ups are listed
+M9 host acceptance is recorded in the approved note. PR #65 is merged; release PR #66
+tracks final CI, the focused polish deploy and release review. The model-reporting, phone and training-data follow-ups are listed
 in NEXT; training and the current production limits remain unchanged.
