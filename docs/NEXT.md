@@ -661,8 +661,8 @@ Branch `v2-m9-release` starts at verified remote `v2` **`c9d9d3d`**. Prepared ch
 No Contabo SSH/deploy, external scan, host restore/load/restart, DNS/memory/flag change,
 GPU rental or model promotion was performed by this implementation. The handoff reserves
 host operations for Roland/Shipper. Tests/CI and host evidence are tracked in AGENT §12;
-final M9 acceptance is not inferred from an earlier milestone or the version bump. Initial
-local validation: 1522 Python passes, 59 skips (58 need the unavailable Docker CLI, one
+final M9 acceptance is not inferred from an earlier milestone or the version bump. Post-fix
+local validation: 1526 Python passes, 59 skips (58 need the unavailable Docker CLI, one
 existing hard-link skip), 49 live cases excluded; 88 frontend passes, ruff/ShellCheck clean.
 All 39 focused release checks pass after resolved-configuration review. On the initial
 PR head, GitHub unit/lint/frontend/no-hosted/edge jobs and CPU training/GGUF swap passed;
@@ -700,7 +700,7 @@ Roland's decision when he accepted M8: these are later fixes, "after whole ai is
 
 #### Security requirements
 
-Every §10.2 baseline item has a test or a runbook check. No open high-severity finding at release. Dedicated CI job `no-hosted-llm` added if workflow-scope credentials are available; otherwise record the gap for Roland.
+Every §10.2 baseline item has a test or a runbook check. No open high-severity finding at release. M9 adds the dedicated `no-hosted-llm` and live browser/screen/sandbox CI jobs; workflow edits were published successfully. Actual merged-tip CI and host evidence remain required.
 
 #### Tests / acceptance
 

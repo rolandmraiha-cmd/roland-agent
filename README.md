@@ -135,7 +135,7 @@ computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
 Every PR updates README, AGENT and NEXT for changed code, plans or deployment state;
 accepted security limits also update SECURITY. M9 documentation is proposed text for
 Roland's review; it is not deployed or finally approved by creating this branch. Local M9
-validation passed 1522 Python tests and all 88 frontend tests; 58 Docker CLI checks and
+validation after the review fixes passed 1526 Python tests and all 88 frontend tests; 58 Docker CLI checks and
 one existing hard-link check were skipped, with 49 live cases excluded. Ruff/ShellCheck
 pass. Live CI caught an unexpected IPv6 listener in the screen server; M9 closes it and
 retains the strict socket check. Verification reads Compose's resolved feature settings.

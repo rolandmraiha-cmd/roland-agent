@@ -207,6 +207,7 @@ Collect results at the actual deployed M9 commit with training still off.
 | External UDP | From that machine: `sudo nmap -sU -p 443 37.60.226.214` | Record open/open\|filtered and confirm the Caddy UDP mapping; UDP silence alone is inconclusive |
 | Certificate | `curl -vI https://37-60-226-214.sslip.io/login` | Valid chain/hostname without `-k`; login 200 |
 | Actual log settings | `sudo docker inspect --format '{{json .HostConfig.LogConfig}}' $(sudo docker compose ps -q)` | Every service has `json-file`, `max-size=10m`, `max-file=3` |
+| Browser/screen sockets | Command below with browser and screen enabled | Exactly browserd and VNC on their intended IPv4 addresses; no IPv6 wildcard VNC listener |
 | Restore | Drill above | PASS on the selected copy; live state retained |
 | Browser-task load | `sudo env WATCH=600 make memory-report` while running a browsing task | At least 800 MiB host available throughout, no restart/OOM; record all service peaks and minimum headroom |
 | Idle headroom | `free -m` with loaded model and all intended services | At least 1200 MiB available |
@@ -220,6 +221,28 @@ time to the first nonempty text chunk and total time; it does not print generate
 credentials. These synthetic rates are not an estimate of a full tool task. Run during a quiet
 period; a benchmark competes with chats for CPU. Record production `MODEL_CTX=3072` and
 model version alongside results. It never changes context, limits or the serving model.
+
+The live CI found that `-no6` alone left LibVNCServer listening on IPv6. After deploying
+the `-rfbportv6 0` fix, check the actual browser socket tables too (Ubuntu's little-endian
+address representation below). This reads socket metadata without connecting or logging keys:
+
+```bash
+sudo docker compose exec -T browser python -c '
+from pathlib import Path
+found = set()
+for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+    path = Path(table)
+    if not path.exists():
+        continue
+    for line in path.read_text().splitlines()[1:]:
+        fields = line.split()
+        if fields[3] == "0A" and not fields[1].startswith("0B00007F:"):
+            found.add(fields[1])
+if found != {"28044D0A:1BBC", "28054D0A:170C"}:
+    raise SystemExit("FAIL: unexpected browser/screen listener")
+print("PASS: browserd/VNC only on intended IPv4 addresses")
+'
+```
 
 For the loaded watch, start the memory report, then in the UI ask the agent to open/read an
 ordinary public page and summarise it. Approve any presented card yourself. The command
