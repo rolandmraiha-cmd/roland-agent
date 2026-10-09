@@ -1052,7 +1052,8 @@ function renderBrowserState() {
   $("browser-address").textContent = "";
   if (!state || !state.enabled || !state.reachable) return;
   $("browser-mode").textContent = state.mode === "agent" ? "Agent mode" : state.mode === "user" ? "User mode" : "Mode unavailable";
-  $("browser-title").textContent = typeof state.title === "string" && state.title ? state.title : "No active page";
+  $("browser-title").textContent = typeof state.title === "string" && state.title ? state.title
+    : typeof state.url === "string" && state.url ? "Untitled page" : "No active page";
   $("browser-address").textContent = typeof state.url === "string" && state.url ? state.url : "No address";
   const tabs = Array.isArray(state.tabs) ? state.tabs : [];
   for (const tab of tabs) {
