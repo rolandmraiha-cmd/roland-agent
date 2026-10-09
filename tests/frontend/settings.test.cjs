@@ -87,6 +87,24 @@ test('the feedback row goes under the answer, not beside it',()=>{
   assert.match(css,/\.msg\.assistant\s*\{[^}]*flex-wrap:\s*wrap/);
   assert.match(css,/\.feedback\s*\{[^}]*flex-basis:\s*100%/);
 });
+test('restoring a persona version clears the diff picked before it',async()=>{
+  const f=fixture();
+  f.context.api=async(url,options={})=>{
+    f.calls.push({url,options});
+    const data=url==='/api/settings/persona'?{active:{agent_name:'Agent',persona:'tone',instructions:''},preview:'prompt',token_count:815,budget:1500,over_budget:false}:
+      url==='/api/settings/persona/versions'?[{id:7,created:1,active:1},{id:2,created:1,active:0}]:
+      url==='/api/settings/persona/versions/2'?{diff:'--- version 2'}:{};
+    return {json:async()=>data};
+  };
+  const history=f.get('persona-history'),diff=f.get('persona-diff');
+  history.value='2';await history.onchange();
+  assert.equal(diff.textContent,'--- version 2');
+  await f.get('persona-restore').onclick();
+  assert.ok(f.calls.some(call=>call.url==='/api/settings/persona/versions/2/restore'&&call.options.method==='POST'));
+  assert.equal(diff.textContent,'');
+  assert.equal(history.children.length,2);
+  assert.equal(f.get('settings-message').textContent,'Restored as a new version.');
+});
 test('model promotion requires exact typed id and a second delayed click',async()=>{
   const f=fixture();f.context.api=async(url,options={})=>{
     f.calls.push({url,options});

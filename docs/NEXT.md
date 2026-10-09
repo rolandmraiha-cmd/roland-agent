@@ -90,7 +90,7 @@ Before writing any code:
 | Item | Value |
 |---|---|
 | Repository | https://github.com/rolandmraiha-cmd/roland-agent |
-| Integration branch | `v2`; Contabo checkout and app image **`7ef26de`** (#62; Roland's deployment log, 9 Oct 2026). M6, fixes #43–#53, M7 (#55, #57, #58), the chat refresh (#59), M8 (#56, training off) and its feedback follow-ups (#61, #62) are live; verification passed normally (13 / 0 / 1, 3143 MiB available). Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
+| Integration branch | `v2`; Contabo checkout and app image **`7ef26de`** (#62; Roland's deployment log, 9 Oct 2026). M6, fixes #43–#53, M7 (#55, #57, #58), the chat refresh (#59), M8 (#56, training off) and its feedback follow-ups (#61, #62) are live; verification passed normally (13 / 0 / 1, 3143 MiB available). #63 (the deploy record and a small persona diff fix) is merged and not deployed. Before the first browser deployment the host was `98971cc`, not the previously documented `a27b5ff` (same M5 code) |
 | `main` | Untouched since v1; do not push until M9 |
 | Live URL | https://37-60-226-214.sslip.io/ |
 | Host | Contabo VPS, Ubuntu 24.04, ~4 vCPU / ~8 GB RAM, IPv4 `37.60.226.214` |
@@ -545,9 +545,10 @@ Open before Roland is asked to accept M8:
 - [x] With capture off, a thumbs-up writes no `training_examples` row (9 Oct 2026, point 8: Roland's count after voting printed `votes: 2 | training examples: 0`). The read-only count: `sudo docker compose exec -T core python -c "import sqlite3; c=sqlite3.connect('file:/data/agent.db?mode=ro', uri=True); print('votes:', c.execute('select count(*) from feedback').fetchone()[0], '| training examples:', c.execute('select count(*) from training_examples').fetchone()[0])"`
 - [x] Ordinary chat, chat refresh and the browser screen on this build (9 Oct 2026, point 8). On the screen only Watch, Take control with a scroll, and Hand back were tried.
 - [ ] A sign-in by Roland on the screen (`request_signin`) on this build. He has to type the password himself.
+- [ ] Not blocking, after the next deploy: pick a version in the persona history, restore it, and see the diff box empty afterwards (#63).
 - [ ] Only if Roland chooses it: agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. In that test, reload the chat after the vote: the row must still read "Included for training review". A rented GPU is optional.
 
-Noticed in the persona test, not changed: after Restore the diff box keeps the diff from before the restore, although the restored version is now the active one (`settings.js` reloads the fields and the history but does not clear `persona-diff`).
+Found in the persona test and fixed in #63 (not deployed): after Restore the diff box kept the diff from before the restore, although the restored version was now the active one. `settings.js` now empties `persona-diff` whenever the persona is reloaded (opening Settings, Save new version, Restore). Regression test in `tests/frontend/settings.test.cjs`.
 
 Keep capture, the weekly loop, `TRAINER_URL` and the `training` profile off until Roland says otherwise. Roland runs the host commands himself.
 
