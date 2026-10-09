@@ -37,86 +37,69 @@ if [[ $mode == restore ]]; then
     exit 0
 fi
 
-# restore-test: disposable project
+# Restore-test uses the built core image and two disposable volumes only. No Compose
+# services, production secrets, networks, browser profile or live database are mounted.
 suffix=$(python3 -c 'import uuid; print(uuid.uuid4().hex[:10])')
 project=${deploy_project}-restore-test-$suffix
 work=$(mktemp -d)
+volumes=()
 cleanup() {
-    docker compose -p "$project" -f "$deploy_repo/docker-compose.yml" down -v --remove-orphans >/dev/null 2>&1 || true
+    local failed=0 volume
+    for volume in "${volumes[@]}"; do
+        docker volume rm "$volume" >/dev/null 2>&1 || failed=1
+    done
     rm -rf -- "$work"
+    if ((failed)); then
+        printf 'restore-test cleanup failed; inspect disposable volumes for %s\n' "$project" >&2
+        return 1
+    fi
 }
 trap cleanup EXIT
 
-mkdir -p -- "$work/workspace" "$work/secrets"
-chmod 0700 -- "$work/workspace" "$work/secrets"
-# Minimal secrets so compose can start core for checks; values are disposable.
-python3 - <<PY
-import secrets, pathlib
-root = pathlib.Path("$work/secrets")
-(root / "model_server_token").write_text(secrets.token_urlsafe(32))
-(root / "agent_password_hash").write_text("not-a-real-hash-for-restore-test")
-for p in root.iterdir():
-    p.chmod(0o400)
-PY
-cp -n -- "$deploy_repo/.env.example" "$work/.env"
-chmod 0600 -- "$work/.env"
-# Point workspace and use internal TLS / localhost.
-python3 - "$work/.env" "$work/workspace" <<'PY'
-import pathlib, sys
-env, ws = pathlib.Path(sys.argv[1]), sys.argv[2]
-lines = []
-overrides = {
-    "AGENT_DOMAIN": "localhost",
-    "CADDY_TLS": "internal",
-    "WORKSPACE_HOST_DIR": ws,
+# The protected directory keeps this temporary copy private on the host. Binding just
+# the file lets uid 1000 read it even when the original backup is owned by root.
+cp -- "$file" "$work/backup.db.gz"
+chmod 0444 -- "$work/backup.db.gz"
+for name in agent-data backups; do
+    volume=${project}_$name
+    docker volume create --label "com.docker.compose.project=$project" \
+        --label "com.docker.compose.volume=$name" "$volume" >/dev/null
+    volumes+=("$volume")
+done
+
+run_copy() {
+    docker run --rm \
+        --user 1000:1000 --network none \
+        --read-only --cap-drop ALL --security-opt no-new-privileges \
+        --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
+        --memory 640m --memory-swap 640m --cpus 1 --pids-limit 128 \
+        --tmpfs /tmp:rw,nosuid,nodev,size=64m,mode=1777 \
+        -v "${project}_agent-data:/data" \
+        -v "${project}_backups:/backups" \
+        -v "$work/backup.db.gz:/input/backup.db.gz:ro" \
+        -e DATA_DIR=/data -e BACKUP_DIR=/backups -e WORKSPACE_DIR=/tmp \
+        roland-agent/core:local "$@"
 }
-keys = set(overrides)
-for line in env.read_text().splitlines():
-    k = line.partition("=")[0]
-    if k in keys:
-        continue
-    lines.append(line)
-lines.extend(f"{k}={v}" for k, v in overrides.items())
-env.write_text("\n".join(lines) + "\n")
-PY
-
-# Seed agent-data by running restore in a one-off core with a fresh volume.
 printf 'restore-test project=%s\n' "$project"
-# Create volumes via a short compose config resolve + volume create labels.
-docker volume create --label "com.docker.compose.project=$project" --label com.docker.compose.volume=agent-data "${project}_agent-data" >/dev/null
-docker volume create --label "com.docker.compose.project=$project" --label com.docker.compose.volume=backups "${project}_backups" >/dev/null
-
-docker run --rm \
-    --user 1000:1000 \
-    --network none \
-    --read-only --cap-drop ALL --security-opt no-new-privileges \
-    --tmpfs /tmp:rw,nosuid,nodev,size=64m \
-    -v "${project}_agent-data:/data" \
-    -v "${project}_backups:/backups" \
-    -v "$(readlink -f -- "$file"):/input/backup.db.gz:ro" \
-    -v "$deploy_repo/secrets/model_server_token:/run/secrets/model_server_token:ro" \
-    -e DATA_DIR=/data -e BACKUP_DIR=/backups -e WORKSPACE_DIR=/tmp \
-    -e AGENT_PASSWORD_HASH_FILE=/run/secrets/agent_password_hash \
-    -e MODEL_SERVER_TOKEN_FILE=/run/secrets/model_server_token \
-    -v "$work/secrets/agent_password_hash:/run/secrets/agent_password_hash:ro" \
-    roland-agent/core:local \
-    python -m agent restore /input/backup.db.gz
-
-docker run --rm \
-    --user 1000:1000 \
-    --network none \
-    --read-only --cap-drop ALL --security-opt no-new-privileges \
-    --tmpfs /tmp:rw,nosuid,nodev,size=64m \
-    -v "${project}_agent-data:/data" \
-    -v "${project}_backups:/backups" \
-    -v "$work/secrets/agent_password_hash:/run/secrets/agent_password_hash:ro" \
-    -v "$work/secrets/model_server_token:/run/secrets/model_server_token:ro" \
-    -e DATA_DIR=/data -e BACKUP_DIR=/backups -e WORKSPACE_DIR=/tmp \
-    -e AGENT_PASSWORD_HASH_FILE=/run/secrets/agent_password_hash \
-    -e MODEL_SERVER_TOKEN_FILE=/run/secrets/model_server_token \
-    roland-agent/core:local \
-    bash -c 'python -c "import sqlite3; c=sqlite3.connect(\"/data/agent.db\"); print(c.execute(\"PRAGMA integrity_check\").fetchone()[0])" \
-      && python -m agent migrate --check \
-      && python -m agent audit-verify'
-
-printf 'restore-test PASS (temporary volume will be deleted)\n'
+run_copy python -m agent restore /input/backup.db.gz
+run_copy python -c '
+import sqlite3
+from pathlib import Path
+from agent.audit import verify_file
+from agent.migrations import inspect_version, latest_version
+with sqlite3.connect("file:/data/agent.db?mode=ro", uri=True) as db:
+    if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
+        raise SystemExit("restore-test integrity check failed")
+    if db.execute("PRAGMA foreign_key_check").fetchall():
+        raise SystemExit("restore-test foreign key check failed")
+    if db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]:
+        raise SystemExit("restore-test retained login sessions")
+if inspect_version(Path("/data/agent.db")) != latest_version():
+    raise SystemExit("restore-test schema is not current")
+if not verify_file(Path("/data/agent.db"))["ok"]:
+    raise SystemExit("restore-test audit check failed")
+print("integrity, foreign keys, schema, audit and expired sessions: PASS")
+'
+cleanup
+trap - EXIT
+printf 'restore-test PASS (disposable volumes removed; live data untouched)\n'

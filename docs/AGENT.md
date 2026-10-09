@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-09. Deployed code baseline: **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): the pull, backup, rebuild and deploy succeeded and verification passed 13 / 0 / 1 with 3143 MiB available; schema version 3 and the base model as current are confirmed (§12). Before that the host ran **`e208bbd`** (#56; 13 / 0 / 1 with 3393 MiB available) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58; the five services are healthy and the screen relay `novnc` runs as a sixth. A6.4 isolation and A6.5 memory checks passed. The plain dummy form test passes live at `50767ec` (correctly labelled Submit order card, one approved submission, final answer); rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. **Roland confirmed M7 as done on 8 Oct 2026**: the browser screen works to the standard he wants and no password was kept; faults that turn up later are to be fixed as they come. M8 (#56) is merged and deployed with training off; its first live checks passed, the feedback follow-ups (#61: Clear vote and a visible chosen thumb; #62: the row under the answer and the capture label after a reload) are deployed at `7ef26de`, Roland found the feedback row working on the live page the same evening (§12), and the other page checks passed too, including a sign-in by Roland on the screen from his phone; **Roland accepted M8 on 9 Oct 2026** and put the training data setup and the phone problems off until after 2.0.0 (§4, §12). M9 is next. #63 also fixes a stale persona diff box; that fix is not deployed. Both parts of M7 are merged (#55, #57) and deployed, and Roland switched the screen on on Contabo on 8 Oct 2026 (off by default in the repo). The screen smoke test passed; his first sign-in attempt found three faults, fixed by #58 (merged and deployed); his second try went through from the plain request to the agent's answer. The password check found nothing (0 of 527 log lines). Verify the remote tip before coding.
+> Snapshot: 2026-10-09. Deployed code baseline: **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): the pull, backup, rebuild and deploy succeeded and verification passed 13 / 0 / 1 with 3143 MiB available; schema version 3 and the base model as current are confirmed (§12). Before that the host ran **`e208bbd`** (#56; 13 / 0 / 1 with 3393 MiB available) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58; the five services are healthy and the screen relay `novnc` runs as a sixth. A6.4 isolation and A6.5 memory checks passed. The plain dummy form test passes live at `50767ec` (correctly labelled Submit order card, one approved submission, final answer); rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. **Roland confirmed M7 as done on 8 Oct 2026**: the browser screen works to the standard he wants and no password was kept; faults that turn up later are to be fixed as they come. M8 (#56) is merged and deployed with training off; its first live checks passed, the feedback follow-ups (#61: Clear vote and a visible chosen thumb; #62: the row under the answer and the capture label after a reload) are deployed at `7ef26de`, Roland found the feedback row working on the live page the same evening (§12), and the other page checks passed too, including a sign-in by Roland on the screen from his phone; **Roland accepted M8 on 9 Oct 2026** and put the training data setup and the phone problems off until after 2.0.0 (§4, §12). M9 release preparation is in progress on `v2-m9-release`; host acceptance and final release merge are pending. #63 also fixes a stale persona diff box; that fix is not deployed. Both parts of M7 are merged (#55, #57) and deployed, and Roland switched the screen on on Contabo on 8 Oct 2026 (off by default in the repo). The screen smoke test passed; his first sign-in attempt found three faults, fixed by #58 (merged and deployed); his second try went through from the plain request to the agent's answer. The password check found nothing (0 of 527 log lines). Verify the remote tip before coding.
 >
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -11,8 +11,8 @@ A private HTTPS agent on Roland's Contabo VPS with:
 1. Password-protected web chat, persistent chats/facts/jobs, streamed replies.
 2. Self-hosted open-weight model only (no third-party inference).
 3. A code-enforced approval gate, an isolated terminal sandbox and a workspace files UI (shipped).
-4. A persistent Chromium the agent drives (M6; enabled on Contabo and accepted by Roland on 8 Oct 2026) and, later, a live screen of that same browser for Roland's own sign-ins (M7).
-5. Later: persona editing and scrubbed, opt-in training on a **separate** GPU machine, never the VPS (M8), then the 2.0.0 release (M9).
+4. Persistent Chromium and a private live screen of that same browser for Roland's own sign-ins (M6/M7, accepted and enabled on Contabo).
+5. Persona editing and feedback (M8, accepted); scrubbed opt-in training on a **separate** machine is implemented but remains off. M9 prepares the 2.0.0 release.
 
 Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a small local model; quality and speed are modest.
 
@@ -62,15 +62,15 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 - M6.7 Browser tab and authenticated status/thumbnail routes exist (#40). They show the browser's mode, address, tabs and a thumbnail on request; with the browser off the tab says so.
 - Server-side checks exist (#41): sandbox/browser isolation and the read-only memory report. The pre-step and `WATCH=600` memory report passed. After #50, ordinary `sudo timeout --kill-after=5s 180s make verify` completed with **11 pass / 0 fail / 1 skip**, including every isolation probe, with **3640 MiB** available at the idle check. The skip is the human login/chat/approval checklist.
 - Deployed and live on Contabo: https://37-60-226-214.sslip.io/ with checkout `a0dbf22` and app image `ea7e429`; `caddy`, `core`, `model`, `sandbox`, `browser` healthy. Before today's browser deployment the host was `98971cc` (M5 code), not the previously documented `a27b5ff` docs commit.
-- M8's migration takes the DB schema from version **2** to **3** on the first core start after deployment. Confirmed on the host on 9 Oct 2026 after the `7ef26de` deploy: `python -m agent migrate --check` printed `Database version: 3; target: 3; up to date`. App version still **0.1.0** (bump to 2.0.0 at M9).
+- M8's migration takes the DB schema from version **2** to **3** on the first core start after deployment. Confirmed on the host on 9 Oct 2026 after the `7ef26de` deploy: `python -m agent migrate --check` printed `Database version: 3; target: 3; up to date`. Deployed package version remains **0.1.0**. M9 source bumps to **2.0.0**; that source version does not establish deployment or release acceptance.
 
-## 4. Not done (do not document as available)
+## 4. Release status and accepted limitations
 
 - **M8 is accepted (Roland, 9 Oct 2026)** and no longer belongs under "not done"; this entry and the next say what was checked and what he put off. Roland put two things off until the whole agent is done, that is until after 2.0.0 (M9): the training data setup, including where that data is saved; and the phone problems (the browser screen not wanting to open on the phone, and the agent not opening on mobile data, only on his wifi). Until then capture, the weekly loop, `TRAINER_URL` and the training profile stay off, and M9 must not depend on either. What is known about the phone problems is in `docs/NEXT.md`, M9, "Put off by Roland until after 2.0.0". **The host acceptance record (9 Oct 2026):** M8 (#56) was deployed at `e208bbd` and its feedback follow-ups (#61, #62) at `7ef26de`, with capture, the weekly loop, `TRAINER_URL` and the training profile off (§12). Passed live on the `e208bbd` build: a thumbs-up, a thumbs-down and a text correction were saved and kept after a refresh; the chat said "Capture is off / Not captured" throughout; persona edit, preview and save worked. Found live: Clear vote removed the saved vote but the old thumb stayed marked as pressed until a refresh. Found while fixing that: a pressed thumb had no style of its own, so a saved vote could not be seen on screen at all. Both are fixed in #61 (`agent/web/static/settings.js`, `style.css`, `tests/frontend/settings.test.cjs`); the fix is deployed at `7ef26de`. Two more things noticed during that fix are fixed in #62, deployed with it: the feedback row sat beside the answer bubble and stacked in a narrow column next to a long answer or on a phone (it now has its own line under the answer), and after a reload a captured vote read "Not captured" (the message list now carries `captured`, and the row shows "Included for training review"). Confirmed after the `7ef26de` deploy: schema version 3, and `make model-list` with the base model as current and no previous model. Checked by Roland on the live page of the `7ef26de` build, in a desktop browser (§12): the chosen thumb is filled and stays filled after a hard refresh, Clear vote empties both thumbs at once, and the row sits under the answer. Also passed on 9 Oct 2026 on that build (§12): persona restore and the safety rules shown read-only after the editable text; the database count with capture off (2 votes, 0 training examples); a chat reloaded while the agent was still answering; a long answer at phone width; the screen's Watch, Take control and Hand back; login and logout on Roland's phone; and a sign-in by Roland on the screen from his phone. Every check on the list that can be done with capture off has passed, and Roland accepted M8 on that. Not checked, and part of what he put off until after 2.0.0: the capture label after a reload (it needs capture on) and the capture/export smoke. Seen in the persona test: after Restore the diff box kept the diff from before the restore. Fixed in #63 (`settings.js` empties the box whenever the persona is reloaded); not deployed yet. The checklist is in `docs/NEXT.md`, M8, "Host acceptance record". The draft #60 proposed the same handoff as a separate `docs/M8-HANDOFF.md`; it was closed unmerged because status lives in these three documents (rule 8 in §2).
 
 - **M8 as merged (implementation #56, approved for integration on 8 Oct 2026):** the pipeline on `v2-m8-model` is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh. Screen and trainer services, required mounted secrets, preflight and edge fixtures are combined. Capture still refuses active sign-ins and every screen session. Backup/configuration expectations, ShellCheck and the missing tokenizer dependency are corrected. Stopping a sign-in now delivers its final cancellation event before the chat ends. Model evaluation reads streamed schema-error bodies before constrained fallback; unrelated HTTP errors are not retried. The synthetic model declares the evaluation context of 4096 tokens; regression tests check that every public prompt plus its output allowance fits and that all 256 byte tokens preserve unseen Unicode. Byte fallback fixes the pinned server failure when tokenizing newlines or unseen characters. The synthetic tokenizer also leaves the assistant prefix literal, preventing the pinned sampler from dropping its first token before grammar initialization. The CPU workflow provides the checkout import path to the standalone probe. The real tiny-GGUF swap probe now uses authenticated trainer API handlers and human request tokens, verifies refusal without a token, and checks that valid promote/rollback does not restart the container. All five GitHub checks passed on code head `c9a7ef1`: 1,543 unit tests, 81 frontend tests, lint, edge/isolation, and CPU training/conversion plus the authenticated model-swap probe. Roland then requested merge and branch removal; this final status update changes documentation only. At that merge no M8 deployment had been performed (it has been since, see the entry above); no paid GPU has been rented and no model promoted. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). Roland accepted M7 on 8 Oct 2026. Training stays off.
 
-- **M9** release. After 2.0.0, by Roland's decision of 9 Oct 2026: the training data setup and the phone problems (first entry above). Plan and acceptance: [docs/NEXT.md](NEXT.md).
+- **M9** release candidate on `v2-m9-release`: stricter verification, a disposable restore drill, benchmark, dedicated local-only CI and live browser/screen/sandbox CI, full SECURITY/RUNBOOK, README and changelog are prepared. No host SSH, deploy, restart, domain/limit/flag change, GPU rental or production model switch was performed. Proposed docs await Roland's text review before merge; A9.1–A9.3 remain pending. After 2.0.0, by Roland's decision of 9 Oct 2026: the training data setup and the phone problems (first entry above). Plan and acceptance: [docs/NEXT.md](NEXT.md).
 - **M7 is accepted (Roland, 8 Oct 2026)** and no longer belongs under "not done"; the next four points say what it consists of and what was left as it is. Known and left as they are: the sign-in was done on his PC, not the phone (the phone could not look up the server's name on mobile data that evening); the agent opens the address it is given and does not look for the site's sign-in form; a new tab and the address bar's suggestion box show "This page is blocked"; and a form that posts into a new tab leaves a blank tab behind.
 - **M7 part 1, core side (#55, merged):** screen sessions (`agent/screen.py`), the sign-in flow and the `request_signin` tool (`agent/signin.py`), the routes Caddy and the pages use (`agent/web/routes_screen.py`: `/screen`, `/api/screen/*`, `/api/signin/*`, `/internal/screen-auth`), the screen page (`screen.html`, `screen.js`), sign-in cards in the chat and Watch / Take control on the Browser tab. With the flag off the routes answer 404 or 403, the tool is not offered and the buttons are hidden. A7.1 (`tests/test_screen_auth.py`) and A7.2 (`tests/test_signin.py`) pass, with page tests in `tests/frontend/screen.test.cjs` and `chat.test.cjs`.
 - **M7 part 2, the services (#57, merged; on on Contabo, off by default in the repo):** x11vnc started by `browserd/launcher.py` when `SCREEN_ENABLED=true` (`browserd/vnc.py`: command line, password file, cutting connections by replacing x11vnc); `docker/novnc/` and the `novnc` compose service behind the `screen` profile; `vnc_password` / `vnc_view_password` mounted into core and the browser; the Caddy screen routes; `python -m agent` accepts `SCREEN_ENABLED=true` together with the browser; preflight, verify and isolation know the screen. A7.3 passes in the live stack (`tests/integration/test_screen_live.py`, run by `make test-browser`) and in CI for the part that needs no browser (`tests/integration/edge.sh`, second phase). A7.4 passed on Roland's second try (see §12). Known leftovers, visible on the screen: a form that posts into a new tab leaves a blank tab behind that browserd cannot see or close, and a new tab and the address bar's suggestion box show "This page is blocked" (docs/NEXT.md, M7, "Known issues").
@@ -90,7 +90,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 - **Merged follow-ups:** #48–#59 are merged into `v2` (8 Oct 2026). M7 is accepted. M8 #56 is rebased on final M7 `e2f0792` and approved by Roland for integration. M8 and its feedback follow-ups (#61, #62) are deployed with training off (`7ef26de`); Roland accepted M8 on 9 Oct 2026; M9 is next.
 - `python -m agent` accepts `SCREEN_ENABLED=true` only together with `BROWSER_ENABLED=true`, and only with two usable VNC passwords that differ in their first eight characters (VNC compares no more).
 - Dedicated CI **job** `no-hosted-llm`: deferred until credentials have `workflow` scope. Unit CI already runs `tests/test_no_hosted_llm.py`.
-- `make model-bench`: deferred.
+- Benchmark: `docker compose exec -T core python -m agent.models.benchmark --samples 3` (M9 candidate); fixed public prompt, local-only, no tools or generated text in the report.
 - Full measured model acceptance table (§6): not yet recorded in the repo.
 - Repo default `MODEL_CTX` is still 4096 (`docker-compose.yml`, `.env.example`) while Contabo runs 3072. Align after Roland decides (§6).
 
@@ -132,34 +132,29 @@ serve (default) · `hash-password` · `chat` · `migrate --check` · `audit-veri
 
 ### Local dev setup
 
-```bash
-git clone --branch v2 https://github.com/rolandmraiha-cmd/roland-agent.git
-cd roland-agent
-git fetch origin && git switch v2 && git pull --ff-only
-python3.12 -m venv .venv && . .venv/bin/activate
-pip install --require-hashes -r requirements.lock -r requirements-dev.lock
-pip install --no-deps --no-build-isolation --no-index -e .
-cp .env.example .env
-# localhost HTTP: COOKIE_SECURE=false; set MODEL_BASE_URL to a local server if chatting
-python -m agent hash-password
-make lint && make test
-```
-
-Never set `ALLOW_SHELL=true` on a personal computer. Never set `SANDBOX_REAP_ALL` on a host.
+See [README.md](../README.md#develop-without-docker) for the complete local-only `.env`:
+app on `127.0.0.1:8000`, llama.cpp on `127.0.0.1:8080`, browser/screen/training off,
+`SHELL_BACKEND=local` with `ALLOW_SHELL=false`, writable local data/workspace/backup paths.
+Install hash-checked core/dev locks before `make lint && make test`. Docker integration
+runs use fixture sites and owned synthetic models, not real external site tasks.
+Never enable local shell on a personal computer or set `SANDBOX_REAP_ALL` on a host.
 
 ### Compose services today
 
-| Service | Role | mem_limit |
+| Service | Role | Memory cap |
 |---|---|---|
-| `caddy` | Only published ports: 80/tcp, 443/tcp, 443/udp; screen routes present but no backend yet | 96m |
-| `core` | App, gate, tools, SQLite/backups volumes, workspace bind; `ALLOW_SHELL=true`, `SHELL_BACKEND=sandbox`; `BROWSER_ENABLED` from `.env` (default `false`); screen/training flags `"false"`. Also on `browser_ctl` (10.77.4.10) and mounts `browser_api_token` | 640m |
-| `model` | Internal `model` network only; read-only weights; `model_server_token` | `${MODEL_MEM_LIMIT:-3840m}` |
-| `sandbox` | `sandboxd` on `sandbox_ctl`; peer + Bearer `sandbox_api_token`; own egress network | 1g |
-| `browser` (**only with `COMPOSE_PROFILES=browser`; enabled on Contabo**) | Chromium on a virtual screen plus `browserd` on `browser_ctl` 10.77.4.40:7100; peer + Bearer `browser_api_token`; own egress network; the `browser-profile` volume is mounted here only | 1280m (includes 320m shm and /tmp) |
+| `caddy` | Only published 80/tcp, 443/tcp+udp; authenticated screen forwarding | 96 MiB |
+| `core` | Auth, chat, code gate, SQLite/audit/backups, workspace, model/sidecar clients | 640 MiB |
+| `model` | Local llama.cpp; internal network only, read-only weights | 3840 MiB |
+| `sandbox` | Isolated commands; peer+Bearer auth; shared workspace | 1024 MiB |
+| `browser` (profile `browser`) | Chromium/browserd; own profile; browser workspace corner; VNC server | 1280 MiB |
+| `novnc` (profile `screen`) | Private relay/client assets; no secrets or profile volume | 64 MiB |
+| `trainer` (profile `training`, off) | Human-bound model/training operations | 128 MiB |
 
-Config caps total 5600 MiB, or 6880 MiB with the browser. Caps are not measured usage.
-
-**Switching the browser on takes two lines in `.env`:** `COMPOSE_PROFILES=browser` (starts the container) and `BROWSER_ENABLED=true` (lets the agent use it). `make preflight-edge` refuses the second without the first. `secrets/browser_api_token` must exist from this version on even with the browser off, because core mounts it: run `make secrets` before deploying (preflight stops the deploy if it is missing). Secret files under `secrets/` are uid **1000**, mode **0400**; secrets and workspace dirs mode **0700** uid 1000.
+Caps total 5600 MiB for the default four services, 6944 MiB with browser+screen, 7072 MiB
+with trainer too. Caps are not measured usage. Browser and screen are on in production;
+training is off. Enablement pairs and mounted secrets are checked by preflight. Preserve
+host settings in [RUNBOOK](RUNBOOK.md); secret files uid 1000/mode 0400, directory 0700.
 
 ## 6. Model runtime
 
@@ -200,17 +195,25 @@ After #43 (`--cache-ram 0`), Roland's pre-step with two chats plus "continue" me
 
 ### Pending
 
-M9 full §10 security review and `docs/SECURITY.md` write-up · M8 live capture/scrubber/promotion acceptance (implemented in #56; put off by Roland until after 2.0.0, with capture staying off).
+M9 §10 review and SECURITY write-up are prepared; host verification and reviewer acceptance remain pending. The baseline matrix maps every §10.2 item to tests or host checks. M8 live capture/export/GPU use is deferred after 2.0.0 by Roland, with training off; automated pipeline/swap tests do not prove live data handling.
 
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model.
 
 ## 8. Next coding order
 
-1. **Grok bots:** wait for Roland to unpause THE SCAM CALL CENTER before those bots start M6. **External AI:** if Roland already handed you this plan, start when he said — Grok parking does not block you.
-2. #53 is rebuilt/deployed at `50767ec`; normal verification passed **11 pass / 0 fail / 1 skip**, and the plain dummy form test passed live. No code change is pending for M6. Decision 1 stays open; keep 3072/3840m and six tool steps.
-3. **M6 is accepted (Roland, 8 Oct 2026).** **M7** is split like M6: part 1 (#55) and part 2 (#57) are merged and deployed, and the screen is on on Contabo. The sign-in follow-up (#58) is merged and deployed and Roland's second sign-in try went through. **M7 is accepted (Roland, 8 Oct 2026).** The chat-refresh fix (#59) is merged at `e2f0792`; its host deploy remains with Roland. Roland requested merge of M8 #56 and deletion of its feature branch. That deploy is done: the host was brought to `e208bbd` with training off, and the first persona and feedback checks passed (9 Oct 2026). The feedback follow-ups (#61, #62) were deployed the same day at `7ef26de`, and schema version 3 and the model list are confirmed. Roland repeated the Clear vote test on the live page that evening and it passed. The other open M8 checks passed the same evening (persona restore, the capture-off database count, chat refresh, a long answer at phone width, the screen). Roland's sign-in on the screen from his phone passed at 18:41. **Roland accepted M8 on 9 Oct 2026.** Next: M9. The training data setup and the phone problems wait until after 2.0.0. The persona diff fix (#63) goes out with the next deploy. Decide the training-data backup policy before any capture. M9 follows host acceptance.
-
-Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
+1. Review the M9 implementation/docs PR (`v2-m9-release` → `v2`); Roland reviews proposed
+   README/master text and Shipper leaves a COMMENT review before merge. External AI may
+   code under Roland's instruction; Grok parking does not block that work.
+2. After reviewed integration merge, all CI jobs must pass at the actual `v2` tip (A9.1).
+   Roland/Shipper deploys that tip, preserving 3072/3840m, six tool steps and training off.
+3. Run [RUNBOOK's M9 checklist](RUNBOOK.md#m9-server-acceptance-record-each-result): external
+   ports/TLS/isolation/logs, backup restore copy, browser load, synthetic speed, soak/restart
+   and human approval smoke. Record results below and in NEXT/README; fix new blockers
+   in separate reviewed PRs. Earlier M6/M8 observations do not substitute for A9.2.
+4. Open the final `v2` → `main` PR only after acceptance; Shipper comments and **Roland
+   merges** (A9.3). Mark changelog released and archive/fold completed NEXT material then.
+5. After 2.0.0, return to Roland's deferred training-data setup and phone issues. No new
+   training capture, provider rental, domain change or context increase without his decision.
 
 ## 9. Host facts
 
@@ -294,6 +297,28 @@ Details, acceptance checklists and Contabo smoke steps: [docs/NEXT.md](NEXT.md).
 | `tests/` | Unit, frontend (`chat.test.cjs`, `snapshot.test.cjs`), integration (`edge.sh`, `isolation.sh`, `browser.sh`, `test_sandbox_live.py`, `test_browser_live.py`) |
 
 ## 12. Last verified
+
+### M9 release evidence (candidate; actual host checks pending)
+
+| Evidence | Latest known result | M9 acceptance |
+|---|---|---|
+| Production commit/schema/model | `7ef26de`, schema 3, `qwen3-4b-q4km-base` current (9 Oct) | Pending reviewed M9 deploy |
+| Idle available memory | 3143 MiB after M8 feedback deploy (9 Oct) | Pending repeat; target ≥1200 MiB |
+| Loaded browser watch | M6: model 3084.29 MiB, browser 822.80 MiB, host minimum 3553 MiB (8 Oct) | Pending M9 ≥800 MiB and no OOM/restarts |
+| Prompt/generation tok/s; first-token time | No Contabo benchmark supplied | Pending three fixed-prompt samples at 3072 |
+| Restore drill on actual backup | No completed host drill supplied | Pending copy-only PASS |
+| External full TCP + UDP443 scan/TLS | No final release scan supplied | Pending dated external output |
+| Isolation/log rotation | Earlier `verify` 13/0/1, narrower checks at M8 | Pending stricter M9 verify |
+| Soak/restart state recovery | Prior automated persistence tests and M7 browser restart | Pending timed host watch/restart |
+| CI | Local: 1522 Python passes, 59 skips (58 require missing Docker CLI, one existing hard-link skip), 49 integration cases excluded; 88 frontend passes; ruff/ShellCheck clean | Pending fresh GitHub container/training jobs and merged `v2` URLs |
+| A9.3 | No final release PR reviewed/merged | Pending Shipper COMMENT and Roland merge |
+
+Local M9 validation also passed all 36 focused release checks, including env-file nonexecution, enabled-service absence, public-model refusal and disposable restore cleanup. Package metadata reports `2.0.0`. Docker/container and CPU training were not executed locally; GitHub CI is required.
+
+Training capture/loop/trainer stay off. Phone mobile-data and intermittent screen-opening
+issues remain deferred, not claimed fixed. `.release-evidence/` is private and excluded from
+git/image builds. Readonly verification has explicit manual SKIPs; zero FAIL alone is not A9.2.
+
 
 **Earlier, before the #49 deployment, 8 Oct 2026 (Roland's supplied logs):** remote `v2` and deployed Contabo HEAD are **`23fd1fc`**. `git pull --ff-only` advanced the host from `c81ef05`; `sudo env APPLY=1 make deploy` completed with all five services healthy/running and HTTPS smoke successful. This makes #46 and #47 live; a post-fix form smoke is not supplied. The `WATCH=600 make memory-report` log ends with **A6.5 PASS**, model peak 3084.29 MiB, browser peak 822.80 MiB, minimum host available 3553 MiB, and no observed restarts/cgroup OOM kills. At that point no completed `make verify` result had been supplied; A6.4 and M6 acceptance were open. Before the first browser deployment the host was `98971cc`, not `a27b5ff` (same M5 code). Snapshot: `pre-m6-deploy-2026-10-08`.
 

@@ -341,6 +341,10 @@ if command == "stat":
         answer(str(state.get("browser_uid", 1000) if target.name == "browser_api_token"
                    else state.get("vnc_uid", 1000) if target.name.startswith("vnc_") else 1000))
 if command == "docker":
+    if args[0] == "volume":
+        answer(args[-1], state.get("volume_rm_rc", 0) if args[1] == "rm" else 0)
+    if args[0] == "run":
+        answer(code=state.get("restore_rc", 0) if "restore" in args else 0)
     if args[0] == "info":
         answer("Firewall Backend: nftables")
     if args[0] == "version":
@@ -364,7 +368,7 @@ if command == "docker":
             started = sample.get("started", {}).get(service, "2026-10-08T05:00:00.123456789Z")
             answer(f"{full_id} {oom} {restarts} {started}")
         if "LogConfig" in " ".join(args):
-            answer('{"Type":"json-file","Config":{"max-size":"10m","max-file":"3"}}')
+            answer(json.dumps(state.get("log_config", {"Type": "json-file", "Config": {"max-size": "10m", "max-file": "3"}})))
     if args[0] == "ps":
         answer()  # No published ports in this fixture.
     if args[0] == "compose":
@@ -377,14 +381,14 @@ if command == "docker":
                 hang_until_killed()
             if state.get("compose_ps_rc"):
                 answer(code=state["compose_ps_rc"])
-            if "--all" in args:
+            if "--all" in args and "json" not in args:
                 answer("\n".join(f"{name}|{ids[name]}|{status}" for name, status in services.items()))
             if "--services" in args:
                 answer("\n".join(name for name, status in services.items() if status == "running"))
             if "-q" in args:
                 answer("\n".join(ids[name] for name, status in services.items() if status == "running"))
             if "--format" in args:
-                answer("\n".join(json.dumps({"Service": name, "Health": "healthy"}) for name in services))
+                answer("\n".join(json.dumps({"Service": name, "State": status, "Health": "healthy"}) for name, status in services.items()))
             answer()
         if "exec" in args:
             tail = args[args.index("exec") + 1:]
@@ -433,9 +437,9 @@ while True:
                 answer(code=state.get("sandbox_egress_rc", 0) if any("example.com" in arg for arg in action)
                        else state.get("sandbox_probe_rc", 7))
             if service == "model":
-                answer(code=0 if "healthcheck" in action else 1)
-            if service == "core" and action[:2] == ["ls", "-l"]:
-                answer()
+                answer(code=state.get("model_health_rc", 0) if "healthcheck" in action else state.get("model_egress_rc", 42))
+            if service == "core" and "/backups/db" in " ".join(action):
+                answer(code=state.get("backup_rc", 0))
 answer(f"Unexpected fake command: {command} {args}", code=90)
 """
 
@@ -445,9 +449,13 @@ def fake_deploy_host(tmp_path, *, browser=False, samples=None):
     repo = tmp_path / "repo"
     deploy = repo / "deploy"
     deploy.mkdir(parents=True)
-    for name in ("common.sh", "memory-report.sh", "preflight.sh", "verify.sh"):
+    for name in ("common.sh", "memory-report.sh", "preflight.sh", "verify.sh", "verify_state.py", "restore.sh"):
         (deploy / name).write_bytes((DEPLOY / name).read_bytes())
     (repo / "docker-compose.yml").write_text("services: {}\n")
+    isolation = repo / "tests/integration/isolation.sh"
+    isolation.parent.mkdir(parents=True)
+    isolation.write_text("#!/usr/bin/env bash\nexit 0\n")
+    isolation.chmod(0o755)
     (deploy / "preflight_edge.py").write_text("# Edge policy is outside these script branch tests.\n")
     services = dict.fromkeys(("caddy", "core", "model", "sandbox"), "running")
     usage = {"caddy": 64, "core": 300, "model": 3500, "sandbox": 128}

@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 9 Oct 2026. Deployed code baseline **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): 13 / 0 / 1 with 3143 MiB available; schema version 3 confirmed. Before that the host ran **`e208bbd`** (#56) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59), M8 (#56) and its two feedback follow-ups are merged and deployed at `7ef26de`, with training off: #61 clears the pressed thumb and makes the chosen vote visible; #62 puts the feedback row under the answer and keeps the capture label after a reload. Roland checked the feedback row on the live page on 9 Oct 2026 and it works; the capture label was not part of that, because capture is off. Roland accepted M8 on 9 Oct 2026. Next: M9. Put off by Roland until after 2.0.0: the training data setup, including where that data is saved, and the phone problems (M9, "Put off by Roland until after 2.0.0").**
+> Snapshot: 9 Oct 2026. Deployed code baseline **`7ef26de`** (#62, M8 with its two feedback follow-ups, training off; Roland's deployment log, 9 Oct 2026): 13 / 0 / 1 with 3143 MiB available; schema version 3 confirmed. Before that the host ran **`e208bbd`** (#56) and **`2de54f4`** (#58). Verification passed 13 / 0 / 1 with 3746 MiB available and the screen on at `4d0f703`, and 13 / 0 / 1 with 3488 MiB available after #58. M6 is enabled; A6.4 isolation and the A6.5 memory watch passed. The plain dummy form test passes live at `50767ec`; rejection handling passed at `7b09b90`. A fresh login on Roland's phone passed. **Roland confirmed M6 as done on 8 Oct 2026** and asked for M7 to start. Confirm the remote tip before coding. **Roland confirmed M7 as done on 8 Oct 2026.** Both parts and the sign-in follow-up (#58) are merged and deployed, and the screen is on on Contabo. **The chat-refresh fix (#59), M8 (#56) and its two feedback follow-ups are merged and deployed at `7ef26de`, with training off: #61 clears the pressed thumb and makes the chosen vote visible; #62 puts the feedback row under the answer and keeps the capture label after a reload. Roland checked the feedback row on the live page on 9 Oct 2026 and it works; the capture label was not part of that, because capture is off. Roland accepted M8 on 9 Oct 2026. M9 release preparation is in progress; final host acceptance and release merge remain pending. Put off by Roland until after 2.0.0: the training data setup, including where that data is saved, and the phone problems (M9, "Put off by Roland until after 2.0.0").**
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
@@ -640,6 +640,30 @@ Status on 9 Oct 2026: steps 1 to 3 are done, the `migrate --check` in step 3 aft
 
 **Spec:** §10, §14, M9 in §12.
 
+#### Status: M9 release candidate prepared (9 Oct 2026)
+
+Branch `v2-m9-release` starts at verified remote `v2` **`c9d9d3d`**. Prepared changes:
+
+- Source package `2.0.0`, unreleased changelog, rewritten README, full security baseline/
+  threat/outbound matrix and operational RUNBOOK; existing accepted limits retained.
+- Verify requires actual healthy services, no internal publication (including loopback), a
+  nonempty backup, exact log driver/limits and a genuine model network-block result.
+- Restore drill uses two disposable volumes and a private copy without production secrets
+  or network; checks integrity, foreign keys, schema, audit and expired sessions, then cleanup.
+- Fixed public-prompt local-only benchmark reports prompt/generation tok/s and first-token
+  latency; it does not print generated text, run tools, change a model or raise limits.
+- Visible `no-hosted-llm` CI, real browser/screen/sandbox checks and actual core-image restore
+  checks; sandbox/browser isolation also probes the model and optional trainer.
+
+No Contabo SSH/deploy, external scan, host restore/load/restart, DNS/memory/flag change,
+GPU rental or model promotion was performed by this implementation. The handoff reserves
+host operations for Roland/Shipper. Tests/CI and host evidence are tracked in AGENT §12;
+final M9 acceptance is not inferred from an earlier milestone or the version bump. Local validation: 1522 Python passes, 59 skips (58 need the unavailable Docker CLI, one existing hard-link skip), 49 live cases excluded; all 36 focused release checks and 88 frontend tests pass, ruff/ShellCheck clean. Fresh GitHub container/training jobs remain required.
+
+Proposed README/master text awaits Roland's review before merge. Keep NEXT until final
+release acceptance; fold/archive its completed plan into AGENT at `v2` → `main`, preserving
+Roland's deferred work and decisions. Do not recreate M4/M8 handoff files.
+
 #### Goal
 
 A reviewed, measured, documented 2.0.0 release, merged to `main` by Roland.
@@ -674,12 +698,12 @@ Every §10.2 baseline item has a test or a runbook check. No open high-severity 
 
 - [ ] **A9.1** CI green on `v2`: lint, unit, frontend, edge/integration, and `no-hosted-llm`.
 - [ ] **A9.2** Server checklist green: isolation script (model, sandbox, browser, novnc, trainer if enabled); external `nmap -Pn -p- 37.60.226.214` shows only 22, 80, 443 and `nmap -sU -p 443` shows 443/udp; TLS valid; a backup exists and the restore drill passed on a copy; memory headroom recorded during a browser task with the model loaded; log rotation visible in `docker inspect`.
-- [ ] Gate smoke repeated: chat "yes" does not approve; jobs cannot sign in; screenshots not sent to the text model.
+- [ ] Gate smoke repeated: chat "yes" does not approve; jobs cannot sign in; screenshots not sent to the text model. Automated regressions remain required; host human smoke is still pending.
 - [ ] **A9.3** Shipper review comment on the release PR; Roland merges.
 
 #### Contabo deploy notes
 
-Restore drill on a **copy** only (`make restore-test FILE=…`), never over live data without Roland. Take a Contabo snapshot before the release deploy.
+Restore drill on a **copy** only (`sudo env APPLY=1 FILE=/absolute/host/backup.db.gz make restore-test`), never over live data without Roland. Copy the backup out of core first. Take a Contabo snapshot before the release deploy. The complete commands, scan/load/benchmark/restart checklist and release order are in [RUNBOOK.md](RUNBOOK.md).
 
 ## 6. Open decisions for Roland
 

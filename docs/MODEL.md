@@ -1,10 +1,12 @@
 # Model training, review and recovery
 
-**M8 implementation approved for integration by Roland (8 Oct 2026, #56).** M8 has not been deployed; host acceptance is pending.
-Capture, the scheduled loop, trainer and GPU rental are off. The implementation is rebased on final M7
-in `v2` at `e2f0792` (#57–#59), including chat refresh. All five GitHub checks passed on code head
-`c9a7ef1`, including actual CPU training and model swap/rollback. Roland accepted M7 on 8 Oct 2026;
-his request to merge #56 includes this runbook (M8.10). Deploy and smoke M8 with training off next.
+**M8 accepted by Roland on 9 October 2026.** It is deployed at `7ef26de`, schema 3,
+with persona/feedback checked on the host and the base model unchanged. Capture, the loop,
+trainer and GPU rental stay off through 2.0.0. Training-data storage/backup policy,
+capture/export smoke and a real GPU run are deferred until after release by Roland.
+CPU training/evaluation and authenticated model-switch/rollback have passed automated
+checks; that does not establish handling of Roland's real training data on the host.
+See [RUNBOOK](RUNBOOK.md) for release acceptance and operational commands.
 
 Use self-hosted inference only. Fine-tuning happens on a separate GPU machine, never Contabo.
 It can reinforce mistakes, learn an injected instruction or forget useful skills. Evaluation
@@ -42,7 +44,7 @@ contexts never appear in SFT or DPO. See [training instructions](../training/REA
 
 ## Import and promotion
 
-`make model-list` is read-only. After M8 has been merged and deployed, manual imports use:
+`make model-list` is read-only. For a later explicitly requested model operation, manual imports use:
 
 ```bash
 APPLY=1 make model-import FILE=/absolute/path/candidate.tar
@@ -97,5 +99,5 @@ Contabo sequentially, pausing production inference and restoring the serving mod
 It consumes CPU time; run it during a planned quiet period. The full GPU pipeline already
 provides current/candidate reports, so a host evaluation is optional.
 
-No M8 feature should be enabled before review and host smoke. A real paid GPU loop is optional
+No training capture/loop/trainer feature should be enabled before Roland decides its data setup and the required host smoke is complete. A real paid GPU loop is optional
 and requires Roland to choose the provider, budget and data transfer; CPU CI does not authorize it.
