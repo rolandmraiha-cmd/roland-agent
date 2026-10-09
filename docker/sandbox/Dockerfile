@@ -1,6 +1,6 @@
 # Sandbox image: runs sandboxd as uid 1000 and executes user commands (§6.3).
 # Same base digest as the core image.
-FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+FROM public.ecr.aws/docker/library/python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 # Common CLI work, PDFs, archives. No build-essential/nodejs until Q13 is answered.
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -54,7 +54,11 @@ The Caddy build uses Amazon ECR Public's Docker Official Image copy, pinned to t
 official `2.11.7-alpine` index. Registry bytes and the Linux/amd64 manifest were verified
 against Docker's image records; it is the same VPS image as the earlier Docker Hub pin.
 This avoids the observed anonymous Docker Hub pull limit without changing Caddy's version,
-runtime policy or ownership. The compose policy test requires the mirror, version and digest.
+runtime policy or ownership. The six Python-based builds also use that official mirror:
+the existing `3.12-slim` index `dddfd7e0…` is unchanged and its complete manifest hash was
+verified at the mirror after Docker Hub's token endpoint returned 504. Their Python base
+contents remain identical. Compose policy checks require the exact mirror, pinned versions,
+non-root configuration and identical core/relay base.
 
 M9 verification refuses an empty/stopped stack, missing health data, a loopback-published
 internal port, empty backup directory, partial log limits and a Docker/probe error posing as

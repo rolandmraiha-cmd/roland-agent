@@ -2,7 +2,7 @@
 # It has core's dependencies and the test tools, installed here at build time: the running
 # container has a read-only root and sits on internal networks, so it can't install anything.
 # The repository itself is mounted read-only at /src.
-FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+FROM public.ecr.aws/docker/library/python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 WORKDIR /deps
 COPY requirements.lock requirements-dev.lock ./
