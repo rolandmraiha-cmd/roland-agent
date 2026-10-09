@@ -76,7 +76,8 @@
     const result = await json("/api/settings/persona");
     $("persona-name").value = result.active.agent_name; $("persona-tone").value = result.active.persona; $("persona-instructions").value = result.active.instructions;
     $("persona-confirm").checked = false; preview(result);
-    $("persona-history").replaceChildren();
+    // The list goes back to the active version, so a diff picked before a save or restore no longer applies.
+    $("persona-history").replaceChildren(); $("persona-diff").textContent = "";
     for (const version of await json("/api/settings/persona/versions")) {
       const option = el("option", "", `Version ${version.id} · ${fmtTime(version.created)}${version.active ? " · active" : ""}`); option.value = String(version.id); $("persona-history").append(option);
     }
