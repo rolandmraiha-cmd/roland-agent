@@ -327,7 +327,7 @@ def create_app(agent: Agent, run_scheduler: bool = True) -> FastAPI:
         timeline = agent.memory.timeline(chat_id)
         events = [row for row in timeline if row["kind"] != "text"]
         return {
-            "messages": [{**row, "feedback": next((dict(f) for f in agent.memory._all("SELECT * FROM feedback WHERE message_id=?", (row["id"],))), None)} for row in timeline if row["kind"] == "text"],
+            "messages": [{**row, "feedback": agent.capture.saved_feedback(row["id"])} for row in timeline if row["kind"] == "text"],
             "events": events,
             "busy": chat_id in busy,
             "pending_approvals": agent.memory.approvals(status="pending", chat_id=chat_id),

@@ -12,7 +12,7 @@
     const up = el("button", "ghost", "👍"), down = el("button", "ghost", "👎"), clear = el("button", "ghost", "Clear vote");
     up.type = down.type = clear.type = "button";
     up.setAttribute("aria-label", "Helpful answer"); down.setAttribute("aria-label", "Unhelpful answer");
-    const state = el("span", "hint", saved?.used_in_dataset ? "Used for training; vote locked" : "Not captured");
+    const state = el("span", "hint", saved?.used_in_dataset ? "Used for training; vote locked" : saved?.captured ? "Included for training review" : "Not captured");
     const editor = el("div", "feedback-editor"); editor.hidden = true;
     const choice = el("select");
     for (const [value, label] of [["text", "What should it have said?"], ["tool", "Should have called a tool"]]) {

@@ -75,6 +75,18 @@ test('a pressed thumb has its own visible style',()=>{
   assert.ok(rule,'style.css must style .feedback button[aria-pressed="true"]');
   assert.match(rule[1],/background:/);assert.match(rule[1],/border-color:/);
 });
+test('a saved vote keeps its capture label after a reload',()=>{
+  const f=fixture(),label=saved=>{const node=f.element();f.context.window.m8.feedback(node,42,saved);return node.children[0].children[3].textContent;};
+  assert.equal(label({rating:1,captured:true}),'Included for training review');
+  assert.equal(label({rating:-1,captured:false}),'Not captured');
+  assert.equal(label({rating:-1,captured:true,used_in_dataset:'data-1'}),'Used for training; vote locked');
+  assert.equal(label(null),'Not captured');
+});
+test('the feedback row goes under the answer, not beside it',()=>{
+  const css=fs.readFileSync(path.join(__dirname,'../../agent/web/static/style.css'),'utf8');
+  assert.match(css,/\.msg\.assistant\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(css,/\.feedback\s*\{[^}]*flex-basis:\s*100%/);
+});
 test('model promotion requires exact typed id and a second delayed click',async()=>{
   const f=fixture();f.context.api=async(url,options={})=>{
     f.calls.push({url,options});

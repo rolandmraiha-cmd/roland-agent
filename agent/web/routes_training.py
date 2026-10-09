@@ -152,8 +152,8 @@ def build_router(agent) -> APIRouter:
 
     @router.get("/api/messages/{identifier}/feedback")
     async def get_feedback(identifier: int):
-        rows = memory._all("SELECT * FROM feedback WHERE message_id=?", (identifier,))
-        return dict(rows[0]) if rows else {"message_id": identifier, "rating": None, "used_in_dataset": None}
+        empty = {"message_id": identifier, "rating": None, "used_in_dataset": None, "captured": False}
+        return agent.capture.saved_feedback(identifier) or empty
 
     @router.get("/api/feedback/tools")
     async def feedback_tools():

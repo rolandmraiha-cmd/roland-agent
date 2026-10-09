@@ -51,6 +51,8 @@ code { font-size: .85em; color: var(--muted); }
 .bubble { white-space: pre-wrap; overflow-wrap: anywhere; padding: .6em .9em; border-radius: 14px; max-width: 85%; }
 .msg.user .bubble { background: var(--user); }
 .msg.assistant .bubble { background: var(--bot); }
+/* The feedback row goes under the answer, not beside it (see .feedback). */
+.msg.assistant { flex-wrap: wrap; }
 .msg.typing .bubble::after { content: "▍"; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .msg.tool, .msg.note { color: var(--muted); font-size: .85rem; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
@@ -171,7 +173,7 @@ a.button[hidden], .browser-screen[hidden] { display: none; }
 /* Human settings and training review. */
 .training-bar { padding: .5rem 1rem; display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
 .training-bar[hidden] { display: none; }
-.feedback { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
+.feedback { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; flex-basis: 100%; }
 /* The saved vote must be visible: aria-pressed alone only tells a screen reader. */
 .feedback button[aria-pressed="true"] { background: var(--user); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .feedback-editor { flex-basis: 100%; display: grid; gap: .5rem; }

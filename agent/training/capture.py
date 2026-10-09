@@ -249,6 +249,19 @@ class Capture:
             )
         return {"message_id": message_id, "rating": rating, "captured": bool(step), "locked": False}
 
+    def saved_feedback(self, message_id: int) -> dict | None:
+        """The stored vote for a reply, and whether it also became a training example.
+
+        The page needs `captured` after a reload: the vote alone does not say it.
+        """
+        rows = self.memory._all(
+            "SELECT f.*, EXISTS(SELECT 1 FROM training_examples e WHERE e.message_id=f.message_id "
+            "AND e.source IN ('thumbs_up','thumbs_down','correction')) AS captured "
+            "FROM feedback f WHERE f.message_id=?",
+            (message_id,),
+        )
+        return {**dict(rows[0]), "captured": bool(rows[0]["captured"])} if rows else None
+
     def check_feedback_unlocked(self, message_id: int) -> None:
         if self.memory._all(
             "SELECT 1 FROM feedback WHERE message_id=? AND used_in_dataset IS NOT NULL "
