@@ -9,7 +9,7 @@
 > its branch. All seven candidate CI jobs passed at `afee233` (links in §12); actual `v2`
 > CI is required before acceptance. Roland will deploy/test and return results before any
 > `v2` → `main` merge. Production remains `7ef26de`; no Contabo action has been performed.
-> The merged branch is being removed by a temporary guarded maintenance job, removed next.
+> `v2-m9-release` is deleted; the temporary guarded maintenance job succeeded and is removed.
 
 ## 1. What we are building
 
@@ -209,8 +209,8 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 ## 8. Next coding order
 
 1. M9 implementation/docs PR #64 is merged at `720c58c` under Roland's explicit
-   9 October authorization. Candidate CI is green; remove its merged branch and keep NEXT
-   until host acceptance. This authorization does not merge `v2` into `main`.
+   9 October authorization. Candidate CI is green and its merged branch is deleted; keep
+   NEXT until host acceptance. This authorization does not merge `v2` into `main`.
 2. All CI jobs must pass at the actual `v2` tip (A9.1).
    Roland/Shipper deploys that tip, preserving 3072/3840m, six tool steps and training off.
 3. Run [RUNBOOK's M9 checklist](RUNBOOK.md#m9-server-acceptance-record-each-result): external

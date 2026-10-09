@@ -8,7 +8,8 @@
 > Roland's explicit instruction to merge and delete `v2-m9-release`. Candidate CI passed
 > all seven jobs at `afee233`; actual integration-tip CI remains required. The next step
 > is Roland's Contabo deploy and tests, then reviewing any needed improvements before
-> `v2` → `main`. The branch is being removed by a temporary guarded job, removed next.
+> `v2` → `main`. `v2-m9-release` is deleted; its temporary guarded maintenance job succeeded
+> and has been removed.
 
 
 ## 0. Who is who (read this first)
@@ -649,7 +650,8 @@ Status on 9 Oct 2026: steps 1 to 3 are done, the `migrate --check` in step 3 aft
 #### Status: M9 candidate merged; Contabo acceptance next (9 Oct 2026)
 
 PR #64 from `v2-m9-release` (based on `c9d9d3d`) is squash-merged at **`720c58c`**.
-Roland explicitly authorized the merge/branch deletion on 9 October. Implemented changes:
+Roland explicitly authorized the merge/branch deletion on 9 October. The branch is deleted
+and the temporary maintenance job is removed. Implemented changes:
 
 - Source package `2.0.0`, unreleased changelog, rewritten README, full security baseline/
   threat/outbound matrix and operational RUNBOOK; existing accepted limits retained.

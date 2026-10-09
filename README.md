@@ -143,5 +143,5 @@ one existing hard-link check were skipped, with 49 live cases excluded. Ruff/She
 pass. Live CI caught an unexpected IPv6 listener in the screen server; M9 closes it and
 retains the strict socket check. Verification reads Compose's resolved feature settings.
 All seven candidate CI jobs passed after these fixes; see AGENT for evidence and the
-integration-tip acceptance requirement. A temporary guarded maintenance workflow is
-removing the merged `v2-m9-release` branch and will be removed immediately afterwards.
+integration-tip acceptance requirement. The merged `v2-m9-release` branch is deleted;
+the temporary maintenance job used for that operation has been removed.
