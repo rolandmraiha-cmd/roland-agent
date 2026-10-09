@@ -536,6 +536,8 @@ Source for points 1 to 3: the handoff comment on #56 (Roland's deployment log an
 7. **Feedback row checked live (9 Oct 2026, 18:02–18:04 Helsinki time; Roland's screenshots and statement, written out in `docs/AGENT.md` §12).** On the `7ef26de` build in a desktop browser: the row is under the answer; the chosen thumb is filled and, as Roland states, stays so after a hard refresh; 👎 opens the correction editor; Clear vote empties both thumbs at once, shows "Vote cleared" and closes the editor; the chat reads "Capture is off" and the row "Not captured".
 8. **Other page checks (9 Oct 2026, 18:17–18:23 Helsinki time; run in a signed-in browser by Claude at Roland's request, with two results from Roland; written out in `docs/AGENT.md` §12).** Persona restore works in both directions and the persona is left at blank standing instructions (Version 8). The safety rules follow the editable text in the preview and have no field. A chat reloaded while the agent was answering showed the answer by itself. A long answer at an emulated phone width keeps the feedback row on one line under it. The screen's Watch, Take control and Hand back behave as described. Roland's count on the host after voting: `votes: 2 | training examples: 0`. Roland: login and logout work on his phone.
 
+Every item below that can be done with capture off is ticked as of 9 Oct 2026, 18:42. M8 now waits for Roland's decision; the capture and export test stays his choice.
+
 Open before Roland is asked to accept M8:
 
 - [x] On the deployed follow-ups (`7ef26de`), the Clear vote test: the chosen thumb is filled after a vote and after a refresh, and both thumbs are empty straight after Clear vote (9 Oct 2026, point 7).
@@ -544,7 +546,7 @@ Open before Roland is asked to accept M8:
 - [x] `docker compose exec -T core python -m agent migrate --check` shows schema version 3, and `make model-list` shows the base model as current (9 Oct 2026, point 6).
 - [x] With capture off, a thumbs-up writes no `training_examples` row (9 Oct 2026, point 8: Roland's count after voting printed `votes: 2 | training examples: 0`). The read-only count: `sudo docker compose exec -T core python -c "import sqlite3; c=sqlite3.connect('file:/data/agent.db?mode=ro', uri=True); print('votes:', c.execute('select count(*) from feedback').fetchone()[0], '| training examples:', c.execute('select count(*) from training_examples').fetchone()[0])"`
 - [x] Ordinary chat, chat refresh and the browser screen on this build (9 Oct 2026, point 8). On the screen only Watch, Take control with a scroll, and Hand back were tried.
-- [ ] A sign-in by Roland on the screen (`request_signin`) on this build. He has to type the password himself.
+- [x] A sign-in by Roland on the screen (`request_signin`) on this build (9 Oct 2026, 18:38–18:42, from his phone: he reports that sign-in and the screen still work; the audit log has `signin_requested`, the control sessions and `signin_resolved` with `signin_done` for `www.figma.com`; `docs/AGENT.md` §12).
 - [ ] Not blocking, after the next deploy: pick a version in the persona history, restore it, and see the diff box empty afterwards (#63).
 - [ ] Only if Roland chooses it: agree the backup policy for the training-data volume, then capture and export from a disposable test chat with made-up data, and check the scrubber counts and that a planted fake secret is gone. In that test, reload the chat after the vote: the row must still read "Included for training review". A rented GPU is optional.
 
