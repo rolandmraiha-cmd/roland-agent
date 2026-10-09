@@ -725,6 +725,15 @@ Every §10.2 baseline item has a test or a runbook check. No open high-severity 
 
 #### Tests / acceptance
 
+Fresh GitHub release builds failed resolving the earlier Caddy OCI index, before application
+checks. The M9 Caddy-index follow-up pins Docker's current official `2.11.7-alpine` index
+`d8542f48…`; old and new indexes reference the same Linux/amd64 image `173b2630…`.
+Registry GET/HEAD and manifest hashes were checked. The fix must pass CI before integration;
+it changes no host policy, Caddy version, CPU image contents or resource/training settings.
+A one-use workflow will delete only this unchanged feature branch after its verified merge;
+remove the workflow after success. Release PR #66 remains pending final CI and the focused deploy.
+
+
 - [ ] **A9.1** All seven jobs green on the final `v2` integration tip; earlier deployed/polish tips passed. Exact final-head results are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
 - [x] **A9.2** Server checklist passed at `bb76263` on 9 Oct 2026 (approved evidence linked above): isolation script (model, sandbox, browser, novnc, trainer if enabled); external `nmap -Pn -p- 37.60.226.214` shows only 22, 80, 443 and `nmap -sU -p 443` shows 443/udp; TLS valid; a backup exists and the restore drill passed on a copy; memory headroom recorded during a browser task with the model loaded; log rotation visible in `docker inspect`.
 - [x] Gate/screen regressions passed in CI; live ownership, rejected/confirmed approval and file/browser smoke passed. Chat composer was disabled during pending approval; the automated chat-approval, job-sign-in and screenshot-boundary regressions remain enforced.

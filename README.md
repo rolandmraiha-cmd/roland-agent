@@ -138,6 +138,15 @@ computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
 
 ## Project records
 
+Fresh GitHub release builds failed resolving the earlier Caddy OCI index, before application
+checks. The M9 Caddy-index follow-up pins Docker's current official `2.11.7-alpine` index
+`d8542f48…`; old and new indexes reference the same Linux/amd64 image `173b2630…`.
+Registry GET/HEAD and manifest hashes were checked. The fix must pass CI before integration;
+it changes no host policy, Caddy version, CPU image contents or resource/training settings.
+A one-use workflow will delete only this unchanged feature branch after its verified merge;
+remove the workflow after success. Release PR #66 remains pending final CI and the focused deploy.
+
+
 [Master status and rules](docs/AGENT.md) · [Remaining release work](docs/NEXT.md) ·
 [Technical specification](docs/v2-spec.md) · [Changelog](CHANGELOG.md).
 Every PR updates README, AGENT and NEXT for changed code, plans or deployment state.
