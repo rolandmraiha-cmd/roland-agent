@@ -1,0 +1,52 @@
+name: Remove the merged M9 polish branch
+on:
+  push:
+    branches: [v2]
+    paths: [.github/workflows/m9-polish-cleanup.yml]
+permissions:
+  contents: write
+  pull-requests: read
+jobs:
+  remove-merged-branch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify PR65 and the unchanged branch, then remove only m9-acceptance-polish
+        env:
+          M9_POLISH_CLEANUP_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          root = "https://api.github.com/repos/rolandmraiha-cmd/roland-agent"
+          read_path = "/git/ref/heads/m9-acceptance-polish"
+          headers = {
+              "Authorization": "Bearer " + os.environ["M9_POLISH_CLEANUP_TOKEN"],
+              "Accept": "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          def api(path, method="GET"):
+              request = urllib.request.Request(root + path, headers=headers, method=method)
+              with urllib.request.urlopen(request, timeout=20) as response:
+                  return json.loads(response.read()) if response.status != 204 else None
+
+          pr = api("/pulls/65")
+          assert pr["merged"] and pr["base"]["ref"] == "v2", "PR65 is not merged into v2"
+          assert pr["merge_commit_sha"] == "a32bbf883396bd49df156b48ffcf32192ab612ab", "Unexpected merge"
+          assert pr["head"]["ref"] == "m9-acceptance-polish", "Unexpected branch"
+          assert pr["head"]["sha"] == "3478d3babc0421af55e7e2e0c1c3c4c7ccfc455d", "Unexpected PR head"
+          ref = api(read_path)
+          assert ref["object"]["sha"] == pr["head"]["sha"], "Branch changed; refusing deletion"
+          api("/git/refs/heads/m9-acceptance-polish", "DELETE")
+          try:
+              api(read_path)
+          except urllib.error.HTTPError as error:
+              assert error.code == 404, "Could not verify branch deletion"
+          else:
+              raise SystemExit("Branch still exists")
+          print("PASS: merged m9-acceptance-polish removed")
+          PY

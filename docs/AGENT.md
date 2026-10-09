@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-09. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 contains the UI/ignore-file polish and updated records; its integration and final release review remain pending. `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
+> Snapshot: 2026-10-09. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 is merged at `a32bbf8`, with all seven checks passed at `3478d3b`. The temporary guarded branch cleanup is in progress; final integration CI and release review remain pending. `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -299,6 +299,10 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 ## 12. Last verified
 
 ### M9 host acceptance (9 October 2026)
+
+PR #65 is merged at `a32bbf8`; final-head runs `37988357752` and `37988357768`
+passed all seven jobs at `3478d3b`. Temporary guarded cleanup removes only the
+unchanged merged `m9-acceptance-polish` branch, then its workflow will be removed.
 
 Roland explicitly approved publication of this summarized evidence on 9 October.
 The actual tested deployment was `bb762630730b50a50f7df381a676d2b96edaf568`;

@@ -1,6 +1,6 @@
 # roland-agent — NEXT: implementation handoff for M6 → M9
 
-> Snapshot: 9 Oct 2026. Production was tested at **`bb76263`** (M9 on `v2`), with schema 3, the base model current, browser/screen on and training off. M6/M7/M8 are accepted. All planned M9 host checks and restart recovery passed; see [the acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publication, the PR #65 merge and branch deletion. The final polish integration and `v2` → `main` release review remain pending. Model reporting in longer chats is a documented follow-up proposed for after 2.0.0; phone and training-data work remain deferred as previously agreed.
+> Snapshot: 9 Oct 2026. Production was tested at **`bb76263`** (M9 on `v2`), with schema 3, the base model current, browser/screen on and training off. M6/M7/M8 are accepted. All planned M9 host checks and restart recovery passed; see [the acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publication, the PR #65 merge and branch deletion. PR #65 is merged at `a32bbf8`, all seven jobs passed at `3478d3b`, and the guarded temporary branch cleanup is in progress. Final integration CI and `v2` → `main` release review remain pending. Model reporting in longer chats is a documented follow-up proposed for after 2.0.0; phone and training-data work remain deferred as previously agreed.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
@@ -674,7 +674,8 @@ Roland completed the M9 host checklist at `bb76263` on 9 October. Verification, 
 restore, external ports/TLS, listener tables, benchmark, ten-minute loaded watch, thirty-minute
 soak and planned restart recovery all passed. Browser tests covered ownership, approvals,
 files, settings and persistent profile state. He approved publishing the summarized evidence
-and merging/deleting the PR #65 branch. The approved note is in
+and merging/deleting the PR #65 branch. PR #65 is now merged at `a32bbf8`; all seven
+final-head checks passed. The temporary guarded cleanup is in progress. The approved note is in
 [releases/m9-acceptance-2026-10-09.md](releases/m9-acceptance-2026-10-09.md).
 
 PR #65 fixes the untitled-page label, environment-backup exclusions and acceptance command

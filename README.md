@@ -6,9 +6,10 @@ chats, files and browser snapshots are never sent to a hosted inference service.
 
 **2.0.0 release candidate.** M0–M9 implementation is on `v2`. The M9 deployment at
 **`bb76263`** passed the host acceptance checks and restart recovery on 9 October 2026.
-Roland approved publishing the results and merging the final polish in PR #65.
+Roland approved publishing the results; PR #65 is merged at `a32bbf8`, with all seven
+checks passed at `3478d3b`. The guarded temporary branch cleanup is in progress.
 See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
-Final polish integration and the reviewed `v2` → `main` release merge remain pending;
+Final integration CI and the reviewed `v2` → `main` release merge remain pending;
 training stays off.
 
 ## What it does
