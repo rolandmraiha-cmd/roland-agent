@@ -1,6 +1,6 @@
 # roland-agent — NEXT: release record and follow-ups
 
-> Snapshot: 10 October 2026. Runtime candidate **`7b3de9d`** is deployed on Contabo: verify 12/0/2, schema 3, valid 591-row audit, 3819 MiB idle available RAM, untitled-page label, Watch/reconnect/control/handback and fresh browser tools checked. All seven jobs passed on that deployed head; final streaming-fix CI/deploy/review/main merge are recorded in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized release as 2.0.0 with the documented follow-ups retained. Full M9 acceptance at `bb76263` and this final smoke are preserved in [the dated acceptance note](releases/m9-acceptance-2026-10-09.md). PR #65/#67 cleanup is complete. Final review confirmed a large-file memory blocker; PR #70 is merged at `226ee63`, all seven jobs passed at `01a4549`; its focused streaming fix is not yet deployed. The guarded branch cleanup is in progress. Main remains unmerged. Training stays off.
+> Snapshot: 10 October 2026. Runtime candidate **`7b3de9d`** is deployed on Contabo: verify 12/0/2, schema 3, valid 591-row audit, 3819 MiB idle available RAM, untitled-page label, Watch/reconnect/control/handback and fresh browser tools checked. All seven jobs passed on that deployed head; final streaming-fix CI/deploy/review/main merge are recorded in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized release as 2.0.0 with the documented follow-ups retained. Full M9 acceptance at `bb76263` and this final smoke are preserved in [the dated acceptance note](releases/m9-acceptance-2026-10-09.md). PR #65/#67 cleanup is complete. Final review confirmed a large-file memory blocker; PR #70 is merged at `226ee63`, all seven jobs passed at `01a4549`; its focused streaming fix is not yet deployed. Guarded cleanup 38047882766 deleted the unchanged feature branch; its temporary workflow is removed. Main remains unmerged. Training stays off.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
@@ -9,8 +9,9 @@
 
 The existing runtime and host checks passed at `7b3de9d`. Final automated review then
 confirmed a large-file memory blocker. PR #70 is merged at `226ee63`; all seven reviewed-head
-jobs passed. Before the already-authorized main merge, complete its guarded branch/workflow
-cleanup, all seven final integration jobs and a focused deployed large-file check. The fix
+jobs passed. Guarded cleanup 38047882766 deleted the unchanged feature branch; its
+temporary workflow is removed. Before the already-authorized main merge, complete all
+seven final integration jobs and a focused deployed large-file check. The fix
 streams 64 KiB chunks from a validated descriptor and bounds file-info/append hashing.
 The HTTP response uses chunked framing so concurrent truncation finishes without a
 stale Content-Length error; binary/empty completion and real h11 framing are checked.

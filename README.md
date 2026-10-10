@@ -13,7 +13,8 @@ with all seven jobs passed at `01a4549`; it streams from a
 validated file descriptor in 64 KiB chunks and bounds metadata hashing. Mutable files
 use a chunked HTTP response so concurrent truncation cannot break a promised length. It needs a
 focused deployment before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges.
-Its unchanged feature branch is being removed by a guarded one-use workflow.
+Its unchanged feature branch was deleted by [guarded cleanup 38047882766](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38047882766);
+the temporary workflow is removed. Final integration CI is tracked in release PR #66.
 The earlier completed checks remain evidence for that tested runtime; this fix is not yet
 deployed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
 Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
