@@ -11,8 +11,8 @@
 The shipping helper fetches the chosen branch explicitly, supports the original v2-only
 clone after retirement, and keeps fast-forward-only pulls. Disposable Git fixtures
 cover default main, an explicit branch and refusal to deploy a diverged main.
-The first waiting cleanup job retains its narrower scope and will stop safely;
-a replacement job covers this reviewed shipping fix.
+The one-use [cleanup run 38060350854](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38060350854)
+covers the eight-file documentation, CI and shipping migration.
 Its guarded job removes `v2` only when its expected head remains fully included in `main`
 and no open PR depends on it; it removes its own feature branch only after that PR merges
 and the feature head still matches the merged source. The one-use workflow is removed
