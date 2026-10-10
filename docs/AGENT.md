@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-10. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 is merged at `a32bbf8`, with all seven checks passed at `3478d3b`. The merged branch and temporary cleanup workflow are removed. Build fix PR #67 is merged at `6146038`, with all seven integration jobs passed; its extra branch and temporary workflow are also removed. Final integration CI, the focused polish deploy and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
+> Snapshot: 2026-10-10. Tested runtime deployment: **`7b3de9d`** on `v2`, schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. Final deploy: verify 12/0/2, audit valid (591 rows), 3819 MiB idle available RAM, untitled-page label, Watch/reconnect, control/handback and fresh browser tools checked. Full M9 restore/isolation/external-port/TLS/benchmark/load/soak/restart acceptance passed at the dated `bb76263` checkpoint. [The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both records. All seven jobs passed on deployed `7b3de9d`; release paperwork is checked again in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized the 2.0.0 main merge with documented follow-ups retained. Feature branches and temporary cleanup workflows are removed. PR #66 records final CI, review and merge status. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -12,7 +12,7 @@ A private HTTPS agent on Roland's Contabo VPS with:
 2. Self-hosted open-weight model only (no third-party inference).
 3. A code-enforced approval gate, an isolated terminal sandbox and a workspace files UI (shipped).
 4. Persistent Chromium and a private live screen of that same browser for Roland's own sign-ins (M6/M7, accepted and enabled on Contabo).
-5. Persona editing and feedback (M8, accepted); scrubbed opt-in training on a **separate** machine is implemented but remains off. M9 prepares the 2.0.0 release.
+5. Persona editing and feedback (M8, accepted); scrubbed opt-in training on a **separate** machine is implemented but remains off. M9 completes the 2.0.0 release; the remaining work is recorded in §8.
 
 Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a small local model; quality and speed are modest.
 
@@ -55,7 +55,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 | M8 implementation (off by default; deployed; accepted by Roland on 9 Oct 2026) | Persona versions, feedback capture, scrubbed datasets, separate-machine training, evaluation, human promotion/rollback and optional trainer; Roland requested merge on 8 Oct 2026 | #56, rebased on final M7 `e2f0792` |
 | M8 feedback follow-up (deployed at `7ef26de`; checked live by Roland, 9 Oct 2026) | Clear vote sets both thumbs to unpressed at once; the chosen thumb is filled so the saved vote can be seen; frontend regression tests | #61, from `e208bbd` |
 | M8 feedback row follow-up (deployed at `7ef26de`; the row checked live on desktop, 9 Oct 2026; the capture label needs capture on) | The thumbs and Clear vote sit on their own line under the answer; a reloaded chat keeps "Included for training review" on a captured vote, because the message list and the feedback route now say whether the vote was captured | #62, on top of #61 |
-| M8 persona diff fix (not deployed yet) | After Save new version or Restore the diff box is emptied instead of keeping the diff picked before; frontend regression test | #63 |
+| M8 persona diff fix (deployed with M9; included in tested `7b3de9d`) | After Save new version or Restore the diff box is emptied instead of keeping the diff picked before; frontend regression test | #63 |
 | Contabo follow-up fixes | RAM prompt cache disabled; memory watch catches restarts/cgroup OOM kills; length-limited replies preserved; confirming tap must be 1–5 s later; no repeat card for a rejected action within a run | #43, #45, #46, #47; deployed at `ea7e429` |
 
 - M6.4 fixture site exists at `tests/fixtures/site/server.py` with the `fixture-web` test service (#38). Part 2 added pages to it and drives it with the real browser.
@@ -66,11 +66,11 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 
 ## 4. Release status and accepted limitations
 
-- **M8 is accepted (Roland, 9 Oct 2026)** and no longer belongs under "not done"; this entry and the next say what was checked and what he put off. Roland put two things off until the whole agent is done, that is until after 2.0.0 (M9): the training data setup, including where that data is saved; and the phone problems (the browser screen not wanting to open on the phone, and the agent not opening on mobile data, only on his wifi). Until then capture, the weekly loop, `TRAINER_URL` and the training profile stay off, and M9 must not depend on either. What is known about the phone problems is in `docs/NEXT.md`, M9, "Put off by Roland until after 2.0.0". **The host acceptance record (9 Oct 2026):** M8 (#56) was deployed at `e208bbd` and its feedback follow-ups (#61, #62) at `7ef26de`, with capture, the weekly loop, `TRAINER_URL` and the training profile off (§12). Passed live on the `e208bbd` build: a thumbs-up, a thumbs-down and a text correction were saved and kept after a refresh; the chat said "Capture is off / Not captured" throughout; persona edit, preview and save worked. Found live: Clear vote removed the saved vote but the old thumb stayed marked as pressed until a refresh. Found while fixing that: a pressed thumb had no style of its own, so a saved vote could not be seen on screen at all. Both are fixed in #61 (`agent/web/static/settings.js`, `style.css`, `tests/frontend/settings.test.cjs`); the fix is deployed at `7ef26de`. Two more things noticed during that fix are fixed in #62, deployed with it: the feedback row sat beside the answer bubble and stacked in a narrow column next to a long answer or on a phone (it now has its own line under the answer), and after a reload a captured vote read "Not captured" (the message list now carries `captured`, and the row shows "Included for training review"). Confirmed after the `7ef26de` deploy: schema version 3, and `make model-list` with the base model as current and no previous model. Checked by Roland on the live page of the `7ef26de` build, in a desktop browser (§12): the chosen thumb is filled and stays filled after a hard refresh, Clear vote empties both thumbs at once, and the row sits under the answer. Also passed on 9 Oct 2026 on that build (§12): persona restore and the safety rules shown read-only after the editable text; the database count with capture off (2 votes, 0 training examples); a chat reloaded while the agent was still answering; a long answer at phone width; the screen's Watch, Take control and Hand back; login and logout on Roland's phone; and a sign-in by Roland on the screen from his phone. Every check on the list that can be done with capture off has passed, and Roland accepted M8 on that. Not checked, and part of what he put off until after 2.0.0: the capture label after a reload (it needs capture on) and the capture/export smoke. Seen in the persona test: after Restore the diff box kept the diff from before the restore. Fixed in #63 (`settings.js` empties the box whenever the persona is reloaded); not deployed yet. The checklist is in `docs/NEXT.md`, M8, "Host acceptance record". The draft #60 proposed the same handoff as a separate `docs/M8-HANDOFF.md`; it was closed unmerged because status lives in these three documents (rule 8 in §2).
+- **M8 is accepted (Roland, 9 Oct 2026)** and no longer belongs under "not done"; this entry and the next say what was checked and what he put off. Roland put two things off until the whole agent is done, that is until after 2.0.0 (M9): the training data setup, including where that data is saved; and the phone problems (the browser screen not wanting to open on the phone, and the agent not opening on mobile data, only on his wifi). Until then capture, the weekly loop, `TRAINER_URL` and the training profile stay off, and M9 must not depend on either. What is known about the phone problems is in `docs/NEXT.md`, M9, "Put off by Roland until after 2.0.0". **The host acceptance record (9 Oct 2026):** M8 (#56) was deployed at `e208bbd` and its feedback follow-ups (#61, #62) at `7ef26de`, with capture, the weekly loop, `TRAINER_URL` and the training profile off (§12). Passed live on the `e208bbd` build: a thumbs-up, a thumbs-down and a text correction were saved and kept after a refresh; the chat said "Capture is off / Not captured" throughout; persona edit, preview and save worked. Found live: Clear vote removed the saved vote but the old thumb stayed marked as pressed until a refresh. Found while fixing that: a pressed thumb had no style of its own, so a saved vote could not be seen on screen at all. Both are fixed in #61 (`agent/web/static/settings.js`, `style.css`, `tests/frontend/settings.test.cjs`); the fix is deployed at `7ef26de`. Two more things noticed during that fix are fixed in #62, deployed with it: the feedback row sat beside the answer bubble and stacked in a narrow column next to a long answer or on a phone (it now has its own line under the answer), and after a reload a captured vote read "Not captured" (the message list now carries `captured`, and the row shows "Included for training review"). Confirmed after the `7ef26de` deploy: schema version 3, and `make model-list` with the base model as current and no previous model. Checked by Roland on the live page of the `7ef26de` build, in a desktop browser (§12): the chosen thumb is filled and stays filled after a hard refresh, Clear vote empties both thumbs at once, and the row sits under the answer. Also passed on 9 Oct 2026 on that build (§12): persona restore and the safety rules shown read-only after the editable text; the database count with capture off (2 votes, 0 training examples); a chat reloaded while the agent was still answering; a long answer at phone width; the screen's Watch, Take control and Hand back; login and logout on Roland's phone; and a sign-in by Roland on the screen from his phone. Every check on the list that can be done with capture off has passed, and Roland accepted M8 on that. Not checked, and part of what he put off until after 2.0.0: the capture label after a reload (it needs capture on) and the capture/export smoke. Seen in the persona test: after Restore the diff box kept the diff from before the restore. Fixed in #63 (`settings.js` empties the box whenever the persona is reloaded); included in the tested M9 deployment `7b3de9d`. The checklist is in `docs/NEXT.md`, M8, "Host acceptance record". The draft #60 proposed the same handoff as a separate `docs/M8-HANDOFF.md`; it was closed unmerged because status lives in these three documents (rule 8 in §2).
 
 - **M8 as merged (implementation #56, approved for integration on 8 Oct 2026):** the pipeline on `v2-m8-model` is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh. Screen and trainer services, required mounted secrets, preflight and edge fixtures are combined. Capture still refuses active sign-ins and every screen session. Backup/configuration expectations, ShellCheck and the missing tokenizer dependency are corrected. Stopping a sign-in now delivers its final cancellation event before the chat ends. Model evaluation reads streamed schema-error bodies before constrained fallback; unrelated HTTP errors are not retried. The synthetic model declares the evaluation context of 4096 tokens; regression tests check that every public prompt plus its output allowance fits and that all 256 byte tokens preserve unseen Unicode. Byte fallback fixes the pinned server failure when tokenizing newlines or unseen characters. The synthetic tokenizer also leaves the assistant prefix literal, preventing the pinned sampler from dropping its first token before grammar initialization. The CPU workflow provides the checkout import path to the standalone probe. The real tiny-GGUF swap probe now uses authenticated trainer API handlers and human request tokens, verifies refusal without a token, and checks that valid promote/rollback does not restart the container. All five GitHub checks passed on code head `c9a7ef1`: 1,543 unit tests, 81 frontend tests, lint, edge/isolation, and CPU training/conversion plus the authenticated model-swap probe. Roland then requested merge and branch removal; this final status update changes documentation only. At that merge no M8 deployment had been performed (it has been since, see the entry above); no paid GPU has been rented and no model promoted. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). Roland accepted M7 on 8 Oct 2026. Training stays off.
 
-- **M9:** implementation PR #64 and polish PR #65 are merged into `v2`; both extra branches and their temporary cleanup workflows are removed. Roland completed host acceptance at `bb76263`; the measured evidence is in §12. Final CI, a focused polish deployment check and release acceptance are tracked in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66), `v2` → `main`. Main remains unchanged. Training-data and phone work stay deferred, with model-reporting quality proposed as another follow-up. Plan and acceptance: [docs/NEXT.md](NEXT.md).
+- **M9:** implementation #64, polish #65 and build fix #67 are merged into `v2`; extra branches and cleanup workflows are removed. Full acceptance passed at `bb76263`; final runtime `7b3de9d` is deployed and passed the focused checks (§12). Roland authorized [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66), `v2` → `main`, with model-reporting, phone and training-data follow-ups retained. Final paperwork CI/review/merge are recorded there. [NEXT](NEXT.md) folds the completed plan into history and retains the follow-ups.
 - **M7 is accepted (Roland, 8 Oct 2026)** and no longer belongs under "not done"; the next four points say what it consists of and what was left as it is. Known and left as they are: the sign-in was done on his PC, not the phone (the phone could not look up the server's name on mobile data that evening); the agent opens the address it is given and does not look for the site's sign-in form; a new tab and the address bar's suggestion box show "This page is blocked"; and a form that posts into a new tab leaves a blank tab behind.
 - **M7 part 1, core side (#55, merged):** screen sessions (`agent/screen.py`), the sign-in flow and the `request_signin` tool (`agent/signin.py`), the routes Caddy and the pages use (`agent/web/routes_screen.py`: `/screen`, `/api/screen/*`, `/api/signin/*`, `/internal/screen-auth`), the screen page (`screen.html`, `screen.js`), sign-in cards in the chat and Watch / Take control on the Browser tab. With the flag off the routes answer 404 or 403, the tool is not offered and the buttons are hidden. A7.1 (`tests/test_screen_auth.py`) and A7.2 (`tests/test_signin.py`) pass, with page tests in `tests/frontend/screen.test.cjs` and `chat.test.cjs`.
 - **M7 part 2, the services (#57, merged; on on Contabo, off by default in the repo):** x11vnc started by `browserd/launcher.py` when `SCREEN_ENABLED=true` (`browserd/vnc.py`: command line, password file, cutting connections by replacing x11vnc); `docker/novnc/` and the `novnc` compose service behind the `screen` profile; `vnc_password` / `vnc_view_password` mounted into core and the browser; the Caddy screen routes; `python -m agent` accepts `SCREEN_ENABLED=true` together with the browser; preflight, verify and isolation know the screen. A7.3 passes in the live stack (`tests/integration/test_screen_live.py`, run by `make test-browser`) and in CI for the part that needs no browser (`tests/integration/edge.sh`, second phase). A7.4 passed on Roland's second try (see §12). Known leftovers, visible on the screen: a form that posts into a new tab leaves a blank tab behind that browserd cannot see or close, and a new tab and the address bar's suggestion box show "This page is blocked" (docs/NEXT.md, M7, "Known issues").
@@ -195,7 +195,7 @@ After #43 (`--cache-ram 0`), Roland's pre-step with two chats plus "continue" me
 
 ### Pending
 
-M9 §10 review and SECURITY write-up are merged; host verification and restart recovery passed at `bb76263`. Final release review/acceptance is tracked in PR #66. The baseline matrix maps every §10.2 item to tests or host checks. M8 live capture/export/GPU use is deferred after 2.0.0 by Roland, with training off; automated pipeline/swap tests do not prove live data handling.
+M9 §10 review and SECURITY write-up are merged; full host verification and restart recovery passed at `bb76263`, and focused final deployment/browser checks passed at `7b3de9d`. Roland authorized the release with documented follow-ups; final review/merge is tracked in PR #66. The baseline matrix maps every §10.2 item to tests or host checks. M8 live capture/export/GPU use is deferred after 2.0.0 by Roland, with training off; automated pipeline/swap tests do not prove live data handling.
 
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model.
 
@@ -213,21 +213,24 @@ Host controls, resource limits and training settings are unchanged.
 The unchanged merged `v2-m9-caddy-index` branch was deleted by guarded
 [cleanup run 37994793408](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994793408);
 its temporary workflow is removed. Release PR #66 records checks on the final cleanup head
-and the focused deploy. The tested host checkpoint remains `bb76263`.
+and the final documentation check. The tested runtime deployment is now `7b3de9d`; verify, schema/audit and focused browser/screen/tool checks passed on 10 October.
 
 
-1. M9 implementation #64, approved polish #65 and verified build fix #67 are merged
-   into `v2`; their extra branches and cleanup workflows are removed. The host acceptance checkpoint is `bb76263`.
-2. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks A9.1:
-   all seven jobs must pass on its final `v2` head. Record exact head and run URLs there.
-3. Roland deploys the merged polish, retaining context 3072, model memory 3840m, threads 3,
-   six tool steps and training off. Run verify and check the untitled browser-page label.
-   The completed restore/load/soak/restart checks need repetition only if a new concern appears.
-4. Add a COMMENT release review at the final head. Roland decides and merges the release
-   (A9.3), unless he explicitly delegates that merge. At acceptance, mark the changelog
-   released and archive/fold completed NEXT material into this history, retaining follow-ups.
-5. After 2.0.0, return to model-reporting quality and Roland's deferred phone and
-   training-data work. New capture, provider rental, DNS or resource limits need his decision.
+1. Finish [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66): final
+   documentation-only CI, COMMENT review at that exact head, then the main merge Roland
+   authorized. The deployed runtime `7b3de9d` already passed all seven jobs and focused
+   host/browser checks. No further host rebuild is required for this paperwork.
+2. Reproduce unsupported model claims in a long chat and incorrect page-content labels;
+   improve reports of actual tool results, blocked or unfinished actions. Preserve the gate.
+3. Return to Roland's deferred phone-screen and mobile-data/DNS work. A domain change
+   needs his decision; no cause or fix is established by the current evidence.
+4. Agree training-data location/backup policy before an explicitly requested synthetic
+   capture/export trial. Capture, weekly training, trainer and the training profile stay off.
+   Any GPU rental, model promotion or resource-limit increase needs Roland's decision.
+
+The completed implementation plan is folded into [NEXT's historical section](NEXT.md).
+Its unchanged pre-release version is also preserved by the [Git history link in §12](#12-last-verified).
+Standing working rules in §2 remain in force.
 
 ## 9. Host facts
 
@@ -238,7 +241,7 @@ and the focused deploy. The tested host checkpoint remains `bb76263`.
 | Public IPv4 | `37.60.226.214` |
 | URL | https://37-60-226-214.sslip.io/ |
 | Paths | `/opt/roland-agent`, workspace `/srv/roland-agent/workspace` |
-| Live services / tested HEAD | caddy, core, model, sandbox, browser, novnc; `bb76263` (M9 acceptance, 9 Oct 2026); PR #65 polish awaits deploy |
+| Live services / tested HEAD | caddy, core, model, sandbox, browser, novnc; `7b3de9d` (final runtime smoke, 10 Oct 2026); earlier full acceptance `bb76263` |
 | Host `.env` | `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`, `COMPOSE_PROFILES=browser,screen`, `BROWSER_ENABLED=true`, `SCREEN_ENABLED=true`, `BROWSER_CHROMIUM_SANDBOX=true`, `BROWSER_SECCOMP=./docker/browser/seccomp-chromium.json`, `MAX_TOOL_STEPS=6` |
 | Snapshot | `pre-m6-deploy-2026-10-08` |
 
@@ -285,7 +288,7 @@ and the focused deploy. The tested host checkpoint remains `bb76263`.
 
 ## 10. Spec vs this document
 
-`docs/v2-spec.md` is the **detailed target**. This **AGENT.md** is the **living status**. `docs/NEXT.md` is the M6–M9 plan. If they disagree: Roland's latest decision → this file → NEXT.md → the spec.
+`docs/v2-spec.md` is the **detailed target**. This **AGENT.md** is the **living status**. `docs/NEXT.md` keeps post-release follow-ups and the completed M6–M9 plan as history. If they disagree: Roland's latest decision → this file → NEXT.md → the spec.
 
 ## 11. Code map (current)
 
@@ -311,6 +314,31 @@ and the focused deploy. The tested host checkpoint remains `bb76263`.
 | `tests/` | Unit, frontend (`chat.test.cjs`, `snapshot.test.cjs`), integration (`edge.sh`, `isolation.sh`, `browser.sh`, `test_sandbox_live.py`, `test_browser_live.py`) |
 
 ## 12. Last verified
+
+### 2.0.0 final acceptance and release record (10 October 2026)
+
+Roland authorized publishing/merging the release and keeping the other issues for later.
+The deployment and short browser checks that the release was waiting for are now complete.
+The final runtime candidate is `7b3de9dcc032d50462b9999bc228576dbd3ec96f`.
+Roland's log confirms all five image builds and six healthy services, verify 12/0/2,
+schema 3 current, valid audit (591 rows, no bad row), and 3819 MiB idle available RAM.
+The final browser smoke confirmed the untitled-page label, Watch/reconnect, control/handback,
+Agent mode afterwards, and executed `browser_open`/`browser_snapshot` audit results.
+The page title was correct; visible paragraph text was labelled as a heading. This retains
+rather than resolves the known model-reporting limitation.
+
+All seven deployed-head jobs passed: [CI 38030093440](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38030093440)
+and [CPU/model switch 38030093416](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38030093416).
+Final release paperwork changes only documentation; its own final-head checks, COMMENT
+review and main merge are recorded in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
+The changelog records 2.0.0 on 10 October. No runtime flags, image pins, secrets, DNS,
+resource limits or model version changed after the tested candidate.
+
+The completed M6–M9 plan is retained in NEXT's collapsed historical section; its
+[unchanged pre-release archive in Git](https://github.com/rolandmraiha-cmd/roland-agent/blob/7b3de9dcc032d50462b9999bc228576dbd3ec96f/docs/NEXT.md)
+is linked here as the implementation history. Model-reporting quality, phone access and
+training-data work remain visible in NEXT and §8. This folding retains the approved text
+and does not create another active instruction document.
 
 ### M9 host acceptance (9 October 2026)
 

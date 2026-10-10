@@ -1,14 +1,16 @@
 # Changelog
 
-## 2.0.0 — Unreleased
+## 2.0.0 — 2026-10-10
 
-M9 release candidate. Host acceptance and restart recovery passed at `bb76263` on
-9 October 2026. Final polish PR #65 is merged at `a32bbf8` and verified build fix
-PR #67 at `6146038`; all seven integration jobs passed. Their extra branches and temporary
-cleanup workflows are removed. Release PR #66 records final-head CI, a focused deploy
-check and the `v2` → `main` review. Release acceptance and
-the main merge remain pending. Training stays off. See the approved M9 acceptance note and known
-model-reporting, phone and training-data follow-ups in the project records.
+Roland authorized the single-user release with model-reporting, phone and training-data
+follow-ups retained. Full host acceptance and restart recovery passed at `bb76263` on
+9 October. The final runtime candidate `7b3de9d` passed all seven CI jobs and the 10 October
+Contabo deploy: verify 12 pass / 0 fail, schema 3 current, valid 591-row audit, and focused
+browser/screen/tool smoke. Final polish #65 and build fix #67 are merged; their extra
+branches and temporary cleanup workflows are removed. Release PR #66 records the
+review and checks on this documentation-only finalization before the `v2` → `main` merge.
+Training stays off. The acceptance note preserves both dated checkpoints; NEXT retains
+the follow-ups and folds the completed implementation plan into history.
 
 ### Added
 
@@ -38,8 +40,8 @@ model-reporting, phone and training-data follow-ups in the project records.
 ### Known limitations and deferred work
 
 - Model reporting can claim actions or recovery without supporting tool results, especially
-  in longer chats. Direct browser inspection and a fresh explicit tool run passed; truthful
-  action reporting remains a follow-up and PR #65 does not fix it.
+  in longer chats. Fresh explicit tools executed, but the final smoke labelled paragraph
+  text as a heading. Accurate action/content reporting remains a follow-up; PR #65 does not fix it.
 - Small CPU model speed/quality; 4096-token repo default has not been accepted on the VPS.
 - Accepted browser GET/background-request and page-inspection limits (see SECURITY).
 - Training-data setup/backup/capture/GPU smoke and phone screen/mobile-data faults wait

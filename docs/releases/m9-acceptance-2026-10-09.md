@@ -1,7 +1,8 @@
 # M9 acceptance — 9 October 2026
 
-Publication approved by Roland on 9 October. This records the test checkpoint before
-the PR #65 merge; current integration/release status is maintained in AGENT and NEXT.
+Publication approved by Roland on 9 October. The original checkpoint below predates
+the PR #65 merge; the 10 October addendum records the final deployed runtime candidate.
+Current integration/release status is maintained in AGENT, NEXT and release PR #66.
 
 Tested deployment: `v2` at `bb762630730b50a50f7df381a676d2b96edaf568`.
 Tests were completed on 9 October 2026, Europe/Helsinki time.
@@ -70,3 +71,35 @@ remain deferred as previously agreed.
 
 Next: review the polish PR, decide how to handle the model reporting finding, and
 complete release review before the `v2` → `main` merge.
+
+## Final deployed candidate — 10 October 2026
+
+Roland's deployment log confirms `v2` at
+`7b3de9dcc032d50462b9999bc228576dbd3ec96f`. PR #65 polish and PR #67's official-image
+mirror fix are included. All five image builds succeeded; preflight reported zero failures
+and warnings, all six intended services were healthy, and deployment finished successfully.
+An online DB/workspace backup was taken before the build. Secrets permissions and the
+existing host configuration were retained; capture, weekly training and trainer stay off.
+
+| Final focused check | Result |
+| --- | --- |
+| Host verify | 12 pass / 0 fail / 2 manual categories; previous full manual evidence above remains applicable |
+| Schema / audit | Database version 3, target 3, up to date; audit `ok: true`, 591 rows, no bad row |
+| Idle available memory | 3819 MiB, above the 1200 MiB idle target |
+| Untitled page | Active cookie-test page showed `Untitled page`, rather than `No active page` |
+| Watch / reconnect | Watch connected; a reload reconnected with the agent still working |
+| Take control / Hand back | Connected control showed the agent paused and User mode; Hand back restored Agent mode and thumbnail refresh |
+| Fresh tool request | `browser_open` and `browser_snapshot` executed against `https://example.com`; actual Browser tab/thumbnail showed that page and audit recorded both results |
+| Candidate CI | All seven jobs passed at this exact head: [CI 38030093440](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38030093440) and [CPU/model switch 38030093416](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38030093416) |
+
+The final fresh-chat reply reported the page title correctly, but labelled the visible
+paragraph text as a heading. Tool execution and browser state passed; accurate content
+labels remain part of the known model-reporting follow-up. No new ownership, isolation or
+deployment failure was found. This smoke does not mark the model-quality issue resolved.
+
+Roland authorized posting/merging the release with the other issues addressed afterwards;
+the final deployment/browser checks it was waiting for are complete. The 2.0.0 release
+paperwork retains the agreed limitations, folds the completed plan into history and is
+checked again before the main merge in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
+The final paperwork changes no runtime source, image pins, settings or secrets, so it does
+not require another full restore/load/soak or host rebuild.

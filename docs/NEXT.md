@@ -1,9 +1,41 @@
-# roland-agent — NEXT: implementation handoff for M6 → M9
+# roland-agent — NEXT: release record and follow-ups
 
-> Snapshot: 10 Oct 2026. Production was tested at **`bb76263`** (M9 on `v2`), with schema 3, the base model current, browser/screen on and training off. M6/M7/M8 are accepted. All planned M9 host checks and restart recovery passed; see [the acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publication, the PR #65 merge and branch deletion. PR #65 is merged at `a32bbf8`, all seven jobs passed at `3478d3b`, and its extra branch and temporary cleanup workflow are removed. Build fix PR #67 is merged at `6146038`, with all seven integration jobs passed; its extra branch and temporary workflow are also removed. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks final integration CI, the focused polish deploy and `v2` → `main` release acceptance. Main remains unchanged. Model reporting in longer chats is a documented follow-up proposed for after 2.0.0; phone and training-data work remain deferred as previously agreed.
+> Snapshot: 10 October 2026. Runtime candidate **`7b3de9d`** is deployed on Contabo: verify 12/0/2, schema 3, valid 591-row audit, 3819 MiB idle available RAM, untitled-page label, Watch/reconnect/control/handback and fresh browser tools checked. All seven jobs passed on that deployed head; final documentation CI/review/main merge are recorded in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized release as 2.0.0 with the documented follow-ups retained. Full M9 acceptance at `bb76263` and this final smoke are preserved in [the dated acceptance note](releases/m9-acceptance-2026-10-09.md). Feature branches and temporary cleanup workflows are removed. Training stays off.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
+
+## Remaining release action and post-2.0.0 work
+
+The runtime and host checks are complete. The remaining release action is final CI and a
+COMMENT review for this documentation-only head, then the main merge Roland authorized.
+CHANGELOG dates 2.0.0 to 10 October. The tested containers need no rebuild for paperwork.
+
+1. **Model reporting:** reproduce longer-chat unsupported claims and inaccurate page-content
+   labels. The final fresh request executed both browser tools and reported the title,
+   but labelled visible paragraph text as a heading. Improve reports based on actual
+   results, including blocked/unfinished actions; keep approval and ownership checks.
+2. **Phone access:** resume Roland's deferred screen interruptions and mobile-data access
+   work. The earlier mobile-data failure was NXDOMAIN; a real domain may help but is not
+   an established fix. DNS changes require Roland's decision.
+3. **Training data:** agree storage and backup policy, then an explicitly requested
+   synthetic capture/export test, including reload labels and fake-secret scrubbing.
+   Capture, weekly training, trainer and the training profile remain off. GPU rental and
+   model promotion need Roland's decision; automated CPU tests do not prove live data use.
+
+Keep context 3072, model memory 3840m, threads 3, six tool steps, RAM prompt cache off,
+browser/screen on and the accepted Chromium/background-POST/sensitive-field settings.
+No 4096-context acceptance is recorded. Standing working rules are in AGENT §2.
+
+## Completed implementation plan (history)
+
+The original M6–M9 plan below is retained as dated history, including its earlier pending
+checkpoints and decisions; its earlier status is superseded by the release record above
+and AGENT §12. The unchanged [pre-release plan](https://github.com/rolandmraiha-cmd/roland-agent/blob/7b3de9dcc032d50462b9999bc228576dbd3ec96f/docs/NEXT.md)
+is archived in Git and linked from AGENT's history. The approved instruction text is kept.
+
+<details>
+<summary>Expand the completed M6–M9 plan and its historical checks</summary>
 
 ## 0. Who is who (read this first)
 
@@ -864,3 +896,5 @@ A milestone is done only when all of these are true:
 16. Do not run host-mutating commands without `APPLY=1`, and do not change DNS, delete volumes or restore over live data without Roland.
 17. Do not merge docs text Roland has not approved; do not add new instruction markdown files. Do not squash-merge a PR that changed code, deploy state, plans, or instructions without updating `docs/AGENT.md`, `docs/NEXT.md`, and `README.md` in that same PR.
 18. Do not claim a feature works in docs until it is merged and smoked on Contabo.
+
+</details>

@@ -5,15 +5,16 @@ commands. Commands assume Bash, `/opt/roland-agent`, Docker Engine 28+ with Comp
 2.33.1+, and passwordless sudo for `deploy`. Contabo currently has Ubuntu 24.04, four
 shared vCPUs, about 7.8 GB usable RAM and 2 GB swap at `37.60.226.214`.
 
-**Status, 10 October 2026:** M6/M7/M8 are accepted. M9 host checks and restart recovery
-passed at `bb76263`, schema 3, base model current, browser/screen on and training off.
-[The approved acceptance note](releases/m9-acceptance-2026-10-09.md) records measured results
-and known follow-ups. PR #65 is merged at `a32bbf8`; its branch and temporary cleanup workflow
-are removed. Build fix PR #67 is merged at `6146038`, with all seven integration jobs passed
-and its branch/temporary workflow removed. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks final
-CI, a focused post-polish deploy check and release acceptance. The tested host checkpoint
-predates PR #65 and #67; the full load, restore and restart checks need not be repeated for
-those narrow fixes unless the focused deploy reveals a new concern.
+**Status, 10 October 2026:** the final runtime candidate `7b3de9d` is deployed: verify
+12 pass / 0 fail, schema 3 current, audit valid (591 rows), 3819 MiB idle available RAM,
+and browser label/Watch/reconnect/control/handback/tool smoke checked. Full M9 load,
+restore, external-port/TLS and restart checks passed at `bb76263` on 9 October.
+[The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both checkpoints.
+PR #65 and #67, their extra branches and temporary cleanup workflows are closed out.
+Roland authorized the 2.0.0 release merge with the documented follow-ups retained;
+[release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final-head
+CI/review. Only release paperwork changes after the tested runtime candidate; a further
+host build or long watch is unnecessary unless a new runtime change or concern appears.
 Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
 External implementers need Roland's explicit instruction before SSH/deploy; this runbook
 does not grant it.
@@ -106,17 +107,41 @@ Take a Contabo snapshot before the release deploy. Confirm the approved remote t
 that local changes will be retained; do not reset the host checkout to resolve differences.
 
 ```bash
+(
+set -e
 cd /opt/roland-agent
-git status --short
+deploy_git_status=$(sudo git -c safe.directory="$PWD" status --porcelain)
+if [ -n "$deploy_git_status" ]; then
+    printf 'STOP: local changes exist:\n%s\n' "$deploy_git_status"
+    exit 1
+fi
 git fetch origin
 git switch v2
 git pull --ff-only
-sudo env APPLY=1 make secrets
-sudo make backup
+git log -1 --oneline
+# Confirm this is the approved commit before deploying.
 sudo env APPLY=1 make deploy
 sudo make verify
 sudo docker compose exec -T core python -m agent migrate --check
+sudo docker compose exec -T core python -m agent audit-verify
+)
 ```
+
+The privileged Git status is read-only: the deploy user cannot inspect the protected
+`secrets/` directory, while ordinary fetch/switch/pull preserve deploy ownership of Git files.
+Keep secrets at directory 0700 and files 0400. On an older checkout that predates the
+`.env.*` exclusions, existing `.env.before-m8` and `.env.before-screen` backups can be
+retained by adding those exact names to `.git/info/exclude` before the clean check:
+
+```bash
+cd /opt/roland-agent
+printf '%s\n' '/.env.before-m8' '/.env.before-screen' >> .git/info/exclude
+```
+
+Do not hide other changes. The 10 October deploy used this fix and retained both backups.
+Use `git switch main` and `git pull --ff-only` instead of the `v2` lines after the release
+merge if following the released branch. The final documentation-only commit does not
+require rebuilding the already-tested containers.
 
 Deploy preflights the host, records the checkout in `.deploy/`, takes an online backup if
 core is running, builds pinned images, reapplies the installed firewall, starts services,

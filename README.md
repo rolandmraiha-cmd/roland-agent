@@ -4,15 +4,16 @@ Roland's single-user assistant, running all day on a Contabo VPS. Chat through i
 password-protected web page on a phone or computer. The model runs on the same server;
 chats, files and browser snapshots are never sent to a hosted inference service.
 
-**2.0.0 release candidate.** M0–M9 implementation is on `v2`. The M9 deployment at
-**`bb76263`** passed the host acceptance checks and restart recovery on 9 October 2026.
-Roland approved publishing the results; PR #65 is merged at `a32bbf8`, with all seven
-checks passed at `3478d3b`. Its merged branch is deleted and the cleanup workflow removed.
-Build fix PR #67 is merged at `6146038`, with all seven integration jobs passed;
-its extra branch and temporary workflow are also removed.
-See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
-Final integration CI and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
-`v2` → `main` has not been merged; training stays off.
+**2.0.0 — 10 October 2026.** M0–M9 are implemented. The final runtime candidate
+**`7b3de9d`** was deployed on Contabo: verify passed (12 pass / 0 fail), schema 3 and the
+591-row audit chain verified, and the browser label, Watch/reconnect, Take control/Hand back
+and a fresh browser-tool request passed. The full restore, isolation, external-port/TLS,
+loaded-memory, soak and restart checks passed at the earlier `bb76263` checkpoint.
+All seven CI jobs passed on the deployed candidate; this release paperwork is checked again
+before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges to `main`.
+Roland authorized the release merge with the documented follow-ups retained. Feature branches
+and their temporary cleanup workflows are removed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
+Training stays off; [NEXT](docs/NEXT.md) keeps the follow-ups and completed plan history.
 
 ## What it does
 
@@ -62,8 +63,10 @@ no OOM kills or container restarts. Full sample timings and service peaks are in
 [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
 
 A longer chat gave an unsupported browser answer without running a browser tool. Direct
-inspection and a fresh-chat tool test returned the correct result. Model reporting reliability
-is a documented follow-up; the approval gate still needs human judgment.
+inspection and fresh-chat tool tests confirmed execution and the real browser state. In the
+final smoke the page title was correct, while text visible as a paragraph was labelled a
+heading. Accurate action and content reporting remain follow-ups; the approval gate still
+needs human judgment.
 
 ## Training stays off for this release
 
