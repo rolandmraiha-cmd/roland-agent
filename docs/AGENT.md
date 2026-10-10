@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-10. Tested runtime deployment: **`7b3de9d`** on `v2`, schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. Final deploy: verify 12/0/2, audit valid (591 rows), 3819 MiB idle available RAM, untitled-page label, Watch/reconnect, control/handback and fresh browser tools checked. Full M9 restore/isolation/external-port/TLS/benchmark/load/soak/restart acceptance passed at the dated `bb76263` checkpoint. [The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both records. All seven jobs passed on deployed `7b3de9d`; release checks are recorded in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized the 2.0.0 main merge with documented follow-ups retained. PR #65/#67 branches and cleanup workflows are removed. Final automated review confirmed a large-file memory blocker; `v2-m9-stream-downloads` bounds downloads and hashes, pending CI/deploy. Main remains unmerged; PR #66 records final checks and merge status. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
+> Snapshot: 2026-10-10. Tested runtime deployment: **`7b3de9d`** on `v2`, schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. Final deploy: verify 12/0/2, audit valid (591 rows), 3819 MiB idle available RAM, untitled-page label, Watch/reconnect, control/handback and fresh browser tools checked. Full M9 restore/isolation/external-port/TLS/benchmark/load/soak/restart acceptance passed at the dated `bb76263` checkpoint. [The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both records. All seven jobs passed on deployed `7b3de9d`; release checks are recorded in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized the 2.0.0 main merge with documented follow-ups retained. PR #65/#67 branches and cleanup workflows are removed. Final automated review confirmed a large-file memory blocker; PR #70 is merged at `226ee63`, all seven jobs passed at `01a4549`; bounded downloads/hashes await focused deploy. Its unchanged branch is being removed by a guarded workflow. Main remains unmerged; PR #66 records final checks and merge status. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -216,8 +216,10 @@ its temporary workflow is removed. Release PR #66 records checks on the final cl
 and the final documentation check. The tested runtime deployment is now `7b3de9d`; verify, schema/audit and focused browser/screen/tool checks passed on 10 October.
 
 
-1. Finish the release-blocking `v2-m9-stream-downloads` fix: review and all seven CI jobs,
-   merge into `v2`, then a focused Contabo build/verify and large-file download check.
+1. The release-blocking [PR #70](https://github.com/rolandmraiha-cmd/roland-agent/pull/70) is merged at `226ee63`. All seven jobs
+   passed at reviewed `01a4549` ([CI 38047287532](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38047287532), [CPU/model switch 38047287538](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38047287538)). Remove its unchanged feature branch and temporary workflow,
+   pass all seven jobs on the final integration tip, then a focused Contabo build/verify
+   and large-file download check.
    The old 768 MiB download fails under a 192 MiB address-space limit; the fixed reader,
    hash and disconnect cases passed locally (42 pass / 1 existing skip). The fix retains
    confinement and header checks and changes no memory limit. It is not yet deployed.
@@ -354,9 +356,15 @@ regular files through the existing openat/O_NOFOLLOW walk, refuses FIFOs without
 streams at most 64 KiB at a time, caps a response to its initial size, uses chunked HTTP
 for mutable files rather than a stale Content-Length, and closes descriptors
 on normal completion, disconnect or cancellation. Hashing uses the same bounded reader.
+PR #70 is merged at `226ee63`; COMMENT review `5478741388` is anchored to `01a4549`.
+All seven reviewed-head jobs passed: CI `38047287532`, CPU/model switch `38047287538`;
+unit 1592 pass / 1 existing skip, dedicated live browser/edge/restore and CPU jobs pass.
+The guarded one-use cleanup checks the merged PR, exact merge SHA and unchanged feature
+head before deleting only `v2-m9-stream-downloads`; remove it after success.
+
 Local regression: the old download raises MemoryError for a 768 MiB sparse file under a
 192 MiB address-space cap; the fixed large download/hash, both ASGI disconnect paths and
-inode/symlink/FIFO checks pass (42 pass / 1 existing skip). CI and host acceptance remain
+inode/symlink/FIFO checks pass (42 pass / 1 existing skip). Final integration CI and focused host acceptance remain
 pending. The two P2 findings are tracked as #68/#69 after 2.0.0.
 
 ### M9 host acceptance (9 October 2026)

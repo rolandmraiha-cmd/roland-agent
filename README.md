@@ -8,10 +8,12 @@ chats, files and browser snapshots are never sent to a hosted inference service.
 `7b3de9d` was deployed and passed the 10 October verify (12/0), schema 3, audit (591 rows)
 and focused browser/screen/tool smoke. Roland authorized the release merge with follow-ups
 retained. Final review then confirmed a large-file memory blocker: downloads buffered the
-whole file inside the 640 MiB core. The focused `v2-m9-stream-downloads` fix streams from a
+whole file inside the 640 MiB core. [Fix PR #70](https://github.com/rolandmraiha-cmd/roland-agent/pull/70) is merged at `226ee63`,
+with all seven jobs passed at `01a4549`; it streams from a
 validated file descriptor in 64 KiB chunks and bounds metadata hashing. Mutable files
-use a chunked HTTP response so concurrent truncation cannot break a promised length. It needs CI and a
+use a chunked HTTP response so concurrent truncation cannot break a promised length. It needs a
 focused deployment before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges.
+Its unchanged feature branch is being removed by a guarded one-use workflow.
 The earlier completed checks remain evidence for that tested runtime; this fix is not yet
 deployed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
 Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
