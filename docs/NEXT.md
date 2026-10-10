@@ -1,11 +1,18 @@
 # roland-agent — NEXT: release record and follow-ups
 
-> Snapshot: 10 October 2026. **2.0.0 accepted** on Contabo at **`7ce7c2c`**, including PR #70's bounded download/hash fix. All seven exact-head jobs passed; verify 12/0/2, schema 3 current, valid 604-row audit, idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; 180-second watch: core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts. Earlier full M9 acceptance and browser/screen/tool smoke retain their scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Extra feature branches and cleanup workflows are removed; v2 is retained. Roland authorized 2.0.0 with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks/review and main merge status. CHANGELOG is dated 10 October. Training stays off.
+> Snapshot: 10 October 2026. **2.0.0 accepted** on Contabo at **`7ce7c2c`**, including PR #70's bounded download/hash fix. All seven exact-head jobs passed; verify 12/0/2, schema 3 current, valid 604-row audit, idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; 180-second watch: core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts. Earlier full M9 acceptance and browser/screen/tool smoke retain their scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Release PR #66 merged into `main` at `9beaf6e`. Roland requested retirement of fully merged `v2`; future deployment and feature PRs use `main`. Guarded branch-deletion status is recorded in the cleanup PR. Roland authorized 2.0.0 with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks/review and main merge status. CHANGELOG is dated 10 October. Training stays off.
 
-> **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
+> **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After merge, record the resulting `main` tip or link the PR that records it.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
 ## Release record and post-2.0.0 work
+
+The branch cleanup PR updates current instructions and both CI workflows for `main`.
+Its guarded job removes `v2` only when its expected head remains fully included in `main`
+and no open PR depends on it; it removes its own feature branch only after that PR merges
+and the feature head still matches the merged source. The one-use workflow is removed
+from the final PR tree while its already-started job waits for the reviewed merge.
+The historical M6–M9 plan below remains byte-for-byte unchanged.
 
 The streaming fix from PR #70 is merged and deployed at `7ce7c2c`. All seven integration
 jobs passed ([CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048061008),
@@ -18,7 +25,8 @@ size/SHA-256/CRC, core sampled peak 87.99/640 MiB, minimum host headroom 3817 Mi
 OOM kills or restarts across all services. Roland used his own logged-in browser after
 the cloud browser's URL policy blocked binary opening. CHANGELOG is dated 10 October.
 PR #66 records the final documentation-head checks, COMMENT review and the main merge
-Roland already authorized. v2 is retained for integration work. The remaining work below
+Roland already authorized; it merged at `9beaf6e`. Roland subsequently requested
+retirement of `v2`. Main now serves as the deployment and feature-PR base. The remaining work below
 is after the accepted release; no further full host deployment is needed for this paperwork.
 
 The fix streams 64 KiB chunks from a validated descriptor, bounds file-info/append hashes

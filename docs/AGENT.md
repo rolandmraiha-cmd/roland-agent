@@ -1,8 +1,8 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-10. **2.0.0 accepted** for Roland's single-user Contabo deployment. Tested runtime **`7ce7c2c`** on `v2`, including PR #70's bounded downloads/hashes. All seven exact-head jobs passed; host verify 12/0/2, schema 3 current, valid audit (604 rows), idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; the 180-second watch recorded core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts for all services. Full M9 acceptance at `bb76263` and browser/screen/tool checks at `7b3de9d` retain their measured scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Extra feature branches and cleanup workflows are removed; `v2` is retained. Roland authorized the release and the documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks, COMMENT review and main merge status. CHANGELOG is dated 10 October. Keep training/capture/trainer off, context 3072, model memory 3840m, threads 3 and six tool steps.
+> Snapshot: 2026-10-10. **2.0.0 accepted** for Roland's single-user Contabo deployment. Tested runtime **`7ce7c2c`** on `v2`, including PR #70's bounded downloads/hashes. All seven exact-head jobs passed; host verify 12/0/2, schema 3 current, valid audit (604 rows), idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; the 180-second watch recorded core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts for all services. Full M9 acceptance at `bb76263` and browser/screen/tool checks at `7b3de9d` retain their measured scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Release PR #66 merged into `main` at `9beaf6e`; its tree matches reviewed `76ad775`. Roland requested retirement of fully merged `v2`. Use `main` for deployments and future feature PRs; the cleanup PR records the guarded deletion. Roland authorized the release and the documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks, COMMENT review and main merge status. CHANGELOG is dated 10 October. Keep training/capture/trainer off, context 3072, model memory 3840m, threads 3 and six tool steps.
 
-> **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
+> **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After merge, record the resulting `main` tip or link the PR that records it.
 
 ## 1. What we are building
 
@@ -22,8 +22,8 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 
 **Names:** **roland-agent** = this Contabo product. **Code Builder / Code Shipper / Crew Chief** = Roland's **Grok Bot** teammates in group chat THE SCAM CALL CENTER (not this app's runtime). An AI on another platform is not those bots unless Roland assigned it that role for the job — see `docs/NEXT.md` §0.
 
-1. Branch from the latest remote `v2` (`v2-m<N>-<slug>`); PRs target `v2`. Never push to `main` until the M9 release PR, which Roland merges.
-2. When Grok bots do the work: **Code Builder (Grok)** codes → **Code Shipper (Grok)** reviews and Contabo-smokes → Shipper merges to `v2`. An external AI codes only if Roland directed it; it does not inherit Contabo/merge rights from the Grok room.
+1. After the accepted 2.0.0 release, branch from the latest remote `main` (`fix-<slug>` or `feature-<slug>`); PRs target `main`. Use reviewed PRs; never push changes straight to `main`. The completed M0–M9 `v2` workflow is historical.
+2. When Grok bots do the work: **Code Builder (Grok)** codes → **Code Shipper (Grok)** reviews and Contabo-smokes → Shipper merges reviewed PRs to `main`. An external AI codes only if Roland directed it; it does not inherit Contabo/merge rights from the Grok room.
 3. Roland's standing rule for **Code Shipper (Grok)**: may merge after a passing review and smoke without waiting. Pings Roland first for substantial manual tests and for destructive or host-level changes (DNS, deletes, memory raises, paid GPU, model promotion).
 4. Code Builder and Code Shipper (Grok) share one GitHub identity, so Shipper leaves a **COMMENT** review, not a formal APPROVE.
 5. No secrets in the repo, no telemetry, no hosted model APIs, no obfuscated code.
@@ -200,6 +200,12 @@ M9 §10 review and SECURITY write-up are merged; full host verification and rest
 Grammar/constrained decoding is **formatting**, not authorization. Untrusted tool/web text can still try to influence the model.
 
 ## 8. Next coding order
+
+2.0.0 is merged into `main` at `9beaf6e`. Roland requested retirement of `v2`;
+no unmerged commits or open dependent PRs were found. The cleanup PR moves deployment
+and CPU CI to `main`, preserves the historical plan, and records exact-head review/checks
+and leased deletion of `v2` plus its own merged feature branch. Runtime acceptance is unchanged.
+Future coding uses feature branches from `main`, targeting `main`, under §2.
 
 Build fix PR #67 is merged at `6146038`. All seven jobs passed at that merged `v2`
 integration tip: [CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994798247)

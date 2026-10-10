@@ -12,12 +12,15 @@ recorded core sampled peak 87.99/640 MiB, minimum host available 3817 MiB and ze
 kills or restarts across all services. All seven jobs passed at that exact head.
 Full M9 restore/load/soak/external-port/TLS and restart checks at `bb76263` and browser
 smoke at `7b3de9d` retain their measured scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md).
-Extra feature branches and temporary cleanup workflows are removed; v2 is retained.
+Release PR #66 merged into `main` at `9beaf6e`. Roland requested retirement of the fully
+merged `v2` branch; use `main` for current deployments and future feature PRs.
+The cleanup PR records its guarded deletion; runtime acceptance is unchanged.
 Roland authorized the release with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66)
 records final documentation-head checks/review and main merge status. CHANGELOG is dated
 10 October. The final paperwork changes only documentation; no further runtime rebuild
 or repeated full restore/load/soak is needed for it.
-Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
+Roland explicitly delegated the completed `v2` → `main` release merge.
+Future changes use reviewed feature PRs to `main` under AGENT §2.
 External implementers need Roland's explicit instruction before SSH/deploy; this runbook
 does not grant it.
 
@@ -51,8 +54,8 @@ firewall work and take a provider snapshot before adding a service.
    `docker info` reports seccomp/AppArmor and check the firewall backend. Host ingress
    must allow SSH 22/tcp, HTTP 80/tcp and HTTPS 443/tcp plus 443/udp only. Check both
    ufw and the provider firewall; the project's helper does not replace host ingress rules.
-2. Use a read-only GitHub deploy key. Clone the approved `v2` branch to
-   `/opt/roland-agent`; use `main` only after Roland merges the release.
+2. Use a read-only GitHub deploy key. Clone the approved `main` branch to
+   `/opt/roland-agent`. The 2.0.0 release PR has merged.
 3. Run `cp -n .env.example .env && chmod 600 .env`. Set ACME email and the served name.
    The fallback is `37-60-226-214.sslip.io`; a real domain can be set later. For this VPS
    explicitly use `MODEL_CTX=3072`, `MODEL_MEM_LIMIT=3840m`. Keep all optional features
@@ -117,9 +120,13 @@ if [ -n "$deploy_git_status" ]; then
     printf 'STOP: local changes exist:\n%s\n' "$deploy_git_status"
     exit 1
 fi
-git fetch origin
-git switch v2
-git pull --ff-only
+git fetch origin refs/heads/main:refs/remotes/origin/main
+if git show-ref --verify --quiet refs/heads/main; then
+    git switch main
+else
+    git switch -c main origin/main
+fi
+git pull --ff-only origin main
 git log -1 --oneline
 # Confirm this is the approved commit before deploying.
 sudo env APPLY=1 make deploy
@@ -141,8 +148,8 @@ printf '%s\n' '/.env.before-m8' '/.env.before-screen' >> .git/info/exclude
 ```
 
 Do not hide other changes. The 10 October deploy used this fix and retained both backups.
-Use `git switch main` and `git pull --ff-only` instead of the `v2` lines after the release
-merge if following the released branch. The documentation-only checkpoint `6a02480`
+The released deployment branch is `main`; the commands above also work with a checkout
+whose original fetch configuration followed only `v2`. The documentation-only checkpoint `6a02480`
 needed no rebuild. The subsequent streaming fix has now been built and deployed at
 `7ce7c2c`; its large-file check must use those new containers.
 
@@ -305,7 +312,13 @@ request sign-in. Screenshots are shown to Roland rather than the text model (aut
 regression tests cover both rules). Test on available wifi/desktop; the specifically deferred
 mobile-data and intermittent phone-screen faults are not made new release prerequisites.
 
-## Review and final release order
+## Post-release review and release history
+
+2.0.0 merged through PR #66 at `9beaf6e` on 10 October 2026. Future feature PRs target
+`main`; run all seven checks on the reviewed head and use a COMMENT review under the
+shared-identity rule. CPU/model-switch CI now runs on `main` pushes as well as PRs.
+Roland requested retirement of `v2`; guarded deletion is recorded in the cleanup PR.
+The completed M9 release order below is retained as history.
 
 1. Review M9 implementation/docs in `v2-m9-release` → `v2`; Roland reviews the proposed
    README/master text before it is merged. Shipper leaves a COMMENT review (shared GitHub identity).
