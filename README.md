@@ -4,19 +4,26 @@ Roland's single-user assistant, running all day on a Contabo VPS. Chat through i
 password-protected web page on a phone or computer. The model runs on the same server;
 chats, files and browser snapshots are never sent to a hosted inference service.
 
-**2.0.0 release candidate.** Full M9 acceptance passed at `bb76263` on 9 October;
-`7b3de9d` was deployed and passed the 10 October verify (12/0), schema 3, audit (591 rows)
-and focused browser/screen/tool smoke. Roland authorized the release merge with follow-ups
-retained. Final review then confirmed a large-file memory blocker: downloads buffered the
-whole file inside the 640 MiB core. [Fix PR #70](https://github.com/rolandmraiha-cmd/roland-agent/pull/70) is merged at `226ee63`,
-with all seven jobs passed at `01a4549`; it streams from a
-validated file descriptor in 64 KiB chunks and bounds metadata hashing. Mutable files
-use a chunked HTTP response so concurrent truncation cannot break a promised length. It needs a
-focused deployment before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges.
-Its unchanged feature branch was deleted by [guarded cleanup 38047882766](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38047882766);
-the temporary workflow is removed. Final integration CI is tracked in release PR #66.
-The earlier completed checks remain evidence for that tested runtime; this fix is not yet
-deployed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
+**2.0.0 — accepted 10 October 2026.** The release is validated on Contabo at
+`7ce7c2c`: verify 12 pass / 0 fail / 2 manual categories, schema 3 current, valid 604-row
+audit and 3820 MiB idle available RAM. The real 768 MiB workspace download is complete:
+its full size, SHA-256 and ZIP CRC passed verification. The 180-second watch recorded
+core at 87.99 / 640 MiB sampled peak, minimum host headroom 3817 MiB, and zero OOM kills
+or restarts across all services.
+
+All seven jobs passed on that deployed head:
+[CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048061008) and
+[CPU/model switch](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048060939).
+[Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records the final
+documentation-head checks, review and the main merge Roland authorized. Full M9 acceptance
+at `bb76263`, browser/screen/tool smoke at `7b3de9d` and the streaming-fix deployment are
+preserved with their measured scopes in [the acceptance note](docs/releases/m9-acceptance-2026-10-09.md).
+
+[Fix PR #70](https://github.com/rolandmraiha-cmd/roland-agent/pull/70) streams downloads from
+validated file descriptors in 64 KiB chunks and bounds metadata hashing. Chunked HTTP
+framing handles concurrent truncation. The extra feature branches and temporary cleanup
+workflows are removed; `v2` is retained for integration work. The final release paperwork
+changes only documentation and needs no further runtime build.
 Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
 including [Ollama fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68)
 and [directory metadata #69](https://github.com/rolandmraiha-cmd/roland-agent/issues/69).

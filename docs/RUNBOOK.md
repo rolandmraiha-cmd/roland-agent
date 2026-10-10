@@ -5,18 +5,18 @@ commands. Commands assume Bash, `/opt/roland-agent`, Docker Engine 28+ with Comp
 2.33.1+, and passwordless sudo for `deploy`. Contabo currently has Ubuntu 24.04, four
 shared vCPUs, about 7.8 GB usable RAM and 2 GB swap at `37.60.226.214`.
 
-**Status, 10 October 2026:** the final runtime candidate `7b3de9d` is deployed: verify
-12 pass / 0 fail, schema 3 current, audit valid (591 rows), 3819 MiB idle available RAM,
-and browser label/Watch/reconnect/control/handback/tool smoke checked. Full M9 load,
-restore, external-port/TLS and restart checks passed at `bb76263` on 9 October.
-[The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both checkpoints.
-PR #65 and #67, their extra branches and temporary cleanup workflows are closed out.
-Roland authorized the 2.0.0 release merge with the documented follow-ups retained;
-[release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final-head
-CI/review. Final automated review confirmed a large-file memory blocker. The focused
-streaming/download/hash fix needs a new core build, verify/schema/audit and a large-file
-check before the main merge; the previous long restore/load/soak evidence remains valid
-unless that focused check reveals a new concern.
+**Status, 10 October 2026:** 2.0.0 accepted for Roland's single-user deployment at
+`7ce7c2c`: verify 12/0/2, schema 3 current, valid 604-row audit, idle RAM 3820 MiB.
+The complete 768 MiB file passed full size/SHA-256/ZIP CRC checks. The 180-second watch
+recorded core sampled peak 87.99/640 MiB, minimum host available 3817 MiB and zero OOM
+kills or restarts across all services. All seven jobs passed at that exact head.
+Full M9 restore/load/soak/external-port/TLS and restart checks at `bb76263` and browser
+smoke at `7b3de9d` retain their measured scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md).
+Extra feature branches and temporary cleanup workflows are removed; v2 is retained.
+Roland authorized the release with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66)
+records final documentation-head checks/review and main merge status. CHANGELOG is dated
+10 October. The final paperwork changes only documentation; no further runtime rebuild
+or repeated full restore/load/soak is needed for it.
 Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
 External implementers need Roland's explicit instruction before SSH/deploy; this runbook
 does not grant it.
@@ -142,8 +142,9 @@ printf '%s\n' '/.env.before-m8' '/.env.before-screen' >> .git/info/exclude
 
 Do not hide other changes. The 10 October deploy used this fix and retained both backups.
 Use `git switch main` and `git pull --ff-only` instead of the `v2` lines after the release
-merge if following the released branch. The documentation-only checkpoint `6a02480` did not require a rebuild, but the subsequent
-streaming fix does. Do not perform its large-file download check on the old containers.
+merge if following the released branch. The documentation-only checkpoint `6a02480`
+needed no rebuild. The subsequent streaming fix has now been built and deployed at
+`7ce7c2c`; its large-file check must use those new containers.
 
 Deploy preflights the host, records the checkout in `.deploy/`, takes an online backup if
 core is running, builds pinned images, reapplies the installed firewall, starts services,

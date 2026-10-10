@@ -108,10 +108,49 @@ not require another full restore/load/soak or host rebuild.
 
 After the focused browser smoke, PR #66's automated review exposed a confirmed P1:
 workspace downloads read the whole file into the 640 MiB core. The prior small-file smoke
-had not covered this. Main is held for the focused `v2-m9-stream-downloads` fix, CI and
-its own deployed acceptance. The completed evidence above remains valid for its scope.
+had not covered this. Main was held for the focused `v2-m9-stream-downloads` fix, CI and
+its own deployed acceptance, completed in the subsequent checkpoint below. The earlier
+evidence remains valid for its scope.
 Local reproduction used a 768 MiB sparse file under a 192 MiB address-space cap: the old
 download raises MemoryError; bounded download and hashing pass. Inode confinement,
 FIFO refusal and ASGI 2.0/2.4 disconnect closure are covered by the focused regression.
 Lower-priority Ollama fallback #68 and moved-directory metadata #69 are retained after
-2.0.0. No new release approval is needed from Roland; the new runtime check is outstanding.
+2.0.0. Roland's existing release approval applies; the subsequent accepted runtime check is recorded below.
+
+## Streaming-fix deployed checkpoint — 10 October 2026
+
+Roland's log confirms deployment at `7ce7c2c67f10ea2e23668802867e66fdd6855565`.
+Preflight reported 0 failures/0 warnings, all five image builds completed and six intended
+services were healthy. The deploy took the online DB/workspace backup before building:
+`agent-20261010-1134.db.gz` and `workspace-20261010.tar.gz`.
+
+| Focused check | Measured result |
+| --- | --- |
+| Exact candidate CI | All seven PR-head and both push workflows successful; [CI 38048061008](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048061008), [CPU/model switch 38048060939](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048060939) |
+| Host verify | 12 pass / 0 fail / 2 manual categories; prior full manual evidence remains applicable |
+| Schema / audit | Version 3, target 3, current; audit ok, 604 rows, no bad row |
+| Verify idle available RAM | 3820 MiB |
+| Baseline memory report | Host available 3781 MiB; core 52.50/640 MiB; every service has zero OOM kills and restarts |
+| Disposable probe | Exclusive sparse file `m9-download-probe-7ce7c2c.bin`, 805306368 bytes / 768 MiB; Files UI shows it at that size |
+| Complete downloaded probe | 805306368 bytes / 768 MiB; ZIP CRC verified and full SHA-256 matches the expected all-zero probe |
+| 180-second loaded watch | Core sampled peak 87.99/640 MiB; minimum host available 3817 MiB; all service OOM/restart counters zero throughout; A6.5 PASS |
+
+The cloud browser rejected opening the binary under its URL protocol policy. Roland
+completed the normal Files download in his own logged-in browser and supplied it in a ZIP.
+Bounded streaming verification read the complete 805306368-byte member, validated ZIP CRC
+`95073edd` and matched the expected all-zero probe's SHA-256:
+`d8492a624b5ded59e8a2185b0755f195a58642456e8387ba2817e46f1e05b358`.
+The compressed archive is 782956 bytes; its compression does not reduce the validated
+logical download size.
+
+Roland's 180-second memory report sampled every 15 seconds and returned A6.5 PASS.
+Every service had zero OOM kills/restarts throughout. Minimum host available was 3817 MiB.
+Sampled service peaks (MiB): core 87.99/640, browser 345.00/1280, model 2996.22/3840,
+caddy 20.14/96, sandbox 38.49/1024 and novnc 21.06/64. These are sampled values for the
+reported watch, not a longer soak or a claim about unobserved instantaneous peaks.
+
+This completes the focused acceptance of the runtime fix. Roland's 2.0.0 main-merge
+approval already stands; the single-user release is accepted and CHANGELOG dated
+10 October 2026. PR #66 records final documentation-head checks/review and main merge
+status. The final paperwork changes only documentation and needs no further runtime
+build or full restore/load/soak.

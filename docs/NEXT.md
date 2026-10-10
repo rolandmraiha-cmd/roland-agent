@@ -1,23 +1,31 @@
 # roland-agent — NEXT: release record and follow-ups
 
-> Snapshot: 10 October 2026. Runtime candidate **`7b3de9d`** is deployed on Contabo: verify 12/0/2, schema 3, valid 591-row audit, 3819 MiB idle available RAM, untitled-page label, Watch/reconnect/control/handback and fresh browser tools checked. All seven jobs passed on that deployed head; final streaming-fix CI/deploy/review/main merge are recorded in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized release as 2.0.0 with the documented follow-ups retained. Full M9 acceptance at `bb76263` and this final smoke are preserved in [the dated acceptance note](releases/m9-acceptance-2026-10-09.md). PR #65/#67 cleanup is complete. Final review confirmed a large-file memory blocker; PR #70 is merged at `226ee63`, all seven jobs passed at `01a4549`; its focused streaming fix is not yet deployed. Guarded cleanup 38047882766 deleted the unchanged feature branch; its temporary workflow is removed. Main remains unmerged. Training stays off.
+> Snapshot: 10 October 2026. **2.0.0 accepted** on Contabo at **`7ce7c2c`**, including PR #70's bounded download/hash fix. All seven exact-head jobs passed; verify 12/0/2, schema 3 current, valid 604-row audit, idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; 180-second watch: core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts. Earlier full M9 acceptance and browser/screen/tool smoke retain their scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Extra feature branches and cleanup workflows are removed; v2 is retained. Roland authorized 2.0.0 with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks/review and main merge status. CHANGELOG is dated 10 October. Training stays off.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
-## Remaining release action and post-2.0.0 work
+## Release record and post-2.0.0 work
 
-The existing runtime and host checks passed at `7b3de9d`. Final automated review then
-confirmed a large-file memory blocker. PR #70 is merged at `226ee63`; all seven reviewed-head
-jobs passed. Guarded cleanup 38047882766 deleted the unchanged feature branch; its
-temporary workflow is removed. Before the already-authorized main merge, complete all
-seven final integration jobs and a focused deployed large-file check. The fix
-streams 64 KiB chunks from a validated descriptor and bounds file-info/append hashing.
-The HTTP response uses chunked framing so concurrent truncation finishes without a
-stale Content-Length error; binary/empty completion and real h11 framing are checked.
-The old 768 MiB download fails under a 192 MiB cap; the focused fixed suite passed locally
-(42 pass / 1 existing skip). Host limits stay unchanged. CHANGELOG remains unreleased
-until this new runtime change is accepted.
+The streaming fix from PR #70 is merged and deployed at `7ce7c2c`. All seven integration
+jobs passed ([CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048061008),
+[CPU/model switch](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38048060939));
+verify/schema/audit and baseline memory checks passed. Its unchanged branch was safely
+deleted by cleanup 38047882766 and the one-use workflow is removed.
+
+The complete 768 MiB download and 180-second loaded memory watch passed: exact
+size/SHA-256/CRC, core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero
+OOM kills or restarts across all services. Roland used his own logged-in browser after
+the cloud browser's URL policy blocked binary opening. CHANGELOG is dated 10 October.
+PR #66 records the final documentation-head checks, COMMENT review and the main merge
+Roland already authorized. v2 is retained for integration work. The remaining work below
+is after the accepted release; no further full host deployment is needed for this paperwork.
+
+The fix streams 64 KiB chunks from a validated descriptor, bounds file-info/append hashes
+and uses valid chunked HTTP framing for concurrent truncation. Binary/empty completion
+and h11 framing are checked. The old 768 MiB download fails under a 192 MiB cap; the
+fixed suite passed (42 pass / 1 existing skip). Host limits stay unchanged. The earlier
+full acceptance and browser smoke remain evidence for their measured scope.
 
 1. **Model reporting:** reproduce longer-chat unsupported claims and inaccurate page-content
    labels. The final fresh request executed both browser tools and reported the title,

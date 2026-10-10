@@ -1,18 +1,16 @@
 # Changelog
 
-## 2.0.0 — Unreleased
+## 2.0.0 — 2026-10-10
 
-Roland authorized the single-user release with model-reporting, phone and training-data
-follow-ups retained. Full host acceptance and restart recovery passed at `bb76263` on
-9 October. The final runtime candidate `7b3de9d` passed all seven CI jobs and the 10 October
-Contabo deploy: verify 12 pass / 0 fail, schema 3 current, valid 591-row audit, and focused
-browser/screen/tool smoke. Final polish #65 and build fix #67 are merged; their extra
-branches and temporary cleanup workflows are removed. Release PR #66 records the
-review and checks on this documentation-only finalization before the `v2` → `main` merge.
-Final automated review confirmed a large-file download/hash memory blocker. The focused
-streaming fix needs CI and a deployed smoke before the authorized main merge; the release
-date remains pending. Training stays off. The acceptance note preserves both dated
-checkpoints; NEXT retains follow-ups and the completed implementation plan as history.
+Accepted for Roland's single-user Contabo deployment. Full M9 host acceptance passed
+at `bb76263`, browser/screen/tool smoke at `7b3de9d`, and the final streaming-fix deploy
+at `7ce7c2c`: verify 12/0/2, schema 3 current, valid 604-row audit, all seven exact-head
+CI jobs passed. The complete 768 MiB download passed full size/SHA-256/CRC validation;
+its 180-second memory watch recorded core sampled peak 87.99/640 MiB, minimum host available
+3817 MiB, and zero OOM kills or restarts. Release PR #66 records final documentation-head
+checks/review and the authorized main merge. Extra feature branches and cleanup workflows
+are removed. NEXT preserves the approved implementation plan as history and retains the
+agreed model-reporting, phone, training-data and lower-priority follow-ups. Training stays off.
 
 ### Added
 
@@ -33,7 +31,7 @@ checkpoints; NEXT retains follow-ups and the completed implementation plan as hi
   file and close it on completion, cancellation or disconnect. Mutable files use chunked
   HTTP framing, avoiding stale-length errors during truncation. File-info and append hashes
   no longer read the whole file into core memory. A 768 MiB sparse-file regression runs
-  below the production memory cap. This final fix is pending deployed acceptance.
+  below the production memory cap. The fix is deployed and the complete 768 MiB download and memory watch passed.
 
 - Proxy trust, login/session/CSRF/websocket controls, tool-step limits and scheduled-job overruns.
 - Read-only non-root containers, network/firewall boundaries, resource limits and supply-chain pins.
