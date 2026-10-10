@@ -14,7 +14,7 @@ Full M9 restore/load/soak/external-port/TLS and restart checks at `bb76263` and 
 smoke at `7b3de9d` retain their measured scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md).
 Release PR #66 merged into `main` at `9beaf6e`. Roland requested retirement of the fully
 merged `v2` branch; use `main` for current deployments and future feature PRs.
-The cleanup PR records its guarded deletion; runtime acceptance is unchanged.
+[Cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71) records its guarded deletion; runtime acceptance is unchanged.
 Roland authorized the release with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66)
 records final documentation-head checks/review and main merge status. CHANGELOG is dated
 10 October. The final paperwork changes only documentation; no further runtime rebuild
@@ -317,7 +317,7 @@ mobile-data and intermittent phone-screen faults are not made new release prereq
 2.0.0 merged through PR #66 at `9beaf6e` on 10 October 2026. Future feature PRs target
 `main`; run all seven checks on the reviewed head and use a COMMENT review under the
 shared-identity rule. CPU/model-switch CI now runs on `main` pushes as well as PRs.
-Roland requested retirement of `v2`; guarded deletion is recorded in the cleanup PR.
+Roland requested retirement of `v2`; guarded deletion is recorded in [cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71).
 The completed M9 release order below is retained as history.
 
 1. Review M9 implementation/docs in `v2-m9-release` → `v2`; Roland reviews the proposed

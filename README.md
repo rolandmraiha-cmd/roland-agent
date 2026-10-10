@@ -24,7 +24,7 @@ validated file descriptors in 64 KiB chunks and bounds metadata hashing. Chunked
 framing handles concurrent truncation. The extra feature branches and temporary cleanup
 workflows are removed. Release PR #66 merged into `main` at `9beaf6e`.
 Use `main` for deployments and as the base of future feature PRs. Roland requested
-retirement of the fully merged `v2` branch; the cleanup PR records its guarded deletion.
+retirement of the fully merged `v2` branch; [cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71) records its guarded deletion.
 The branch/CI cleanup changes no runtime code and needs no server rebuild.
 Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
 including [Ollama fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68)

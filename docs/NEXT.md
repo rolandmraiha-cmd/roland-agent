@@ -1,13 +1,13 @@
 # roland-agent — NEXT: release record and follow-ups
 
-> Snapshot: 10 October 2026. **2.0.0 accepted** on Contabo at **`7ce7c2c`**, including PR #70's bounded download/hash fix. All seven exact-head jobs passed; verify 12/0/2, schema 3 current, valid 604-row audit, idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; 180-second watch: core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts. Earlier full M9 acceptance and browser/screen/tool smoke retain their scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Release PR #66 merged into `main` at `9beaf6e`. Roland requested retirement of fully merged `v2`; future deployment and feature PRs use `main`. Guarded branch-deletion status is recorded in the cleanup PR. Roland authorized 2.0.0 with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks/review and main merge status. CHANGELOG is dated 10 October. Training stays off.
+> Snapshot: 10 October 2026. **2.0.0 accepted** on Contabo at **`7ce7c2c`**, including PR #70's bounded download/hash fix. All seven exact-head jobs passed; verify 12/0/2, schema 3 current, valid 604-row audit, idle RAM 3820 MiB. Complete 768 MiB download passed size/SHA-256/CRC; 180-second watch: core sampled peak 87.99/640 MiB, minimum host headroom 3817 MiB, zero OOM/restarts. Earlier full M9 acceptance and browser/screen/tool smoke retain their scopes in [the acceptance note](releases/m9-acceptance-2026-10-09.md). Release PR #66 merged into `main` at `9beaf6e`. Roland requested retirement of fully merged `v2`; future deployment and feature PRs use `main`. Guarded branch-deletion status is recorded in [cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71). Roland authorized 2.0.0 with documented follow-ups; [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final documentation-head checks/review and main merge status. CHANGELOG is dated 10 October. Training stays off.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After merge, record the resulting `main` tip or link the PR that records it.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
 ## Release record and post-2.0.0 work
 
-The branch cleanup PR updates current instructions and both CI workflows for `main`.
+[Branch cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71) updates current instructions and both CI workflows for `main`.
 Its guarded job removes `v2` only when its expected head remains fully included in `main`
 and no open PR depends on it; it removes its own feature branch only after that PR merges
 and the feature head still matches the merged source. The one-use workflow is removed
