@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
+import sys
+import textwrap
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -187,3 +192,105 @@ def test_upload_refuses_symlink_dest(client):
     detail = response.json()["detail"].lower()
     assert "outside" in detail or "symbolic" in detail
     assert (root / "link.txt").is_symlink()
+
+
+@pytest.mark.parametrize("spec_version", ["2.0", "2.4"])
+async def test_download_closes_reader_when_client_disconnects(make_agent, monkeypatch, spec_version):
+    from starlette.requests import ClientDisconnect
+
+    from agent.web import routes_files
+
+    agent = make_agent()
+    ws = routes_files.workspace_for(agent)
+    ws.ensure()
+    (ws.root / "chunks.bin").write_bytes(b"x" * (3 * 64 * 1024))
+    opened = []
+    real_open = ws.open_read
+
+    def track_open(path):
+        handle = real_open(path)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(ws, "open_read", track_open)
+    monkeypatch.setattr(routes_files, "workspace_for", lambda _: ws)
+    router = routes_files.build_router(agent)
+    download = next(r.endpoint for r in router.routes if r.path == "/api/files/download")
+    response = await download("chunks.bin")
+    disconnected = asyncio.Event()
+
+    async def send(message):
+        if message["type"] == "http.response.body" and message.get("body"):
+            if spec_version == "2.4":
+                raise OSError("client disconnected")
+            disconnected.set()
+
+    async def receive():
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+    if spec_version == "2.4":
+        with pytest.raises(ClientDisconnect):
+            await response(scope, receive, send)
+    else:
+        await response(scope, receive, send)
+    assert opened and all(handle.closed for handle in opened)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="matches the Linux core memory limit")
+def test_large_download_and_hash_fit_below_core_memory_limit(tmp_path):
+    # A sparse file larger than core's 640 MiB cap; the child cannot buffer it.
+    root = tmp_path / "large-workspace"
+    root.mkdir()
+    size = 768 * 1024 * 1024
+    with (root / "large.bin").open("wb") as handle:
+        handle.truncate(size)
+    probe = textwrap.dedent(
+        """
+        import asyncio
+        import resource
+        import sys
+        from pathlib import Path
+        from types import SimpleNamespace
+        from agent.web.routes_files import build_router
+        from agent.workspace import Workspace
+
+        root = Path(sys.argv[1])
+        config = SimpleNamespace(workspace=root, workspace_quota_mb=8192,
+            workspace_reserve_mb=1, workspace_max_files=50000,
+            upload_max_mb=100, trash_keep_days=7)
+        router = build_router(SimpleNamespace(config=config, memory=None))
+        download = next(r.endpoint for r in router.routes if r.path == '/api/files/download')
+        resource.setrlimit(resource.RLIMIT_AS, (192 * 1024 * 1024, 192 * 1024 * 1024))
+
+        async def run():
+            response = await download('large.bin')
+            assert response.headers['content-length'] == str(768 * 1024 * 1024)
+            # Discard chunks and disconnect early; never collect the response in a client.
+            disconnected = asyncio.Event()
+            count = 0
+            async def send(message):
+                nonlocal count
+                if message['type'] == 'http.response.body' and message.get('body'):
+                    assert len(message['body']) <= 64 * 1024
+                    count += 1
+                    if count == 2:
+                        disconnected.set()
+            async def receive():
+                await disconnected.wait()
+                return {'type': 'http.disconnect'}
+            await response({'type': 'http', 'asgi': {'spec_version': '2.0'}}, receive, send)
+            assert count >= 2
+            # file_info uses the same bounded hash reader on an unindexed large file.
+            info = Workspace(root).info('large.bin')
+            assert info['size'] == 768 * 1024 * 1024
+            assert len(info['sha256']) == 64
+
+        asyncio.run(run())
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, str(root)], capture_output=True, text=True, timeout=30
+    )
+    assert completed.returncode == 0, completed.stderr

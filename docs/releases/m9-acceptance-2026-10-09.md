@@ -103,3 +103,15 @@ paperwork retains the agreed limitations, folds the completed plan into history 
 checked again before the main merge in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
 The final paperwork changes no runtime source, image pins, settings or secrets, so it does
 not require another full restore/load/soak or host rebuild.
+
+## Review follow-up: large-file blocker
+
+After the focused browser smoke, PR #66's automated review exposed a confirmed P1:
+workspace downloads read the whole file into the 640 MiB core. The prior small-file smoke
+had not covered this. Main is held for the focused `v2-m9-stream-downloads` fix, CI and
+its own deployed acceptance. The completed evidence above remains valid for its scope.
+Local reproduction used a 768 MiB sparse file under a 192 MiB address-space cap: the old
+download raises MemoryError; bounded download and hashing pass. Inode confinement,
+FIFO refusal and ASGI 2.0/2.4 disconnect closure are covered by the focused regression.
+Lower-priority Ollama fallback #68 and moved-directory metadata #69 are retained after
+2.0.0. No new release approval is needed from Roland; the new runtime check is outstanding.

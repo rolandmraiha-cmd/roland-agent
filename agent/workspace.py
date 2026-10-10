@@ -21,6 +21,7 @@ DEFAULT_MAX_FILES = 50_000
 DEFAULT_UPLOAD_MAX_MB = 100
 WRITE_FILE_MAX_BYTES = 1_000_000
 PREVIEW_MAX_BYTES = 10 * 1024 * 1024
+READ_CHUNK_BYTES = 64 * 1024
 LIST_CAP = 1000
 PATH_MAX_CHARS = 1024
 COMPONENT_MAX_BYTES = 255
@@ -95,7 +96,9 @@ def image_mime(header: bytes) -> str | None:
 def content_disposition(filename: str) -> str:
     """RFC 5987 attachment disposition; ASCII fallback strips quotes and non-latin1."""
     safe = filename.replace("\\", "_").replace('"', "_")
-    ascii_name = "".join(c if 32 <= ord(c) < 127 and c not in {";", "\\"} else "_" for c in safe) or "download"
+    ascii_name = (
+        "".join(c if 32 <= ord(c) < 127 and c not in {";", "\\"} else "_" for c in safe) or "download"
+    )
     encoded = quote(filename, safe="")
     return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{encoded}"
 
@@ -353,26 +356,37 @@ class Workspace:
             os.close(root)
 
     # --- read / write / list ---
-    def read_bytes(self, rel: str, *, max_bytes: int | None = None) -> bytes:
+    def open_read(self, rel: str) -> BinaryIO:
+        """Open a regular file without following links; the caller closes the handle."""
         components = normalize(rel)
         if not components:
             raise WorkspaceError("give a file name.")
-        dir_fd, file_fd = self._open_at(components, os.O_RDONLY)
+        # Do not block on a sandbox-created FIFO before the regular-file check.
+        dir_fd, file_fd = self._open_at(components, os.O_RDONLY | os.O_NONBLOCK)
         try:
             meta = os.fstat(file_fd)
             if stat.S_ISLNK(meta.st_mode):
                 raise WorkspaceError(_SYMLINK_MSG)
             if not stat.S_ISREG(meta.st_mode):
                 raise WorkspaceError("Not a regular file.")
-            with os.fdopen(file_fd, "rb") as handle:
-                file_fd = -1  # ownership transferred
-                if max_bytes is None:
-                    return handle.read()
-                return handle.read(max_bytes)
+            handle = os.fdopen(file_fd, "rb")
+            file_fd = -1  # ownership transferred
+            return handle
         finally:
             if file_fd >= 0:
                 os.close(file_fd)
             os.close(dir_fd)
+
+    def read_bytes(self, rel: str, *, max_bytes: int | None = None) -> bytes:
+        with self.open_read(rel) as handle:
+            return handle.read() if max_bytes is None else handle.read(max_bytes)
+
+    def file_sha256(self, rel: str) -> str:
+        digest = hashlib.sha256()
+        with self.open_read(rel) as handle:
+            while chunk := handle.read(READ_CHUNK_BYTES):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def read_text(self, rel: str, *, max_chars: int) -> str:
         # Read a bit more than max_chars in bytes; decode with replace.
@@ -484,9 +498,9 @@ class Workspace:
         path = join_rel(components)
         if self.memory is not None:
             if digest is None:
-                # Append: recompute from file when small enough, else leave prior.
+                # Append: recompute without buffering the existing file.
                 try:
-                    digest = hashlib.sha256(self.read_bytes(rel)).hexdigest()
+                    digest = self.file_sha256(rel)
                 except OSError:
                     digest = None
             self.memory.record_file(path, size, digest, origin=origin, chat_id=chat_id)
@@ -648,9 +662,7 @@ class Workspace:
         original = join_rel(components)
         record_id = trash_id
         if self.memory is not None:
-            record_id = self.memory.add_trash(
-                original, trash_path, deleted_by, size, approval_id=approval_id
-            )
+            record_id = self.memory.add_trash(original, trash_path, deleted_by, size, approval_id=approval_id)
             self.memory.delete_file_record(original)
         self._file_count_cache = None
         return record_id
@@ -781,13 +793,7 @@ class Workspace:
         if not components:
             raise WorkspaceError("give a file name.")
         meta = self.lstat(rel)
-        kind = (
-            "symlink"
-            if stat.S_ISLNK(meta.st_mode)
-            else "dir"
-            if stat.S_ISDIR(meta.st_mode)
-            else "file"
-        )
+        kind = "symlink" if stat.S_ISLNK(meta.st_mode) else "dir" if stat.S_ISDIR(meta.st_mode) else "file"
         path = join_rel(components)
         origin = "unknown"
         sha = None
@@ -801,7 +807,7 @@ class Workspace:
                 pass
         if kind == "file" and sha is None:
             try:
-                sha = hashlib.sha256(self.read_bytes(rel)).hexdigest()
+                sha = self.file_sha256(rel)
             except (WorkspaceError, OSError):
                 sha = None
         return {

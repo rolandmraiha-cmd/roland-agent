@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 — 2026-10-10
+## 2.0.0 — Unreleased
 
 Roland authorized the single-user release with model-reporting, phone and training-data
 follow-ups retained. Full host acceptance and restart recovery passed at `bb76263` on
@@ -9,8 +9,10 @@ Contabo deploy: verify 12 pass / 0 fail, schema 3 current, valid 591-row audit, 
 browser/screen/tool smoke. Final polish #65 and build fix #67 are merged; their extra
 branches and temporary cleanup workflows are removed. Release PR #66 records the
 review and checks on this documentation-only finalization before the `v2` → `main` merge.
-Training stays off. The acceptance note preserves both dated checkpoints; NEXT retains
-the follow-ups and folds the completed implementation plan into history.
+Final automated review confirmed a large-file download/hash memory blocker. The focused
+streaming fix needs CI and a deployed smoke before the authorized main merge; the release
+date remains pending. Training stays off. The acceptance note preserves both dated
+checkpoints; NEXT retains follow-ups and the completed implementation plan as history.
 
 ### Added
 
@@ -27,6 +29,11 @@ the follow-ups and folds the completed implementation plan into history.
 
 ### Hardened
 
+- Workspace downloads stream bounded chunks from an openat/O_NOFOLLOW-validated regular
+  file and close it on completion, cancellation or disconnect. File-info and append hashes
+  no longer read the whole file into core memory. A 768 MiB sparse-file regression runs
+  below the production memory cap. This final fix is pending deployed acceptance.
+
 - Proxy trust, login/session/CSRF/websocket controls, tool-step limits and scheduled-job overruns.
 - Read-only non-root containers, network/firewall boundaries, resource limits and supply-chain pins.
 - Release verification now rejects missing/stopped services, loopback publications,
@@ -38,6 +45,9 @@ the follow-ups and folds the completed implementation plan into history.
   actual IPv4/IPv6 socket tables before accepting the container.
 
 ### Known limitations and deferred work
+
+- Optional Ollama streamed-schema fallback (#68) and moved-directory descendant metadata
+  (#69) are tracked after 2.0.0; the production model uses llama.cpp.
 
 - Model reporting can claim actions or recovery without supporting tool results, especially
   in longer chats. Fresh explicit tools executed, but the final smoke labelled paragraph

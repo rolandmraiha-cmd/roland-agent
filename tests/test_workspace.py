@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 
@@ -188,3 +189,22 @@ def test_finalize_upload_refuses_symlink_dest(ws):
         ws.finalize_upload(tmp_rel, "dest.txt", overwrite=True, size=7, sha256="a" * 64)
     assert "outside" in str(exc.value)
     assert (ws.root / "dest.txt").is_symlink()
+
+
+def test_open_reader_keeps_validated_inode_after_path_swap(ws, tmp_path):
+    (ws.root / "safe.txt").write_bytes(b"safe")
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"outside-secret")
+    with ws.open_read("safe.txt") as handle:
+        (ws.root / "safe.txt").unlink()
+        (ws.root / "safe.txt").symlink_to(outside)
+        assert handle.read() == b"safe"
+    assert handle.closed
+    with pytest.raises(WorkspaceError):
+        ws.open_read("safe.txt")
+
+
+def test_open_reader_refuses_fifo_without_blocking(ws):
+    os.mkfifo(ws.root / "pipe")
+    with pytest.raises(WorkspaceError, match="Not a regular file"):
+        ws.open_read("pipe")
