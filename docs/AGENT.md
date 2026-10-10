@@ -118,7 +118,7 @@ make firewall             # dry-run rules
 make firewall-install     # APPLY=1: install unit/script + apply rules
 make workspace-fs         # dry-run; APPLY=1 creates 10G loop FS (never reformats)
 make deploy               # APPLY=1: preflight → build → up → smoke
-make ship HOST=… REF=v2   # APPLY=1: remote git pull + make deploy
+make ship HOST=… REF=main   # APPLY=1: remote git pull + make deploy
 make verify               # PASS/FAIL checklist incl. isolation; skips unavailable checks
 make backup / restore FILE=… / restore-test FILE=…
 make migrate-v1-workspace # APPLY=1; fresh Contabo usually skips
@@ -203,7 +203,8 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 
 2.0.0 is merged into `main` at `9beaf6e`. Roland requested retirement of `v2`;
 no unmerged commits or open dependent PRs were found. [Cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71) moves deployment
-and CPU CI to `main`, preserves the historical plan, and records exact-head review/checks
+and CPU CI to `main`, retargets `make ship` (default and explicit fetch/pull) with
+real disposable Git tests, preserves the historical plan, and records exact-head review/checks
 and leased deletion of `v2` plus its own merged feature branch. Runtime acceptance is unchanged.
 Future coding uses feature branches from `main`, targeting `main`, under §2.
 

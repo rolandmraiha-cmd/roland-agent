@@ -25,7 +25,9 @@ framing handles concurrent truncation. The extra feature branches and temporary 
 workflows are removed. Release PR #66 merged into `main` at `9beaf6e`.
 Use `main` for deployments and as the base of future feature PRs. Roland requested
 retirement of the fully merged `v2` branch; [cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71) records its guarded deletion.
-The branch/CI cleanup changes no runtime code and needs no server rebuild.
+The cleanup also makes `make ship` default to `main` and fetch/pull its chosen branch
+explicitly, including v2-only clones after retirement. Its Git fixture tests preserve
+fast-forward safety. Application runtime code is unchanged; no server rebuild is needed.
 Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
 including [Ollama fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68)
 and [directory metadata #69](https://github.com/rolandmraiha-cmd/roland-agent/issues/69).

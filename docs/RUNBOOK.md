@@ -148,6 +148,11 @@ printf '%s\n' '/.env.before-m8' '/.env.before-screen' >> .git/info/exclude
 ```
 
 Do not hide other changes. The 10 October deploy used this fix and retained both backups.
+`make ship HOST=…` defaults to `main`; `REF` can select another branch. It explicitly
+fetches and pulls that branch, supports a prior v2-only clone, and refuses a diverged
+local branch before deployment. Its local regression uses disposable Git repositories
+and an SSH stub; no live SSH/deploy test is implied.
+
 The released deployment branch is `main`; the commands above also work with a checkout
 whose original fetch configuration followed only `v2`. The documentation-only checkpoint `6a02480`
 needed no rebuild. The subsequent streaming fix has now been built and deployed at

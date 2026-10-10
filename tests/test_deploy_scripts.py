@@ -159,6 +159,90 @@ def test_deploy_and_ship_refuse_without_apply():
         assert "APPLY=1" in result.stderr, name
 
 
+@pytest.mark.parametrize("requested_ref", [None, "release-check"])
+def test_ship_updates_single_branch_clone_after_v2_retirement(tmp_path, requested_ref):
+    _exercise_ship_after_v2_retirement(tmp_path, requested_ref)
+
+
+def test_ship_preserves_diverged_main_without_deploying(tmp_path):
+    _exercise_ship_after_v2_retirement(tmp_path, None, diverged=True)
+
+
+def _exercise_ship_after_v2_retirement(tmp_path, requested_ref, *, diverged=False):
+    """Execute the SSH command locally against disposable real Git repositories."""
+
+    def git(directory, *args):
+        return subprocess.check_output(
+            ["git", "-C", str(directory), *args], text=True, stderr=subprocess.STDOUT, timeout=15
+        ).strip()
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    git(seed, "init", "--initial-branch=main")
+    git(seed, "config", "user.name", "Ship fixture")
+    git(seed, "config", "user.email", "ship@example.invalid")
+    (seed / "Makefile").write_text("deploy:\n\t@git rev-parse HEAD > deploy.marker\n")
+    (seed / "version").write_text("base\n")
+    git(seed, "add", ".")
+    git(seed, "commit", "-m", "base")
+    git(seed, "branch", "v2")
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "clone", "--bare", str(seed), str(origin))
+    remote = tmp_path / "remote checkout"
+    git(tmp_path, "clone", "--single-branch", "--branch", "v2", str(origin), str(remote))
+    git(seed, "remote", "add", "origin", str(origin))
+    target = requested_ref or "main"
+    if requested_ref:
+        git(seed, "switch", "-c", target)
+    (seed / "version").write_text("accepted\n")
+    git(seed, "add", "version")
+    git(seed, "commit", "-m", "accepted update")
+    expected = git(seed, "rev-parse", "HEAD")
+    git(seed, "push", "origin", target)
+    git(seed, "push", "origin", "--delete", "v2")
+    original = None
+    if diverged:
+        git(remote, "switch", "-c", "main")
+        git(remote, "config", "user.name", "Ship fixture")
+        git(remote, "config", "user.email", "ship@example.invalid")
+        (remote / "version").write_text("local change\n")
+        git(remote, "add", "version")
+        git(remote, "commit", "-m", "local change")
+        original = git(remote, "rev-parse", "HEAD")
+
+    binaries = tmp_path / "bin"
+    binaries.mkdir()
+    ssh = binaries / "ssh"
+    ssh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        '[[ "$#" == 4 && "$1" == -o && "$2" == BatchMode=yes && "$3" == deploy@example.invalid ]]\n'
+        'exec bash -c "$4"\n'
+    )
+    ssh.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{binaries}{os.pathsep}{os.environ['PATH']}",
+        "HOST": "deploy@example.invalid",
+        "REMOTE_DIR": str(remote),
+        "APPLY": "1",
+    }
+    env.pop("REF", None)
+    if requested_ref:
+        env["REF"] = requested_ref
+    result = subprocess.run(
+        ["bash", str(DEPLOY / "ship.sh")], capture_output=True, text=True, env=env, timeout=30
+    )
+    if diverged:
+        assert result.returncode != 0, (result.stdout, result.stderr)
+        assert git(remote, "rev-parse", "HEAD") == original
+        assert not (remote / "deploy.marker").exists()
+    else:
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert git(remote, "branch", "--show-current") == target
+        assert git(remote, "rev-parse", "HEAD") == expected
+        assert (remote / "deploy.marker").read_text().strip() == expected
+
+
 def test_firewall_dry_run_without_apply():
     result = subprocess.run(
         ["bash", str(DEPLOY / "firewall.sh"), "--iptables"],
