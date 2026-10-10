@@ -22,8 +22,12 @@ preserved with their measured scopes in [the acceptance note](docs/releases/m9-a
 [Fix PR #70](https://github.com/rolandmraiha-cmd/roland-agent/pull/70) streams downloads from
 validated file descriptors in 64 KiB chunks and bounds metadata hashing. Chunked HTTP
 framing handles concurrent truncation. The extra feature branches and temporary cleanup
-workflows are removed; `v2` is retained for integration work. The final release paperwork
-changes only documentation and needs no further runtime build.
+workflows are removed. Release PR #66 merged into `main` at `9beaf6e`.
+Use `main` for deployments and as the base of future feature PRs. Roland requested
+retirement of the fully merged `v2` branch; [cleanup PR #71](https://github.com/rolandmraiha-cmd/roland-agent/pull/71) records its guarded deletion.
+The cleanup also makes `make ship` default to `main` and fetch/pull its chosen branch
+explicitly, including v2-only clones after retirement. Its Git fixture tests preserve
+fast-forward safety. Application runtime code is unchanged; no server rebuild is needed.
 Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
 including [Ollama fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68)
 and [directory metadata #69](https://github.com/rolandmraiha-cmd/roland-agent/issues/69).
@@ -108,7 +112,7 @@ Use Python 3.12 and Node 20 or newer. Start a local llama.cpp server separately 
 `127.0.0.1:8080` with your owned GGUF. No model is needed for unit tests.
 
 ```bash
-git clone --branch v2 https://github.com/rolandmraiha-cmd/roland-agent.git
+git clone --branch main https://github.com/rolandmraiha-cmd/roland-agent.git
 cd roland-agent
 python3.12 -m venv .venv
 . .venv/bin/activate

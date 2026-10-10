@@ -4,8 +4,6 @@ on:
   pull_request:
   push:
     branches:
-      - v2
-      - "v2-*"
       - main
 
 permissions:
@@ -88,7 +86,7 @@ jobs:
         run: python tests/integration/restore_probe.py
 
   browser-integration:
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/v2' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
