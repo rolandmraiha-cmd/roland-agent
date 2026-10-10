@@ -1,43 +1,351 @@
+name: roland-agent
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+x-hardening: &hardening
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+  logging: *logging
+
+x-host: &agent_host ${AGENT_DOMAIN:-${AGENT_FALLBACK_HOST:-37-60-226-214.sslip.io}}
+
+# M4: core + caddy + model + sandbox. M6 adds the browser service, behind the "browser"
+# profile: it only starts when .env has COMPOSE_PROFILES=browser, and core only uses it when
+# .env also has BROWSER_ENABLED=true. M7 adds the screen Roland watches and signs in on: the
+# novnc service behind the "screen" profile, and SCREEN_ENABLED=true for core and the browser
+# (so .env then has COMPOSE_PROFILES=browser,screen). Training stays off.
 services:
-  agent:
-    build: .
+  caddy:
+    <<: *hardening
+    build: { context: ., dockerfile: docker/caddy/Dockerfile }
+    image: roland-agent/caddy:local
+    user: "1000:1000"
+    sysctls: { net.ipv4.ip_unprivileged_port_start: "0" }
+    ports: ["80:80/tcp", "443:443/tcp", "443:443/udp"]
+    environment:
+      AGENT_HOST: *agent_host
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      CADDY_TLS: ${CADDY_TLS:-acme}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-100}
+    volumes: [caddy-data:/data, caddy-config:/config]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    networks:
+      public: { ipv4_address: 10.77.0.2, gw_priority: 100 }
+      edge: { ipv4_address: 10.77.1.2 }
+      screen: { ipv4_address: 10.77.2.2 }
+    depends_on: { core: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 96m
+    memswap_limit: 96m
+    cpus: 0.5
+    pids_limit: 64
+
+  core:
+    <<: *hardening
+    build: { context: ., dockerfile: Dockerfile }
+    image: roland-agent/core:local
+    user: "1000:1000"
     env_file: .env
-    restart: unless-stopped
-    ports:
-      # Only reachable from this machine. Put a reverse proxy with HTTPS in front to go online.
-      - "127.0.0.1:8080:8080"
+    environment:
+      AGENT_ENV: production
+      AGENT_HOST: *agent_host
+      ALLOWED_HOSTS: *agent_host
+      COOKIE_SECURE: "true"
+      HOST: 10.77.1.10
+      PORT: "8080"
+      FORWARDED_ALLOW_IPS: 10.77.1.2
+      CORE_ALLOWED_PEERS: 10.77.1.2
+      DATA_DIR: /data
+      WORKSPACE_DIR: /workspace
+      BACKUP_DIR: /backups
+      ALLOW_SHELL: "true"
+      SHELL_BACKEND: sandbox
+      SANDBOX_URL: http://10.77.3.20:7000
+      SANDBOX_API_TOKEN_FILE: /run/secrets/sandbox_api_token
+      BROWSER_ENABLED: ${BROWSER_ENABLED:-false}
+      BROWSER_URL: http://10.77.4.40:7100
+      BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
+      SCREEN_ENABLED: ${SCREEN_ENABLED:-false}
+      VNC_PASSWORD_FILE: /run/secrets/vnc_password
+      VNC_VIEW_PASSWORD_FILE: /run/secrets/vnc_view_password
+      TRAINING_CAPTURE: "false"
+      TRAINING_LOOP_ENABLED: "false"
+      TRAINER_URL: ${TRAINER_URL:-}
+      TRAINER_API_TOKEN_FILE: /run/secrets/trainer_api_token
+      TRAINING_DATA_DIR: /training-data
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-llamacpp}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-http://10.77.6.60:8080}
+      MODEL_MAX_CONCURRENCY: "1"
+      MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
+      AGENT_PASSWORD_HASH_FILE: /run/secrets/agent_password_hash
+    # The two screen passwords are handed to Roland's screen page, one per mode (§6.6).
+    secrets: [model_server_token, agent_password_hash, sandbox_api_token, browser_api_token, vnc_password, vnc_view_password, trainer_api_token]
     volumes:
       - agent-data:/data
-    # No Docker socket and no host folders. If you turn on ALLOW_SHELL, its commands stay inside
-    # this container, but they still run as the agent's user (a separate sandbox comes in v2).
-    # The container's own files are read-only; only /data (and a small /tmp) can be written.
-    read_only: true
-    tmpfs:
-      - /tmp:size=256m
-    security_opt:
-      - no-new-privileges:true
-    cap_drop: [ALL]
+      - backups:/backups
+      - models:/models:ro
+      - training-data:/training-data
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}
+        target: /workspace
+        bind: { create_host_path: false }
+    tmpfs: ["/tmp:size=96m,mode=1777"]
+    networks:
+      edge: { ipv4_address: 10.77.1.10 }
+      sandbox_ctl: { ipv4_address: 10.77.3.10 }
+      # Core only calls out on this network. It listens on its edge address alone, so the
+      # browser container finds nothing to connect to here.
+      browser_ctl: { ipv4_address: 10.77.4.10 }
+      model: { ipv4_address: 10.77.6.10 }
+      trainer_ctl: { ipv4_address: 10.77.7.10 }
+      core_egress: { gw_priority: 100 }
+    healthcheck:
+      test: ["CMD", "python", "-m", "agent", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    mem_limit: 640m
+    memswap_limit: 640m
+    cpus: 1.0
     pids_limit: 256
-    mem_limit: 2g
-    cpus: 1.5
     depends_on:
-      - ollama
+      model: { condition: service_started }
+      sandbox: { condition: service_healthy }
 
-  # Local model (free). Remove this service if you use Grok or another paid API instead.
-  ollama:
-    image: ollama/ollama:0.35.1   # pinned; update on purpose
-    restart: unless-stopped
+  trainer:
+    <<: *hardening
+    profiles: [training]
+    build: { context: ., dockerfile: docker/trainer/Dockerfile }
+    image: roland-agent/trainer:local
+    user: "1000:1000"
+    environment:
+      TRAINER_API_TOKEN_FILE: /run/secrets/trainer_api_token
+      TRAINING_LAUNCH_MODE: ${TRAINING_LAUNCH_MODE:-manual}
+      TRAINING_SSH_TARGET: ${TRAINING_SSH_TARGET:-}
+      TRAINING_SSH_KNOWN_HOSTS: ${TRAINING_SSH_KNOWN_HOSTS:-}
+      TRAINING_PROVIDER: ${TRAINING_PROVIDER:-}
+      TRAINING_MAX_HOURS: ${TRAINING_MAX_HOURS:-4}
+      MODEL_IMPORT_MAX_MB: ${MODEL_IMPORT_MAX_MB:-6144}
+    secrets: [trainer_api_token]
+    volumes: ["training-data:/training-data:ro", "training-runs:/training-runs", "models:/models"]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    networks:
+      trainer_ctl: { ipv4_address: 10.77.7.70 }
+      trainer_egress: { gw_priority: 100 }
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 150s
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('10.77.7.70',7200),3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  model:
+    <<: *hardening
+    # Verified multi-platform CPU image; keep in sync with docker/model/VERSION.
+    image: ghcr.io/ggml-org/llama.cpp:server-b11434@sha256:af8c29600d1de84945de13fa7f126d06fdae16c4b19dc7db1c69c74287eae257
+    user: "1000:1000"
+    entrypoint: ["bash", "/opt/run/run.sh"]
+    environment:
+      MODEL_CTX: ${MODEL_CTX:-4096}
+      MODEL_THREADS: ${MODEL_THREADS:-3}
+      MODEL_SERVER_TOKEN_FILE: /run/secrets/model_server_token
+    secrets: [model_server_token]
+    volumes:
+      - models:/models:ro
+      - type: bind
+        source: ./docker/model/run.sh
+        target: /opt/run/run.sh
+        read_only: true
+        bind: { create_host_path: false }
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    networks:
+      model: { ipv4_address: 10.77.6.60 }
+    healthcheck:
+      test: ["CMD", "bash", "/opt/run/run.sh", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    stop_grace_period: 30s
+    oom_score_adj: 300
+    mem_limit: ${MODEL_MEM_LIMIT:-3840m}
+    memswap_limit: ${MODEL_MEM_LIMIT:-3840m}
+    cpus: ${MODEL_CPUS:-3.0}
+    pids_limit: 128
+
+
+  sandbox:
+    <<: *hardening
+    build: { context: ., dockerfile: docker/sandbox/Dockerfile }
+    image: roland-agent/sandbox:local
+    user: "1000:1000"
+    environment:
+      SANDBOXD_HOST: 10.77.3.20
+      SANDBOXD_PORT: "7000"
+      SANDBOXD_ALLOWED_PEERS: 10.77.3.10
+      SANDBOX_API_TOKEN_FILE: /run/secrets/sandbox_api_token
+      SANDBOX_MAX_OUTPUT_BYTES: "65536"
+      SANDBOX_MAX_CONCURRENT: "2"
+      SANDBOX_TIMEOUT_MAX: "300"
+      TZ: Europe/Helsinki
+    secrets: [sandbox_api_token]
+    volumes:
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}
+        target: /workspace
+        bind: { create_host_path: false }
+    tmpfs: ["/tmp:size=384m,mode=1777"]
+    networks:
+      sandbox_ctl: { ipv4_address: 10.77.3.20 }
+      sandbox_egress: { ipv4_address: 10.77.11.20, gw_priority: 100 }
+    healthcheck:
+      test: ["CMD", "python", "-m", "sandboxd", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    ulimits: { nofile: { soft: 1024, hard: 1024 } }
+    oom_score_adj: 800
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.5
+    pids_limit: 256
+
+  # One persistent Chromium on a virtual screen, driven by browserd (§6.5). Off unless the
+  # "browser" profile is on. The profile volume holds Roland's signed-in sessions and is
+  # mounted here and nowhere else. With SCREEN_ENABLED=true it also runs x11vnc, the screen
+  # server, on the vnc network; otherwise nothing listens there.
+  browser:
+    <<: *hardening
+    profiles: ["browser"]
     security_opt:
       - no-new-privileges:true
-    cap_drop: [ALL]
-    pids_limit: 512
-    # A 7b model needs about 6 GB. Raise these for bigger models.
-    mem_limit: 8g
-    cpus: 4
-    # No ports published: only the agent can reach it, on the internal compose network.
+      # Docker's own seccomp profile, unless .env sets BROWSER_SECCOMP to
+      # ./docker/browser/seccomp-chromium.json. Chromium's own sandbox
+      # (BROWSER_CHROMIUM_SANDBOX=true) needs that one. See docs/SECURITY.md.
+      - seccomp=${BROWSER_SECCOMP:-builtin}
+    build: { context: ., dockerfile: docker/browser/Dockerfile }
+    image: roland-agent/browser:local
+    user: "1000:1000"
+    environment:
+      BROWSERD_HOST: 10.77.4.40
+      BROWSERD_PORT: "7100"
+      BROWSERD_ALLOWED_PEERS: 10.77.4.10
+      DISPLAY: ":99"
+      HOME: /tmp/home
+      TZ: Europe/Helsinki
+      BROWSER_VIEWPORT: ${BROWSER_VIEWPORT:-1280x800}
+      BROWSER_MAX_TABS: ${BROWSER_MAX_TABS:-2}
+      BROWSER_ACTION_TIMEOUT_S: ${BROWSER_ACTION_TIMEOUT_S:-30}
+      BROWSER_NAV_TIMEOUT_S: ${BROWSER_NAV_TIMEOUT_S:-45}
+      BROWSER_MAX_DOWNLOAD_MB: ${BROWSER_MAX_DOWNLOAD_MB:-200}
+      BROWSER_CHROMIUM_SANDBOX: ${BROWSER_CHROMIUM_SANDBOX:-false}
+      BROWSER_SENSITIVE_MATCH: ${BROWSER_SENSITIVE_MATCH:-substring}
+      BROWSER_BLOCK_BACKGROUND_POSTS: ${BROWSER_BLOCK_BACKGROUND_POSTS:-false}
+      BROWSER_API_TOKEN_FILE: /run/secrets/browser_api_token
+      SCREEN_ENABLED: ${SCREEN_ENABLED:-false}
+      VNC_LISTEN: 10.77.5.40
+      VNC_ALLOWED_PEERS: 10.77.5.30
+      VNC_PASSWORD_FILE: /run/secrets/vnc_password
+      VNC_VIEW_PASSWORD_FILE: /run/secrets/vnc_view_password
+    secrets: [browser_api_token, vnc_password, vnc_view_password]
     volumes:
-      - ollama-models:/root/.ollama
+      - browser-profile:/profile
+      - type: bind
+        source: ${WORKSPACE_HOST_DIR:-/srv/roland-agent/workspace}/browser
+        target: /files
+        bind: { create_host_path: false }
+    tmpfs: ["/tmp:size=256m,mode=1777"]
+    shm_size: 320m
+    networks:
+      browser_ctl: { ipv4_address: 10.77.4.40 }
+      vnc: { ipv4_address: 10.77.5.40 }
+      browser_egress: { ipv4_address: 10.77.12.40, gw_priority: 100 }
+    healthcheck:
+      test: ["CMD", "python", "-m", "browserd", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # Long enough for Chromium to write cookies to the profile before it is stopped.
+    stop_grace_period: 30s
+    oom_score_adj: 500
+    # The cap includes /dev/shm and /tmp, which are memory too.
+    mem_limit: 1280m
+    memswap_limit: 1280m
+    cpus: 2.0
+    pids_limit: 512
+
+  # The screen relay (§6.6): websockify serves noVNC's script files to the screen page and
+  # carries the screen connection from Caddy to x11vnc. Off unless the "screen" profile is
+  # on. It has no secret, no volume and no way out: Caddy reaches it on one internal network
+  # (only after core said yes, forward_auth), and it reaches x11vnc on the other.
+  novnc:
+    <<: *hardening
+    profiles: ["screen"]
+    build: { context: ., dockerfile: docker/novnc/Dockerfile }
+    image: roland-agent/novnc:local
+    user: "1000:1000"
+    tmpfs: ["/tmp:size=8m,mode=1777"]
+    networks:
+      screen: { ipv4_address: 10.77.2.30 }
+      vnc: { ipv4_address: 10.77.5.30 }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('10.77.2.30', 6080), 3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 64m
+    memswap_limit: 64m
+    cpus: 0.25
+    pids_limit: 32
+
+# Reserved bridges are declared now; later services attach when implemented.
+networks:
+  public:         { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.0.0/24 }] } }
+  edge:           { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.1.0/24 }] } }
+  screen:         { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.2.0/24 }] } }
+  sandbox_ctl:    { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.3.0/24 }] } }
+  browser_ctl:    { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.4.0/24 }] } }
+  vnc:            { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.5.0/24 }] } }
+  model:          { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.6.0/24 }] } }
+  trainer_ctl:    { internal: true, enable_ipv6: false, ipam: { config: [{ subnet: 10.77.7.0/24 }] } }
+  core_egress:    { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.10.0/24 }] } }
+  sandbox_egress: { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.11.0/24 }] } }
+  browser_egress: { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.12.0/24 }] } }
+  trainer_egress: { enable_ipv6: false, ipam: { config: [{ subnet: 10.77.13.0/24 }] } }
 
 volumes:
   agent-data:
-  ollama-models:
+  backups:
+  browser-profile:
+  caddy-data:
+  caddy-config:
+  models:
+  training-data:
+  training-runs:
+
+secrets:
+  model_server_token: { file: ./secrets/model_server_token }
+  agent_password_hash: { file: ./secrets/agent_password_hash }
+  sandbox_api_token: { file: ./secrets/sandbox_api_token }
+  browser_api_token: { file: ./secrets/browser_api_token }
+  trainer_api_token: { file: ./secrets/trainer_api_token }
+  vnc_password: { file: ./secrets/vnc_password }
+  vnc_view_password: { file: ./secrets/vnc_view_password }

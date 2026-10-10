@@ -1,4 +1,13 @@
 .env
+.env.*
+!.env.example
+secrets/*
+!secrets/.gitkeep
+.ci-workspace/
+.ci-training/
+.ci-llama/
+.llama.cpp/
+.training-venv/
 data/
 __pycache__/
 *.pyc
@@ -7,3 +16,7 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+.deploy/
+.release-evidence/
+backups/
+workspace/

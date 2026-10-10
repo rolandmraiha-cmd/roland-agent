@@ -1,0 +1,15 @@
+[Unit]
+Description=roland-agent Docker/host firewall rules
+Documentation=file:///opt/roland-agent/docs/v2-spec.md
+After=docker.service ufw.service
+PartOf=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/roland-agent-firewall
+ExecReload=/usr/local/sbin/roland-agent-firewall
+
+[Install]
+WantedBy=multi-user.target

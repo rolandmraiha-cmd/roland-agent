@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+echo "No provider is configured. Supply a teardown executable that destroys the provisioned instance, including on cancellation and failure." >&2
+exit 2

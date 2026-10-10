@@ -3,20 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import ipaddress
 import json
-import os
 import socket
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Awaitable, Callable
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
 
+from .audit import Audit, NullAudit
 from .memory import Memory
 from .schedule import next_run_after, valid_cron
+from .tools_browser import SPECS as BROWSER_SPECS
+from .tools_files import attach_file, delete_file, file_info, move_file
 
 MAX_OUTPUT = 8000          # characters of tool output the model sees
 MAX_DOWNLOAD = 2_000_000   # bytes read from a web page
@@ -25,11 +28,11 @@ LIST_PROMPT_CHARS = 300    # how much of each prompt list_jobs shows
 MAX_LISTED_JOBS = 30       # list_jobs shows at most this many
 MAX_JOB_PROMPT = 5000      # characters, same as the Jobs tab form
 FETCH_DEADLINE = 45        # seconds for a whole web fetch, redirects included
+MAX_FACT_CHARS = 200       # one saved fact; every fact goes into every prompt
+MAX_FACTS = 50             # saved facts in total
+MAX_FACTS_PROMPT_CHARS = 1500  # the whole facts block in the system prompt (~500 tokens)
 # IPv6 ranges that can wrap an IPv4 address (NAT64, 6to4), so a private IPv4 could hide inside.
 BLOCKED_NETS = [ipaddress.ip_network(n) for n in ("64:ff9b::/96", "64:ff9b:1::/48", "2002::/16")]
-# Environment variables the shell never gets, so commands can't print the agent's secrets.
-SECRET_ENV = {"AGENT_PASSWORD_HASH", "MODEL_API_KEY"}
-
 
 def clip(text: str, limit: int = MAX_OUTPUT) -> str:
     if len(text) <= limit:
@@ -43,18 +46,22 @@ class ToolContext:
     workspace: Path
     timezone: str
     allow_shell: bool
+    audit: Audit | NullAudit = field(default_factory=NullAudit)
+    gate: object | None = None
+    run: object | None = None
+    config: object | None = None
+    shell: object | None = None  # ShellBackend; None → LocalShell when allow_shell
+    browser: object | None = None  # BrowserClient; None → browser tools are off
+    signins: object | None = None  # SignIns; None → request_signin is off
 
 
 Handler = Callable[[ToolContext, dict], Awaitable[str]]
 
 
-def _workspace_path(ctx: ToolContext, path: str) -> Path:
-    """Resolves a path inside the workspace and refuses anything that points outside it."""
-    root = ctx.workspace.resolve()
-    target = (root / (path or ".")).resolve()
-    if target != root and root not in target.parents:
-        raise ValueError("Path is outside the workspace.")
-    return target
+def _ws(ctx: ToolContext):
+    from .tools_files import workspace_from_ctx
+
+    return workspace_from_ctx(ctx)
 
 
 # --- web ---
@@ -94,7 +101,7 @@ def _pinned(parsed, ip: str) -> tuple[str, dict, dict]:
 async def fetch_url(ctx: ToolContext, args: dict) -> str:
     try:
         return await asyncio.wait_for(_fetch(str(args.get("url", "")).strip()), FETCH_DEADLINE)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return f"Error: the page took longer than {FETCH_DEADLINE} seconds."
 
 
@@ -129,105 +136,162 @@ async def _fetch(url: str) -> str:
                     for tag in soup(["script", "style", "noscript", "svg"]):
                         tag.decompose()
                     title = soup.title.get_text(strip=True) if soup.title else ""
-                    lines = [l.strip() for l in soup.get_text("\n").splitlines() if l.strip()]
+                    lines = [line.strip() for line in soup.get_text("\n").splitlines() if line.strip()]
                     text = (f"Title: {title}\n\n" if title else "") + "\n".join(lines)
                 return clip(f"HTTP {resp.status_code} {url}\n\n{text}")
     return "Error: too many redirects."
 
 
 # --- shell ---
+def _shell_timeout(ctx: ToolContext, args: dict) -> int:
+    config = getattr(ctx, "config", None)
+    default = getattr(config, "shell_timeout_default", None) or SHELL_TIMEOUT
+    maximum = getattr(config, "shell_timeout_max", None) or 300
+    raw = args.get("timeout_s", default)
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(1, min(value, maximum))
+
+
 async def run_shell(ctx: ToolContext, args: dict) -> str:
     if not ctx.allow_shell:
         return ("Error: shell commands are turned off. Roland can turn them on with "
                 "ALLOW_SHELL=true.")
     command = str(args.get("command", ""))
-    ctx.workspace.mkdir(parents=True, exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if k not in SECRET_ENV}
-    proc = await asyncio.create_subprocess_shell(
-        command, cwd=ctx.workspace, env=env,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        start_new_session=True,
+    timeout_s = _shell_timeout(ctx, args)
+    backend = ctx.shell
+    if backend is None:
+        from .local_shell import LocalShell
+
+        backend = LocalShell(ctx.workspace, max_output=MAX_OUTPUT)
+    result = await backend.run(command, timeout_s)
+    # Audit every command (§6.2.5 shell_exec).
+    run = ctx.run
+    run_id = getattr(run, "run_id", None) if run is not None else None
+    chat_id = getattr(run, "chat_id", None) if run is not None else None
+    ctx.audit.write(
+        "agent",
+        "shell_exec",
+        run_id=run_id,
+        chat_id=chat_id,
+        tool="run_shell",
+        detail={
+            "command": command[:4096],
+            "exit_code": result.exit_code,
+            "duration_ms": result.duration_ms,
+            "output_sha256": hashlib.sha256(result.output.encode("utf-8", errors="replace")).hexdigest(),
+            "output_preview": result.output[:2048],
+            "truncated": result.truncated,
+            "timed_out": result.timed_out,
+            "timeout_s": timeout_s,
+        },
     )
-
-    def kill() -> None:
-        try:
-            os.killpg(proc.pid, 9)
-        except ProcessLookupError:
-            pass
-
-    async def read_capped() -> tuple[bytes, bool]:
-        # Reads at most MAX_OUTPUT bytes; a command that prints more is stopped right there.
-        out = b""
-        while len(out) <= MAX_OUTPUT:
-            part = await proc.stdout.read(4096)
-            if not part:
-                return out, False
-            out += part
-        kill()
-        return out, True
-
-    async def finish() -> None:
-        # Drains what's left (the process is dead or done) so its pipes close cleanly.
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=5)
-        except asyncio.TimeoutError:
-            pass
-
-    try:
-        out, cut = await asyncio.wait_for(read_capped(), timeout=SHELL_TIMEOUT)
-    except asyncio.TimeoutError:
-        kill()
-        await finish()
-        return f"Error: the command took longer than {SHELL_TIMEOUT} seconds and was stopped."
-    await finish()
-    text = clip(out.decode(errors="replace"))
-    if cut:
+    if result.timed_out:
+        return f"Error: the command took longer than {timeout_s} seconds and was stopped."
+    text = clip(result.output)
+    if result.truncated:
         return f"{text}\n[stopped: the command printed more than {MAX_OUTPUT} characters]"
-    return f"exit code {proc.returncode}\n{text}"
+    return f"exit code {result.exit_code}\n{text}"
 
 
 # --- files ---
 async def read_file(ctx: ToolContext, args: dict) -> str:
+    path = str(args.get("path", ""))
     try:
-        target = _workspace_path(ctx, str(args.get("path", "")))
-        return clip(target.read_text(errors="replace"))
+        return _ws(ctx).read_text(path, max_chars=MAX_OUTPUT)
+    except FileNotFoundError:
+        shown = path.strip() or "(empty path)"
+        return (
+            f"Error: file not found: {shown}. It is not in the workspace. "
+            "Do not retry this path; answer with what you know or ask Roland."
+        )
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 
 
 async def write_file(ctx: ToolContext, args: dict) -> str:
     try:
-        target = _workspace_path(ctx, str(args.get("path", "")))
-        if target == ctx.workspace.resolve():
-            return "Error: give a file name."
-        target.parent.mkdir(parents=True, exist_ok=True)
+        path = str(args.get("path", ""))
         content = str(args.get("content", ""))
-        if args.get("append"):
-            with target.open("a") as f:
-                f.write(content)
-        else:
-            target.write_text(content)
-        return f"Saved {target.relative_to(ctx.workspace.resolve())} ({len(content)} characters)."
+        append = bool(args.get("append"))
+        run = ctx.run
+        chat_id = getattr(run, "chat_id", None) if run is not None else None
+        approval_id = getattr(run, "pending_approval_id", None) if run is not None else None
+        result = _ws(ctx).write_text(
+            path,
+            content,
+            append=append,
+            origin="agent",
+            chat_id=chat_id,
+            deleted_by="agent",
+            approval_id=approval_id,
+        )
+        return f"Saved {result['path']} ({len(content)} characters)."
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 
 
 async def list_files(ctx: ToolContext, args: dict) -> str:
     try:
-        ctx.workspace.mkdir(parents=True, exist_ok=True)
-        target = _workspace_path(ctx, str(args.get("path", ".")))
-        root = ctx.workspace.resolve()
-        items = sorted(target.iterdir())
-        lines = [f"{p.relative_to(root)}{'/' if p.is_dir() else ''}" for p in items[:300]]
+        entries, _truncated = _ws(ctx).list_dir(str(args.get("path", ".") or "."))
+        lines = []
+        for entry in entries[:300]:
+            name = entry["path"]
+            if entry["type"] == "dir":
+                lines.append(f"{name}/")
+            elif entry["type"] == "symlink":
+                lines.append(entry["name"] if entry["name"].endswith("@") else f"{name}@")
+            else:
+                lines.append(name)
         return "\n".join(lines) or "(empty)"
     except (ValueError, OSError) as e:
         return f"Error: {e}"
 
 
 # --- memory ---
+def one_line(text: str) -> str:
+    """Joins all lines into one, so a fact can't start what looks like a new prompt line."""
+    return " ".join(text.split())
+
+
 async def remember(ctx: ToolContext, args: dict) -> str:
-    fact_id = ctx.memory.remember(str(args.get("fact", "")))
+    fact = one_line(str(args.get("fact", "")))
+    if not fact:
+        return "Error: the fact is empty."
+    if len(fact) > MAX_FACT_CHARS:
+        return f"Error: a fact can be at most {MAX_FACT_CHARS} characters. Save a shorter one."
+    run = ctx.run
+    chat_id = getattr(run, "chat_id", None) if run is not None else None
+    tainted = bool(getattr(run, "tainted", False)) if run is not None else False
+    fact_id = ctx.memory.remember(
+        fact, limit=MAX_FACTS, origin="agent", chat_id=chat_id, tainted=tainted,
+    )
+    if fact_id is None:
+        return (f"Error: {MAX_FACTS} facts are saved already. Forget one first, or ask Roland "
+                "to delete some on the Jobs tab.")
     return f"Remembered as fact {fact_id}."
+
+
+def prompt_facts(memory: Memory, *, max_chars: int = MAX_FACTS_PROMPT_CHARS) -> str:
+    """Saved facts as prompt lines, newest first: one line each, shortened, and the whole block
+    at most MAX_FACTS_PROMPT_CHARS. The system prompt is never trimmed, so this keeps it inside
+    a small model's context however many facts are saved (older versions saved without limits)."""
+    facts = memory.facts()
+    room = max_chars - 100  # left for the "not shown" line
+    lines: list[str] = []
+    used = 0
+    for fact_id, text in reversed(facts):
+        line = f"{fact_id}: {_short(text, MAX_FACT_CHARS)}"
+        used += len(line) + 1
+        if used > room:
+            break
+        lines.append(line)
+    if len(facts) > len(lines):
+        lines.append(f"({len(facts) - len(lines)} older saved facts not shown here; Roland can "
+                     "see them on the Jobs tab.)")
+    return "\n".join(lines)
 
 
 async def forget(ctx: ToolContext, args: dict) -> str:
@@ -247,14 +311,17 @@ async def schedule_job(ctx: ToolContext, args: dict) -> str:
     if len(prompt) > MAX_JOB_PROMPT:
         return f"Error: a job prompt can be at most {MAX_JOB_PROMPT} characters."
     nxt = next_run_after(cron, ctx.timezone)
-    job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False, origin="agent")
+    with ctx.memory.transaction():
+        job_id = ctx.memory.add_job(name, cron, prompt, nxt, approved=False, origin="agent")
+        ctx.audit.write("agent", "job_created", tool="schedule_job",
+                        detail={"job_id": job_id, "name": name, "cron": cron, "approved": False})
     return (f"Created job {job_id} '{name}' ({cron}, {ctx.timezone}). It is waiting for Roland's "
             "approval: tell him to press Approve on the Jobs tab. It won't run until then.")
 
 
 def _short(text: str, limit: int) -> str:
     """One line, at most `limit` characters, with … when something was left out."""
-    text = " ".join(text.split())
+    text = one_line(text)
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
@@ -306,13 +373,14 @@ def _fn(name: str, description: str, properties: dict, required: list[str]) -> d
 
 
 S = {"type": "string"}
-I = {"type": "integer"}
+INTEGER = {"type": "integer"}
 
 TOOLS: dict[str, tuple[dict, Handler]] = {
     "fetch_url": (_fn("fetch_url", "Download a public web page and return its text.",
                       {"url": S}, ["url"]), fetch_url),
-    "run_shell": (_fn("run_shell", "Run a shell command in your own container, in your workspace "
-                      "folder. 60 second limit.", {"command": S}, ["command"]), run_shell),
+    "run_shell": (_fn("run_shell", "Run a shell command in the isolated sandbox workspace. "
+                      "Optional timeout_s (seconds) and reason for gated commands.",
+                      {"command": S, "timeout_s": INTEGER, "reason": S}, ["command"]), run_shell),
     "read_file": (_fn("read_file", "Read a text file from your workspace. Paths are relative to the workspace, e.g. 'notes/todo.txt'.",
                       {"path": S}, ["path"]), read_file),
     "write_file": (_fn("write_file", "Write (or append to) a text file in your workspace. Paths are relative to the workspace, e.g. 'notes/todo.txt'.",
@@ -320,19 +388,33 @@ TOOLS: dict[str, tuple[dict, Handler]] = {
                        ["path", "content"]), write_file),
     "list_files": (_fn("list_files", "List files in a workspace folder (relative path, default the workspace itself).",
                        {"path": S}, []), list_files),
-    "remember": (_fn("remember", "Save a lasting fact about Roland or your work.",
+    "delete_file": (_fn("delete_file", "Move a workspace file to trash. Requires Roland's approval.",
+                        {"path": S, "reason": S}, ["path"]), delete_file),
+    "move_file": (_fn("move_file", "Move or rename a workspace file. Replacing an existing file needs approval.",
+                      {"from": S, "to": S, "reason": S}, ["from", "to"]), move_file),
+    "file_info": (_fn("file_info", "Show size, modified time, sha256 and origin for a workspace file.",
+                      {"path": S}, ["path"]), file_info),
+    "attach_file": (_fn("attach_file", "Share a workspace file with Roland in the chat (download card). Nothing leaves the server.",
+                        {"path": S, "note": S}, ["path"]), attach_file),
+    "remember": (_fn("remember", "Save a lasting fact about Roland or your work: one short line, "
+                     f"at most {MAX_FACT_CHARS} characters.",
                      {"fact": S}, ["fact"]), remember),
-    "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": I}, ["fact_id"]), forget),
+    "forget": (_fn("forget", "Delete a saved fact by its id.", {"fact_id": INTEGER}, ["fact_id"]), forget),
     "schedule_job": (_fn("schedule_job", "Schedule a background job: a prompt you will run on a "
                          "5-field cron schedule in Roland's time zone, e.g. '0 7 * * *' for every "
                          "day at 07:00.", {"name": S, "cron": S, "prompt": S},
                          ["name", "cron", "prompt"]), schedule_job),
     "list_jobs": (_fn("list_jobs", "List scheduled background jobs, waiting for approval first, "
                       "then newest first, 30 at a time. Use offset to see more.",
-                      {"offset": I}, []), list_jobs),
+                      {"offset": INTEGER}, []), list_jobs),
     "cancel_job": (_fn("cancel_job", "Delete a scheduled job by its id.",
-                       {"job_id": I}, ["job_id"]), cancel_job),
+                       {"job_id": INTEGER}, ["job_id"]), cancel_job),
 }
+# Browser tools (M6) come last. They are only offered when BROWSER_ENABLED=true.
+TOOLS.update({
+    name: (_fn(name, description, properties, required), handler)
+    for name, description, properties, required, handler in BROWSER_SPECS
+})
 
 
 def schemas(exclude: set[str] = frozenset()) -> list[dict]:
@@ -340,15 +422,90 @@ def schemas(exclude: set[str] = frozenset()) -> list[dict]:
 
 
 async def call_tool(ctx: ToolContext, name: str, args: dict) -> str:
+    from .gate import PIN_KEY, POLICIES, Decision, NoApproverGate, Risk, mark_executed
+
     if name not in TOOLS:
         return f"Error: there is no tool called {name}."
+    policy = POLICIES.get(name)
+    if policy is None:
+        return f"Error: there is no tool called {name}."
+    if PIN_KEY in args:
+        # Reserved for values a classifier pins. The model can never supply them.
+        args = {key: value for key, value in args.items() if key != PIN_KEY}
     try:
-        return await TOOLS[name][1](ctx, args)
+        decision = await policy.classify(ctx, args)
+    except Exception:
+        decision = Decision(Risk.FORBIDDEN, "other", reason="classifier error")
+    if decision.pinned and decision.risk is not Risk.FORBIDDEN:
+        # Stored with the approval, so what Roland approves is bound to what was classified.
+        args = {**args, PIN_KEY: dict(decision.pinned)}
+    run = ctx.run
+    run_id = getattr(run, "run_id", None) if run is not None else None
+    chat_id = getattr(run, "chat_id", None) if run is not None else None
+    ctx.audit.write(
+        "agent",
+        "gate_decision",
+        run_id=run_id,
+        chat_id=chat_id,
+        tool=name,
+        decision=decision.risk.value,
+        detail={"category": decision.category, "reason": decision.reason, "args_keys": sorted(args)},
+    )
+    if decision.risk is Risk.FORBIDDEN:
+        return f"Error: {name} isn't allowed: {decision.reason or 'forbidden'}"
+    approval_id = None
+    run_args = args
+    if decision.risk is Risk.GATED:
+        gate = ctx.gate or NoApproverGate()
+        outcome = await gate.request(ctx, name, args, decision)
+        if not outcome.approved:
+            return f"Not done: {outcome.message}"
+        # Fail closed: never run with freshly supplied/model args when stored args are missing.
+        if outcome.args is None:
+            return "Not done: approved action is missing stored args."
+        run_args = outcome.args
+        approval_id = outcome.approval_id
+    # Gate clears pending_approval_id in request()'s finally; restore for the tool
+    # so overwrite/trash paths can see that replace was already approved.
+    if approval_id is not None and run is not None:
+        run.pending_approval_id = approval_id
+    try:
+        result = await TOOLS[name][1](ctx, run_args)
     except Exception as e:  # a broken tool call should never crash the agent
-        return f"Error: {type(e).__name__}: {e}"
+        result = f"Error: {type(e).__name__}: {e}"
+    finally:
+        if approval_id is not None and run is not None:
+            run.pending_approval_id = None
+    if approval_id is not None and ctx.gate is not None:
+        mark_executed(ctx.memory, ctx.audit, approval_id, result)
+    else:
+        digest_detail = {"preview": result[:500]}
+        ctx.audit.write(
+            "agent",
+            "tool_result",
+            run_id=run_id,
+            chat_id=chat_id,
+            tool=name,
+            decision=decision.risk.value,
+            detail=digest_detail,
+        )
+    if policy.taints and run is not None:
+        run.tainted = True
+        if run_id:
+            ctx.memory.set_run_tainted(run_id)
+    return result
 
 
 def describe(name: str, args: dict) -> str:
     """A short line for the chat page showing which tool ran."""
     text = json.dumps(args, ensure_ascii=False)
     return f"{name} {clip(text, 160)}"
+
+
+# Import-time assertion: every registered tool must have a policy (§6.2.4).
+from .gate import POLICIES as _POLICIES  # noqa: E402
+
+assert set(TOOLS) == set(_POLICIES), (
+    f"TOOLS/POLICIES mismatch: only in TOOLS={set(TOOLS)-set(_POLICIES)} "
+    f"only in POLICIES={set(_POLICIES)-set(TOOLS)}"
+)

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#111418">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 <title>Agent</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -25,18 +26,40 @@
       <h1 id="title">Chat</h1>
       <div class="tabs" role="tablist">
         <button id="tab-chat" class="tab active" role="tab">Chat</button>
+        <button id="tab-approvals" class="tab" role="tab">Approvals <span id="approval-badge" class="tab-badge" hidden>0</span></button>
+        <button id="tab-files" class="tab" role="tab">Files</button>
+        <button id="tab-browser" class="tab" role="tab">Browser</button>
         <button id="tab-jobs" class="tab" role="tab">Jobs</button>
+        <button id="tab-audit" class="tab" role="tab">Audit</button>
+        <button id="tab-settings" class="tab" role="tab">Settings</button>
       </div>
     </header>
 
     <section id="chat-view" class="view">
+      <div id="chat-training" class="training-bar" hidden>
+        <label>Training for this chat <select id="chat-training-mode"><option value="follow">Follow global setting</option><option value="on">Include when capture is on</option><option value="never">Never use this chat</option></select></label>
+        <span id="chat-training-state" class="hint"></span>
+      </div>
       <div id="messages" class="messages" aria-live="polite"></div>
       <form id="composer" class="composer">
+        <input id="attach-input" type="file" multiple hidden>
+        <button id="attach" class="ghost icon" type="button" title="Attach files" aria-label="Attach files">📎</button>
         <textarea id="input" rows="1" placeholder="Message your agent…" maxlength="20000"
                   aria-label="Message your agent"
                   title="Enter sends on desktop. Shift+Enter adds a line. Ctrl/Cmd+Enter sends on any device."></textarea>
+        <button id="stop" class="ghost danger" type="button" hidden>Stop</button>
         <button id="send" class="primary" type="submit">Send</button>
       </form>
+    </section>
+
+    <section id="approvals-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Pending approvals</h2>
+        <p class="hint">Risky actions wait here until you approve or reject them. Plain chat “yes” does not count.</p>
+        <div id="approval-list"></div>
+        <h2>History</h2>
+        <div id="approval-history"></div>
+      </div>
     </section>
 
     <section id="jobs-view" class="view jobs" hidden>
@@ -61,8 +84,120 @@
         <div id="fact-list"></div>
       </div>
     </section>
+
+
+    <section id="files-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Files</h2>
+        <p class="hint">Workspace files. Uploads stay on this server. Deletes go to trash first.</p>
+        <div id="files-usage" class="hint"></div>
+        <div class="job-actions files-actions">
+          <nav id="files-crumb" class="files-crumb" aria-label="Path"></nav>
+          <button id="files-upload-btn" class="primary" type="button">Upload</button>
+          <input id="files-upload-input" type="file" multiple hidden>
+          <button id="files-mkdir-btn" class="ghost" type="button">New folder</button>
+          <button id="files-trash-btn" class="ghost" type="button">Trash</button>
+          <button id="files-refresh" class="ghost" type="button">Refresh</button>
+        </div>
+        <div id="files-progress" class="hint" hidden></div>
+        <div id="files-list"></div>
+        <div id="trash-panel" hidden>
+          <h2>Trash</h2>
+          <div id="trash-list"></div>
+        </div>
+      </div>
+    </section>
+    <section id="browser-view" class="view jobs" hidden>
+      <div class="jobs-inner browser-inner">
+        <h2>Browser</h2>
+        <p id="browser-status" class="hint" role="status" aria-live="polite">Loading browser status…</p>
+        <div id="browser-details" hidden>
+          <dl class="browser-info">
+            <dt>Mode</dt><dd id="browser-mode"></dd>
+            <dt>Title</dt><dd id="browser-title"></dd>
+            <dt>Address</dt><dd id="browser-address"></dd>
+          </dl>
+          <div id="browser-screen" class="browser-screen" hidden>
+            <p class="hint">See the browser live. Watching leaves the agent working; taking control pauses it until you hand the browser back.</p>
+            <div class="job-actions">
+              <a id="browser-watch" class="button ghost" href="/screen?mode=watch" target="_blank" rel="noopener">Watch screen</a>
+              <a id="browser-control" class="button ghost" href="/screen?mode=control" target="_blank" rel="noopener">Take control</a>
+            </div>
+            <div id="browser-signins"></div>
+          </div>
+          <h3>Tabs</h3>
+          <ul id="browser-tabs" class="browser-tabs" aria-label="Browser tabs"></ul>
+          <div class="browser-preview">
+            <div class="browser-preview-head">
+              <h3>Thumbnail</h3>
+              <button id="browser-refresh" class="ghost" type="button" disabled>Refresh</button>
+            </div>
+            <p id="browser-shot-note" class="hint">Choose Refresh to get the current thumbnail.</p>
+            <img id="browser-thumbnail" class="browser-thumbnail" alt="Current browser thumbnail" hidden>
+          </div>
+        </div>
+        <p id="browser-error" class="error" role="alert" hidden></p>
+      </div>
+    </section>
+    <section id="audit-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Audit log</h2>
+        <p class="hint">Append-only record of gate decisions and actions.</p>
+        <div class="job-actions audit-actions">
+          <button id="audit-export" class="ghost" type="button">Export CSV</button>
+          <button id="audit-refresh" class="ghost" type="button">Refresh</button>
+        </div>
+        <div id="audit-list"></div>
+      </div>
+    </section>
+    <section id="settings-view" class="view jobs" hidden>
+      <div class="jobs-inner">
+        <h2>Persona</h2>
+        <form id="persona-form" class="job-form">
+          <label>Agent name <input id="persona-name" maxlength="60" required></label>
+          <label>Persona and tone <textarea id="persona-tone" maxlength="2000" rows="4"></textarea></label>
+          <label>Standing instructions <textarea id="persona-instructions" maxlength="4000" rows="5"></textarea></label>
+          <button id="persona-preview-button" class="ghost" type="button">Preview and count tokens</button>
+          <p id="persona-tokens" class="hint"></p>
+          <details><summary>Full prompt, including the fixed safety rules</summary><pre id="persona-preview" class="prompt-preview"></pre></details>
+          <label><input id="persona-confirm" type="checkbox"> I confirm a prompt over the budget. It will take longer and leave less room for the conversation.</label>
+          <button class="primary" type="submit">Save new version</button>
+        </form>
+        <label>History <select id="persona-history"></select></label>
+        <button id="persona-restore" class="ghost" type="button">Restore as a new version</button>
+        <pre id="persona-diff" class="prompt-preview"></pre>
+        <h2>Training data</h2>
+        <p class="hint">Capture is opt-in. Sign-in and screen sessions are never captured. Review the scrubbed data before sending it to your separate GPU machine.</p>
+        <label><input id="training-capture" type="checkbox"> Use my chats and feedback to improve my model</label>
+        <label><input id="training-loop" type="checkbox"> Weekly self-improvement</label>
+        <p id="training-schedule" class="hint"></p>
+        <button id="training-save" class="primary" type="button">Save capture settings</button>
+        <div class="job-actions">
+          <label>Source <select id="training-filter-source"><option value="">All</option><option>thumbs_up</option><option>thumbs_down</option><option>correction</option><option>approved_call</option><option>rejected_call</option></select></label>
+          <label>Included <select id="training-filter-included"><option value="">All</option><option value="true">Included</option><option value="false">Excluded</option></select></label>
+          <label>Tainted <select id="training-filter-tainted"><option value="">All</option><option value="true">Yes</option><option value="false">No</option></select></label>
+          <button id="training-refresh" class="ghost" type="button">Refresh examples</button>
+        </div>
+        <div id="training-examples"></div>
+        <button id="training-export" class="primary" type="button">Build dataset from new labelled data</button>
+        <button id="training-past" class="ghost" type="button">Review past-chat count</button>
+        <div id="training-past-confirm" hidden><p id="training-past-count"></p><button id="training-past-include" class="ghost" type="button">Include this count and build dataset</button></div>
+        <div id="training-datasets"></div>
+        <h2>Model</h2>
+        <p class="hint">Training on a model's own output can amplify mistakes and forget skills. A passing evaluation needs your approval. You can roll back if the new model is worse.</p>
+        <p id="model-current" class="hint"></p>
+        <label>Import candidate.tar <input id="model-import" type="file" accept=".tar"></label>
+        <button id="model-import-button" class="ghost" type="button">Import for evaluation review</button>
+        <button id="model-rollback" class="ghost" type="button" hidden>Roll back</button>
+        <div id="model-versions"></div>
+        <h3>Promotion requests</h3><div id="model-promotions"></div>
+        <h3>Training runs</h3><div id="training-runs"></div>
+        <p id="settings-message" role="status" aria-live="polite"></p>
+      </div>
+    </section>
   </main>
 </div>
 <script src="/static/app.js"></script>
+<script src="/static/settings.js"></script>
 </body>
 </html>

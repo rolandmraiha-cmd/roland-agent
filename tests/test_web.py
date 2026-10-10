@@ -84,7 +84,6 @@ def test_idle_session_expires(client, monkeypatch):
 
 
 def test_password_change_ends_sessions(tmp_path, make_agent):
-    from agent.memory import Memory
     agent = make_agent()
     s1 = auth.Sessions(agent.memory, 14, 72, agent.config.password_hash)
     token = s1.create()
@@ -127,6 +126,41 @@ def test_chat_stream_and_history(client):
     msgs = client.get(f"/api/chats/{chat_id}/messages").json()["messages"]
     assert msgs[0]["content"] == "hello" and msgs[1]["content"].startswith("Hi Roland")
     assert client.get("/api/chats").json()[0]["title"] == "hello"
+
+
+def test_chat_stream_sends_keepalive_while_model_thinks(make_agent, monkeypatch):
+    """Mobile Safari drops idle SSE; keepalive comments must flow during long waits."""
+    import asyncio
+
+    from agent.brain import Step
+
+    class SlowBrain:
+        async def stream(self, messages, tools):
+            await asyncio.sleep(0.05)  # shorter than production; monkeypatched wait_for below
+            yield "Hi "
+            yield "there "
+            yield Step(text="Hi there ")
+
+    # Force keepalive every 0.01s so one sleep(0.05) produces several comments.
+    real_wait = asyncio.wait_for
+
+    async def wait_for(awaitable, timeout=None):
+        if timeout == 5.0:
+            return await real_wait(awaitable, timeout=0.01)
+        return await real_wait(awaitable, timeout=timeout)
+
+    monkeypatch.setattr(asyncio, "wait_for", wait_for)
+    agent = make_agent()
+    agent.brain = SlowBrain()
+    with TestClient(create_app(agent, run_scheduler=False)) as client:
+        login(client)
+        chat_id = client.post("/api/chats", headers=ORIGIN).json()["id"]
+        with client.stream(
+            "POST", f"/api/chats/{chat_id}/send", json={"text": "hello"}, headers=ORIGIN
+        ) as r:
+            body = "".join(r.iter_text())
+    assert ": ping" in body or ": keepalive" in body
+    assert '"type": "done"' in body and '"type": "end"' in body
 
 
 def test_jobs_api(client):
@@ -204,6 +238,7 @@ def test_wrong_guesses_dont_hold_up_roland(make_agent, monkeypatch):
     """The slowdown sleep happens outside the login lock: while attackers' wrong guesses sleep,
     Roland's login still goes straight through."""
     import asyncio
+
     import httpx
     real_sleep = asyncio.sleep
 
@@ -234,6 +269,7 @@ def test_wrong_guesses_dont_hold_up_roland(make_agent, monkeypatch):
 
 def test_one_attempt_per_address_at_a_time(make_agent, monkeypatch):
     import asyncio
+
     import httpx
     real_sleep = asyncio.sleep
 
@@ -262,7 +298,7 @@ def test_forwarded_for_only_from_trusted_proxy(make_agent, monkeypatch, caplog):
     agent = make_agent(trusted_proxies=("172.17.0.1",))
     app = create_app(agent, run_scheduler=False)
     with TestClient(app, client=("172.17.0.1", 1)) as proxy:
-        for i in range(auth.PER_IP_FAILS):  # 5 wrong from one visitor behind the proxy
+        for _i in range(auth.PER_IP_FAILS):  # 5 wrong from one visitor behind the proxy
             proxy.post("/login", data={"password": "x"},
                        headers={**ORIGIN, "X-Forwarded-For": "6.6.6.6"})
         r = proxy.post("/login", data={"password": PW},
@@ -293,7 +329,9 @@ def test_forwarded_for_details():
 
     import asyncio
     # A visitor typing a fake left-hand entry doesn't change who they are.
-    assert asyncio.run(run(("*",), "172.17.0.1", "1.1.1.1, 6.6.6.6:4000")) == "6.6.6.6"
+    with pytest.raises(ValueError):
+        ProxyHeaders(app, ("*",))
+    assert asyncio.run(run(("172.17.0.1",), "172.17.0.1", "1.1.1.1, 6.6.6.6:4000")) == "6.6.6.6"
     assert asyncio.run(run(("172.17.0.0/16",), "172.17.0.1", "1.1.1.1", "6.6.6.6")) == "6.6.6.6"
     assert asyncio.run(run(("172.17.0.0/16",), "172.17.0.1", "6.6.6.6, 172.17.0.9")) == "6.6.6.6"
     assert asyncio.run(run(("172.17.0.1",), "8.8.8.8", "1.1.1.1")) == "8.8.8.8"  # untrusted peer
@@ -342,7 +380,9 @@ def test_blank_job_rejected(client, field):
 @pytest.mark.parametrize("scheduled", [False, True])
 async def test_shutdown_cancels_and_awaits_job(make_agent, monkeypatch, scheduled):
     import asyncio
+
     import httpx
+
     from agent.scheduler import running_jobs
 
     agent = make_agent()
@@ -370,3 +410,45 @@ async def test_shutdown_cancels_and_awaits_job(make_agent, monkeypatch, schedule
     assert stopped.is_set()
     assert job_id not in running_jobs
     assert agent.memory.runs()[0]["finished"] is not None
+
+
+@pytest.mark.asyncio
+async def test_forwarded_for_never_uses_leftmost_when_all_trusted(caplog):
+    from agent.web.app import ProxyHeaders
+
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(scope["client"][0])
+
+    middleware = ProxyHeaders(app, ("10.77.1.0/24",))
+    scope = {"type": "http", "client": ("10.77.1.2", 1),
+             "headers": [(b"x-forwarded-for", b"10.77.1.5, 10.77.1.6")]}
+    with caplog.at_level("WARNING", logger="agent.web"):
+        await middleware(scope, None, None)
+        await middleware(scope, None, None)
+    assert seen == ["10.77.1.2", "10.77.1.2"]
+    assert caplog.text.count("keeping direct peer") == 1
+
+
+def test_star_rejected_in_config_check(make_agent):
+    agent = make_agent(trusted_proxies=("*",))
+    with pytest.raises(SystemExit) as error:
+        agent.config.check()
+    assert str(error.value) == "FORWARDED_ALLOW_IPS='*' is not allowed; list the proxy IP"
+
+
+@pytest.mark.asyncio
+async def test_invalid_forwarded_hop_is_used_only_when_rightmost():
+    from agent.web.app import ProxyHeaders
+
+    seen = []
+
+    async def app(scope, receive, send):
+        seen.append(scope["client"][0])
+
+    middleware = ProxyHeaders(app, ("10.77.1.2",))
+    for hops in (b"invalid, 1.2.3.4", b"1.2.3.4, invalid"):
+        await middleware({"type": "http", "client": ("10.77.1.2", 1),
+                          "headers": [(b"x-forwarded-for", hops)]}, None, None)
+    assert seen == ["1.2.3.4", "invalid"]

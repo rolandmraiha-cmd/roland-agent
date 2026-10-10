@@ -1,0 +1,7 @@
+# The browser image (docker/browser/Dockerfile). Remake the lock with:
+#   uv pip compile requirements-browser.in -c requirements.lock --generate-hashes --python-version 3.12 --python-platform linux -o requirements-browser.lock
+# playwright must be the version the base image's Chromium was built for. fastapi and uvicorn
+# follow requirements.lock (-c), so browserd runs on the same versions as core and sandboxd.
+playwright==1.63.0
+fastapi
+uvicorn

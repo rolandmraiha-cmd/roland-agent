@@ -1,6 +1,17 @@
 .env
+.env.*
+!.env.example
+secrets/
+.ci-workspace/
+.ci-training/
+.ci-llama/
+.llama.cpp/
+.training-venv/
 .venv
 data
 .git
 __pycache__
 .pytest_cache
+.release-evidence
+backups
+workspace
