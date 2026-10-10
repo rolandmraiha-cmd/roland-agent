@@ -9,7 +9,8 @@ chats, files and browser snapshots are never sent to a hosted inference service.
 and focused browser/screen/tool smoke. Roland authorized the release merge with follow-ups
 retained. Final review then confirmed a large-file memory blocker: downloads buffered the
 whole file inside the 640 MiB core. The focused `v2-m9-stream-downloads` fix streams from a
-validated file descriptor in 64 KiB chunks and bounds metadata hashing. It needs CI and a
+validated file descriptor in 64 KiB chunks and bounds metadata hashing. Mutable files
+use a chunked HTTP response so concurrent truncation cannot break a promised length. It needs CI and a
 focused deployment before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges.
 The earlier completed checks remain evidence for that tested runtime; this fix is not yet
 deployed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).

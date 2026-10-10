@@ -220,7 +220,6 @@ def build_router(agent) -> APIRouter:
             size,
             media_type="application/octet-stream",
             headers={
-                "Content-Length": str(size),
                 "Content-Disposition": content_disposition(name),
                 "X-Content-Type-Options": "nosniff",
                 "Content-Security-Policy": "default-src 'none'; sandbox",

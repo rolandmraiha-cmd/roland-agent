@@ -11,8 +11,10 @@ The existing runtime and host checks passed at `7b3de9d`. Final automated review
 confirmed a large-file memory blocker. Before the already-authorized main merge, finish
 `v2-m9-stream-downloads`, all seven CI jobs and a focused deployed large-file check. The fix
 streams 64 KiB chunks from a validated descriptor and bounds file-info/append hashing.
+The HTTP response uses chunked framing so concurrent truncation finishes without a
+stale Content-Length error; binary/empty completion and real h11 framing are checked.
 The old 768 MiB download fails under a 192 MiB cap; the focused fixed suite passed locally
-(39 pass / 1 existing skip). Host limits stay unchanged. CHANGELOG remains unreleased
+(42 pass / 1 existing skip). Host limits stay unchanged. CHANGELOG remains unreleased
 until this new runtime change is accepted.
 
 1. **Model reporting:** reproduce longer-chat unsupported claims and inaccurate page-content

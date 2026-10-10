@@ -30,7 +30,8 @@ checkpoints; NEXT retains follow-ups and the completed implementation plan as hi
 ### Hardened
 
 - Workspace downloads stream bounded chunks from an openat/O_NOFOLLOW-validated regular
-  file and close it on completion, cancellation or disconnect. File-info and append hashes
+  file and close it on completion, cancellation or disconnect. Mutable files use chunked
+  HTTP framing, avoiding stale-length errors during truncation. File-info and append hashes
   no longer read the whole file into core memory. A 768 MiB sparse-file regression runs
   below the production memory cap. This final fix is pending deployed acceptance.
 

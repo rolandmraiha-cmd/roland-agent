@@ -7,6 +7,7 @@ import subprocess
 import sys
 import textwrap
 
+import h11
 import pytest
 from fastapi.testclient import TestClient
 
@@ -129,6 +130,55 @@ def test_download_headers_attachment_nosniff_csp(client):
     assert "default-src 'none'" in response.headers["content-security-policy"]
     assert "sandbox" in response.headers["content-security-policy"]
     assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("size", [0, 3 * 64 * 1024 + 17])
+def test_download_returns_complete_binary_and_empty_files(client, size):
+    data = (bytes(range(256)) * ((size + 255) // 256))[:size]
+    (client.agent.config.workspace / "chunks.bin").write_bytes(data)
+    response = client.get("/api/files/download", params={"path": "chunks.bin"})
+    assert response.status_code == 200
+    assert response.content == data
+
+
+async def test_download_truncation_finishes_valid_http_response(make_agent, monkeypatch):
+    from agent.web import routes_files
+
+    agent = make_agent()
+    ws = routes_files.workspace_for(agent)
+    ws.ensure()
+    path = ws.root / "mutable.bin"
+    path.write_bytes(b"x" * (3 * 64 * 1024))
+    monkeypatch.setattr(routes_files, "workspace_for", lambda _: ws)
+    router = routes_files.build_router(agent)
+    download = next(r.endpoint for r in router.routes if r.path == "/api/files/download")
+    response = await download("mutable.bin")
+    protocol = h11.Connection(h11.SERVER)
+    protocol.receive_data(b"GET / HTTP/1.1\r\nHost: agent.test\r\n\r\n")
+    assert isinstance(protocol.next_event(), h11.Request)
+    assert isinstance(protocol.next_event(), h11.EndOfMessage)
+    truncated = False
+    finished = False
+
+    async def send(message):
+        nonlocal truncated, finished
+        if message["type"] == "http.response.start":
+            protocol.send(h11.Response(status_code=message["status"], headers=message["headers"]))
+        elif message["type"] == "http.response.body":
+            protocol.send(h11.Data(data=message.get("body", b"")))
+            if message.get("body") and not truncated:
+                with path.open("wb"):
+                    pass
+                truncated = True
+            if not message.get("more_body", False):
+                protocol.send(h11.EndOfMessage())
+                finished = True
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert truncated and finished
 
 
 def test_preview_only_real_images(client):
@@ -266,7 +316,7 @@ def test_large_download_and_hash_fit_below_core_memory_limit(tmp_path):
 
         async def run():
             response = await download('large.bin')
-            assert response.headers['content-length'] == str(768 * 1024 * 1024)
+            assert 'content-length' not in response.headers
             # Discard chunks and disconnect early; never collect the response in a client.
             disconnected = asyncio.Event()
             count = 0

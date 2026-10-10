@@ -219,7 +219,7 @@ and the final documentation check. The tested runtime deployment is now `7b3de9d
 1. Finish the release-blocking `v2-m9-stream-downloads` fix: review and all seven CI jobs,
    merge into `v2`, then a focused Contabo build/verify and large-file download check.
    The old 768 MiB download fails under a 192 MiB address-space limit; the fixed reader,
-   hash and disconnect cases passed locally (39 pass / 1 existing skip). The fix retains
+   hash and disconnect cases passed locally (42 pass / 1 existing skip). The fix retains
    confinement and header checks and changes no memory limit. It is not yet deployed.
 2. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) then needs all
    seven final-head jobs, a COMMENT review and the main merge Roland already authorized.
@@ -351,11 +351,12 @@ PR #66's automated P1 is confirmed: downloads called unbounded `Workspace.read_b
 so a sandbox-created file larger than the 640 MiB core limit could restart core. File-info
 and append bookkeeping also used unbounded reads for hashing. The focused fix opens
 regular files through the existing openat/O_NOFOLLOW walk, refuses FIFOs without blocking,
-streams at most 64 KiB at a time, caps a response to its initial size and closes descriptors
+streams at most 64 KiB at a time, caps a response to its initial size, uses chunked HTTP
+for mutable files rather than a stale Content-Length, and closes descriptors
 on normal completion, disconnect or cancellation. Hashing uses the same bounded reader.
 Local regression: the old download raises MemoryError for a 768 MiB sparse file under a
 192 MiB address-space cap; the fixed large download/hash, both ASGI disconnect paths and
-inode/symlink/FIFO checks pass (39 pass / 1 existing skip). CI and host acceptance remain
+inode/symlink/FIFO checks pass (42 pass / 1 existing skip). CI and host acceptance remain
 pending. The two P2 findings are tracked as #68/#69 after 2.0.0.
 
 ### M9 host acceptance (9 October 2026)
