@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import PurePosixPath
+from typing import BinaryIO
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..workspace import (
     PREVIEW_MAX_BYTES,
+    READ_CHUNK_BYTES,
     Workspace,
     WorkspaceError,
     content_disposition,
@@ -63,6 +66,32 @@ def _http_for_workspace(error: Exception) -> HTTPException:
             return HTTPException(507, msg)
         return HTTPException(400, msg)
     return HTTPException(400, str(error))
+
+
+def _download_chunks(handle: BinaryIO, size: int):
+    try:
+        remaining = size
+        while remaining:
+            chunk = handle.read(min(READ_CHUNK_BYTES, remaining))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+            yield chunk
+    finally:
+        handle.close()
+
+
+class _DownloadResponse(StreamingResponse):
+    def __init__(self, handle: BinaryIO, size: int, **kwargs):
+        self._handle = handle
+        super().__init__(_download_chunks(handle, size), **kwargs)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            # Includes cancellation and ASGI 2.4 send failures, which can skip backgrounds.
+            self._handle.close()
 
 
 def build_router(agent) -> APIRouter:
@@ -177,13 +206,18 @@ def build_router(agent) -> APIRouter:
     @router.get("/api/files/download")
     async def download(path: str):
         ws = workspace_for(agent)
+        handle = None
         try:
-            data = ws.read_bytes(path)
+            handle = ws.open_read(path)
+            size = os.fstat(handle.fileno()).st_size
             name = PurePosixPath(path).name or "download"
         except (WorkspaceError, FileNotFoundError, OSError) as error:
+            if handle is not None:
+                handle.close()
             raise _http_for_workspace(error) from error
-        return Response(
-            content=data,
+        return _DownloadResponse(
+            handle,
+            size,
             media_type="application/octet-stream",
             headers={
                 "Content-Disposition": content_disposition(name),
@@ -233,9 +267,7 @@ def build_router(agent) -> APIRouter:
             dest = ws.move(body.from_, body.to, overwrite=False)
         except (WorkspaceError, FileExistsError, FileNotFoundError, OSError) as error:
             raise _http_for_workspace(error) from error
-        agent.audit.write(
-            "roland", "file_move", detail={"from": body.from_, "to": dest}
-        )
+        agent.audit.write("roland", "file_move", detail={"from": body.from_, "to": dest})
         return {"path": dest}
 
     @router.delete("/api/files")
@@ -245,9 +277,7 @@ def build_router(agent) -> APIRouter:
             trash_id = ws.move_to_trash(path, deleted_by="roland")
         except (WorkspaceError, FileNotFoundError, OSError) as error:
             raise _http_for_workspace(error) from error
-        agent.audit.write(
-            "roland", "file_delete", detail={"path": path, "trash_id": trash_id}
-        )
+        agent.audit.write("roland", "file_delete", detail={"path": path, "trash_id": trash_id})
         return {"ok": True, "trash_id": trash_id}
 
     @router.get("/api/trash")

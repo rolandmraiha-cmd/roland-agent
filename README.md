@@ -4,16 +4,19 @@ Roland's single-user assistant, running all day on a Contabo VPS. Chat through i
 password-protected web page on a phone or computer. The model runs on the same server;
 chats, files and browser snapshots are never sent to a hosted inference service.
 
-**2.0.0 — 10 October 2026.** M0–M9 are implemented. The final runtime candidate
-**`7b3de9d`** was deployed on Contabo: verify passed (12 pass / 0 fail), schema 3 and the
-591-row audit chain verified, and the browser label, Watch/reconnect, Take control/Hand back
-and a fresh browser-tool request passed. The full restore, isolation, external-port/TLS,
-loaded-memory, soak and restart checks passed at the earlier `bb76263` checkpoint.
-All seven CI jobs passed on the deployed candidate; this release paperwork is checked again
-before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges to `main`.
-Roland authorized the release merge with the documented follow-ups retained. Feature branches
-and their temporary cleanup workflows are removed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
-Training stays off; [NEXT](docs/NEXT.md) keeps the follow-ups and completed plan history.
+**2.0.0 release candidate.** Full M9 acceptance passed at `bb76263` on 9 October;
+`7b3de9d` was deployed and passed the 10 October verify (12/0), schema 3, audit (591 rows)
+and focused browser/screen/tool smoke. Roland authorized the release merge with follow-ups
+retained. Final review then confirmed a large-file memory blocker: downloads buffered the
+whole file inside the 640 MiB core. The focused `v2-m9-stream-downloads` fix streams from a
+validated file descriptor in 64 KiB chunks and bounds metadata hashing. Mutable files
+use a chunked HTTP response so concurrent truncation cannot break a promised length. It needs CI and a
+focused deployment before [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) merges.
+The earlier completed checks remain evidence for that tested runtime; this fix is not yet
+deployed. See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
+Training stays off; [NEXT](docs/NEXT.md) preserves the completed plan and follow-ups,
+including [Ollama fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68)
+and [directory metadata #69](https://github.com/rolandmraiha-cmd/roland-agent/issues/69).
 
 ## What it does
 

@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-10. Tested runtime deployment: **`7b3de9d`** on `v2`, schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. Final deploy: verify 12/0/2, audit valid (591 rows), 3819 MiB idle available RAM, untitled-page label, Watch/reconnect, control/handback and fresh browser tools checked. Full M9 restore/isolation/external-port/TLS/benchmark/load/soak/restart acceptance passed at the dated `bb76263` checkpoint. [The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both records. All seven jobs passed on deployed `7b3de9d`; release paperwork is checked again in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized the 2.0.0 main merge with documented follow-ups retained. Feature branches and temporary cleanup workflows are removed. PR #66 records final CI, review and merge status. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
+> Snapshot: 2026-10-10. Tested runtime deployment: **`7b3de9d`** on `v2`, schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. Final deploy: verify 12/0/2, audit valid (591 rows), 3819 MiB idle available RAM, untitled-page label, Watch/reconnect, control/handback and fresh browser tools checked. Full M9 restore/isolation/external-port/TLS/benchmark/load/soak/restart acceptance passed at the dated `bb76263` checkpoint. [The acceptance note](releases/m9-acceptance-2026-10-09.md) preserves both records. All seven jobs passed on deployed `7b3de9d`; release checks are recorded in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized the 2.0.0 main merge with documented follow-ups retained. PR #65/#67 branches and cleanup workflows are removed. Final automated review confirmed a large-file memory blocker; `v2-m9-stream-downloads` bounds downloads and hashes, pending CI/deploy. Main remains unmerged; PR #66 records final checks and merge status. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -12,7 +12,7 @@ A private HTTPS agent on Roland's Contabo VPS with:
 2. Self-hosted open-weight model only (no third-party inference).
 3. A code-enforced approval gate, an isolated terminal sandbox and a workspace files UI (shipped).
 4. Persistent Chromium and a private live screen of that same browser for Roland's own sign-ins (M6/M7, accepted and enabled on Contabo).
-5. Persona editing and feedback (M8, accepted); scrubbed opt-in training on a **separate** machine is implemented but remains off. M9 completes the 2.0.0 release; the remaining work is recorded in §8.
+5. Persona editing and feedback (M8, accepted); scrubbed opt-in training on a **separate** machine is implemented but remains off. M9 prepares the 2.0.0 release; the final large-file blocker and remaining work are recorded in §8.
 
 Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a small local model; quality and speed are modest.
 
@@ -70,7 +70,7 @@ Default model: **Qwen3-4B-Instruct-2507 Q4_K_M** via llama.cpp on CPU. It is a s
 
 - **M8 as merged (implementation #56, approved for integration on 8 Oct 2026):** the pipeline on `v2-m8-model` is rebased on the final M7 baseline in `v2` at `e2f0792` (#57–#59), including chat refresh. Screen and trainer services, required mounted secrets, preflight and edge fixtures are combined. Capture still refuses active sign-ins and every screen session. Backup/configuration expectations, ShellCheck and the missing tokenizer dependency are corrected. Stopping a sign-in now delivers its final cancellation event before the chat ends. Model evaluation reads streamed schema-error bodies before constrained fallback; unrelated HTTP errors are not retried. The synthetic model declares the evaluation context of 4096 tokens; regression tests check that every public prompt plus its output allowance fits and that all 256 byte tokens preserve unseen Unicode. Byte fallback fixes the pinned server failure when tokenizing newlines or unseen characters. The synthetic tokenizer also leaves the assistant prefix literal, preventing the pinned sampler from dropping its first token before grammar initialization. The CPU workflow provides the checkout import path to the standalone probe. The real tiny-GGUF swap probe now uses authenticated trainer API handlers and human request tokens, verifies refusal without a token, and checks that valid promote/rollback does not restart the container. All five GitHub checks passed on code head `c9a7ef1`: 1,543 unit tests, 81 frontend tests, lint, edge/isolation, and CPU training/conversion plus the authenticated model-swap probe. Roland then requested merge and branch removal; this final status update changes documentation only. At that merge no M8 deployment had been performed (it has been since, see the entry above); no paid GPU has been rented and no model promoted. `docs/MODEL.md` is included in Roland's approval to merge #56 (M8.10). Roland accepted M7 on 8 Oct 2026. Training stays off.
 
-- **M9:** implementation #64, polish #65 and build fix #67 are merged into `v2`; extra branches and cleanup workflows are removed. Full acceptance passed at `bb76263`; final runtime `7b3de9d` is deployed and passed the focused checks (§12). Roland authorized [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66), `v2` → `main`, with model-reporting, phone and training-data follow-ups retained. Final paperwork CI/review/merge are recorded there. [NEXT](NEXT.md) folds the completed plan into history and retains the follow-ups.
+- **M9:** implementation #64, polish #65 and build fix #67 are merged into `v2`; extra branches and cleanup workflows are removed. Full acceptance passed at `bb76263`; final runtime `7b3de9d` is deployed and passed the focused checks (§12). Roland authorized [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66), `v2` → `main`, with model-reporting, phone and training-data follow-ups retained. A confirmed large-file memory blocker needs the focused streaming fix, CI and deployed acceptance before that merge. [NEXT](NEXT.md) folds the completed plan into history and retains the follow-ups.
 - **M7 is accepted (Roland, 8 Oct 2026)** and no longer belongs under "not done"; the next four points say what it consists of and what was left as it is. Known and left as they are: the sign-in was done on his PC, not the phone (the phone could not look up the server's name on mobile data that evening); the agent opens the address it is given and does not look for the site's sign-in form; a new tab and the address bar's suggestion box show "This page is blocked"; and a form that posts into a new tab leaves a blank tab behind.
 - **M7 part 1, core side (#55, merged):** screen sessions (`agent/screen.py`), the sign-in flow and the `request_signin` tool (`agent/signin.py`), the routes Caddy and the pages use (`agent/web/routes_screen.py`: `/screen`, `/api/screen/*`, `/api/signin/*`, `/internal/screen-auth`), the screen page (`screen.html`, `screen.js`), sign-in cards in the chat and Watch / Take control on the Browser tab. With the flag off the routes answer 404 or 403, the tool is not offered and the buttons are hidden. A7.1 (`tests/test_screen_auth.py`) and A7.2 (`tests/test_signin.py`) pass, with page tests in `tests/frontend/screen.test.cjs` and `chat.test.cjs`.
 - **M7 part 2, the services (#57, merged; on on Contabo, off by default in the repo):** x11vnc started by `browserd/launcher.py` when `SCREEN_ENABLED=true` (`browserd/vnc.py`: command line, password file, cutting connections by replacing x11vnc); `docker/novnc/` and the `novnc` compose service behind the `screen` profile; `vnc_password` / `vnc_view_password` mounted into core and the browser; the Caddy screen routes; `python -m agent` accepts `SCREEN_ENABLED=true` together with the browser; preflight, verify and isolation know the screen. A7.3 passes in the live stack (`tests/integration/test_screen_live.py`, run by `make test-browser`) and in CI for the part that needs no browser (`tests/integration/edge.sh`, second phase). A7.4 passed on Roland's second try (see §12). Known leftovers, visible on the screen: a form that posts into a new tab leaves a blank tab behind that browserd cannot see or close, and a new tab and the address bar's suggestion box show "This page is blocked" (docs/NEXT.md, M7, "Known issues").
@@ -216,21 +216,25 @@ its temporary workflow is removed. Release PR #66 records checks on the final cl
 and the final documentation check. The tested runtime deployment is now `7b3de9d`; verify, schema/audit and focused browser/screen/tool checks passed on 10 October.
 
 
-1. Finish [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66): final
-   documentation-only CI, COMMENT review at that exact head, then the main merge Roland
-   authorized. The deployed runtime `7b3de9d` already passed all seven jobs and focused
-   host/browser checks. No further host rebuild is required for this paperwork.
-2. Reproduce unsupported model claims in a long chat and incorrect page-content labels;
+1. Finish the release-blocking `v2-m9-stream-downloads` fix: review and all seven CI jobs,
+   merge into `v2`, then a focused Contabo build/verify and large-file download check.
+   The old 768 MiB download fails under a 192 MiB address-space limit; the fixed reader,
+   hash and disconnect cases passed locally (42 pass / 1 existing skip). The fix retains
+   confinement and header checks and changes no memory limit. It is not yet deployed.
+2. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) then needs all
+   seven final-head jobs, a COMMENT review and the main merge Roland already authorized.
+   The completed `7b3de9d` host/browser checks remain evidence for their tested scope.
+3. Reproduce unsupported model claims in a long chat and incorrect page-content labels;
    improve reports of actual tool results, blocked or unfinished actions. Preserve the gate.
-3. Return to Roland's deferred phone-screen and mobile-data/DNS work. A domain change
+4. Return to Roland's deferred phone-screen and mobile-data/DNS work. A domain change
    needs his decision; no cause or fix is established by the current evidence.
-4. Agree training-data location/backup policy before an explicitly requested synthetic
+5. Agree training-data location/backup policy before an explicitly requested synthetic
    capture/export trial. Capture, weekly training, trainer and the training profile stay off.
    Any GPU rental, model promotion or resource-limit increase needs Roland's decision.
 
 The completed implementation plan is folded into [NEXT's historical section](NEXT.md).
 Its unchanged pre-release version is also preserved by the [Git history link in §12](#12-last-verified).
-Standing working rules in §2 remain in force.
+Lower-priority findings stay after 2.0.0: [Ollama fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68) and [directory metadata #69](https://github.com/rolandmraiha-cmd/roland-agent/issues/69). Standing working rules in §2 remain in force.
 
 ## 9. Host facts
 
@@ -315,10 +319,11 @@ Standing working rules in §2 remain in force.
 
 ## 12. Last verified
 
-### 2.0.0 final acceptance and release record (10 October 2026)
+### 2.0.0 runtime checkpoint and final review (10 October 2026)
 
 Roland authorized publishing/merging the release and keeping the other issues for later.
-The deployment and short browser checks that the release was waiting for are now complete.
+The deployment and short browser checks passed, then final automated review confirmed
+the large-file memory blocker below. Main remains unmerged until that fix is accepted.
 The final runtime candidate is `7b3de9dcc032d50462b9999bc228576dbd3ec96f`.
 Roland's log confirms all five image builds and six healthy services, verify 12/0/2,
 schema 3 current, valid audit (591 rows, no bad row), and 3819 MiB idle available RAM.
@@ -329,16 +334,30 @@ rather than resolves the known model-reporting limitation.
 
 All seven deployed-head jobs passed: [CI 38030093440](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38030093440)
 and [CPU/model switch 38030093416](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/38030093416).
-Final release paperwork changes only documentation; its own final-head checks, COMMENT
-review and main merge are recorded in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
-The changelog records 2.0.0 on 10 October. No runtime flags, image pins, secrets, DNS,
-resource limits or model version changed after the tested candidate.
+The documentation-only checkpoint is `6a02480`; subsequent streaming-fix checks, COMMENT
+review and the final main merge are recorded in [PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
+The changelog remains unreleased until the streaming fix passes acceptance. Host flags,
+image pins, secrets, DNS, resource limits and model version are unchanged.
 
 The completed M6–M9 plan is retained in NEXT's collapsed historical section; its
 [unchanged pre-release archive in Git](https://github.com/rolandmraiha-cmd/roland-agent/blob/7b3de9dcc032d50462b9999bc228576dbd3ec96f/docs/NEXT.md)
 is linked here as the implementation history. Model-reporting quality, phone access and
 training-data work remain visible in NEXT and §8. This folding retains the approved text
 and does not create another active instruction document.
+
+### Large-file release blocker (10 October 2026)
+
+PR #66's automated P1 is confirmed: downloads called unbounded `Workspace.read_bytes`,
+so a sandbox-created file larger than the 640 MiB core limit could restart core. File-info
+and append bookkeeping also used unbounded reads for hashing. The focused fix opens
+regular files through the existing openat/O_NOFOLLOW walk, refuses FIFOs without blocking,
+streams at most 64 KiB at a time, caps a response to its initial size, uses chunked HTTP
+for mutable files rather than a stale Content-Length, and closes descriptors
+on normal completion, disconnect or cancellation. Hashing uses the same bounded reader.
+Local regression: the old download raises MemoryError for a 768 MiB sparse file under a
+192 MiB address-space cap; the fixed large download/hash, both ASGI disconnect paths and
+inode/symlink/FIFO checks pass (42 pass / 1 existing skip). CI and host acceptance remain
+pending. The two P2 findings are tracked as #68/#69 after 2.0.0.
 
 ### M9 host acceptance (9 October 2026)
 

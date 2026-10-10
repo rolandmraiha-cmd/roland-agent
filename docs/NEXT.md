@@ -1,15 +1,21 @@
 # roland-agent — NEXT: release record and follow-ups
 
-> Snapshot: 10 October 2026. Runtime candidate **`7b3de9d`** is deployed on Contabo: verify 12/0/2, schema 3, valid 591-row audit, 3819 MiB idle available RAM, untitled-page label, Watch/reconnect/control/handback and fresh browser tools checked. All seven jobs passed on that deployed head; final documentation CI/review/main merge are recorded in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized release as 2.0.0 with the documented follow-ups retained. Full M9 acceptance at `bb76263` and this final smoke are preserved in [the dated acceptance note](releases/m9-acceptance-2026-10-09.md). Feature branches and temporary cleanup workflows are removed. Training stays off.
+> Snapshot: 10 October 2026. Runtime candidate **`7b3de9d`** is deployed on Contabo: verify 12/0/2, schema 3, valid 591-row audit, 3819 MiB idle available RAM, untitled-page label, Watch/reconnect/control/handback and fresh browser tools checked. All seven jobs passed on that deployed head; final streaming-fix CI/deploy/review/main merge are recorded in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). Roland authorized release as 2.0.0 with the documented follow-ups retained. Full M9 acceptance at `bb76263` and this final smoke are preserved in [the dated acceptance note](releases/m9-acceptance-2026-10-09.md). PR #65/#67 cleanup is complete. Final review confirmed a large-file memory blocker; its focused streaming fix is not yet deployed. Main remains unmerged. Training stays off.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates `docs/AGENT.md`, this file, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Plans do not live only in chat. After squash-merge, the tip line names the new `v2` tip.
 > Audience: an AI coder that has the repository but has not seen any earlier chat.
 
 ## Remaining release action and post-2.0.0 work
 
-The runtime and host checks are complete. The remaining release action is final CI and a
-COMMENT review for this documentation-only head, then the main merge Roland authorized.
-CHANGELOG dates 2.0.0 to 10 October. The tested containers need no rebuild for paperwork.
+The existing runtime and host checks passed at `7b3de9d`. Final automated review then
+confirmed a large-file memory blocker. Before the already-authorized main merge, finish
+`v2-m9-stream-downloads`, all seven CI jobs and a focused deployed large-file check. The fix
+streams 64 KiB chunks from a validated descriptor and bounds file-info/append hashing.
+The HTTP response uses chunked framing so concurrent truncation finishes without a
+stale Content-Length error; binary/empty completion and real h11 framing are checked.
+The old 768 MiB download fails under a 192 MiB cap; the focused fixed suite passed locally
+(42 pass / 1 existing skip). Host limits stay unchanged. CHANGELOG remains unreleased
+until this new runtime change is accepted.
 
 1. **Model reporting:** reproduce longer-chat unsupported claims and inaccurate page-content
    labels. The final fresh request executed both browser tools and reported the title,
@@ -22,6 +28,8 @@ CHANGELOG dates 2.0.0 to 10 October. The tested containers need no rebuild for p
    synthetic capture/export test, including reload labels and fake-secret scrubbing.
    Capture, weekly training, trainer and the training profile remain off. GPU rental and
    model promotion need Roland's decision; automated CPU tests do not prove live data use.
+
+Additional lower-priority follow-ups are [Ollama streamed-error fallback #68](https://github.com/rolandmraiha-cmd/roland-agent/issues/68) and [directory metadata #69](https://github.com/rolandmraiha-cmd/roland-agent/issues/69). They remain after 2.0.0.
 
 Keep context 3072, model memory 3840m, threads 3, six tool steps, RAM prompt cache off,
 browser/screen on and the accepted Chromium/background-POST/sensitive-field settings.

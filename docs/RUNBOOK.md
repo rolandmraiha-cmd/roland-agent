@@ -13,8 +13,10 @@ restore, external-port/TLS and restart checks passed at `bb76263` on 9 October.
 PR #65 and #67, their extra branches and temporary cleanup workflows are closed out.
 Roland authorized the 2.0.0 release merge with the documented follow-ups retained;
 [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) records final-head
-CI/review. Only release paperwork changes after the tested runtime candidate; a further
-host build or long watch is unnecessary unless a new runtime change or concern appears.
+CI/review. Final automated review confirmed a large-file memory blocker. The focused
+streaming/download/hash fix needs a new core build, verify/schema/audit and a large-file
+check before the main merge; the previous long restore/load/soak evidence remains valid
+unless that focused check reveals a new concern.
 Only Roland merges the final `v2` → `main` PR unless he explicitly delegates that merge.
 External implementers need Roland's explicit instruction before SSH/deploy; this runbook
 does not grant it.
@@ -140,8 +142,8 @@ printf '%s\n' '/.env.before-m8' '/.env.before-screen' >> .git/info/exclude
 
 Do not hide other changes. The 10 October deploy used this fix and retained both backups.
 Use `git switch main` and `git pull --ff-only` instead of the `v2` lines after the release
-merge if following the released branch. The final documentation-only commit does not
-require rebuilding the already-tested containers.
+merge if following the released branch. The documentation-only checkpoint `6a02480` did not require a rebuild, but the subsequent
+streaming fix does. Do not perform its large-file download check on the old containers.
 
 Deploy preflights the host, records the checkout in `.deploy/`, takes an online backup if
 core is running, builds pinned images, reapplies the installed firewall, starts services,

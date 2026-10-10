@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
+import sys
+import textwrap
+
+import h11
 import pytest
 from fastapi.testclient import TestClient
 
@@ -126,6 +132,55 @@ def test_download_headers_attachment_nosniff_csp(client):
     assert response.headers["cache-control"] == "no-store"
 
 
+@pytest.mark.parametrize("size", [0, 3 * 64 * 1024 + 17])
+def test_download_returns_complete_binary_and_empty_files(client, size):
+    data = (bytes(range(256)) * ((size + 255) // 256))[:size]
+    (client.agent.config.workspace / "chunks.bin").write_bytes(data)
+    response = client.get("/api/files/download", params={"path": "chunks.bin"})
+    assert response.status_code == 200
+    assert response.content == data
+
+
+async def test_download_truncation_finishes_valid_http_response(make_agent, monkeypatch):
+    from agent.web import routes_files
+
+    agent = make_agent()
+    ws = routes_files.workspace_for(agent)
+    ws.ensure()
+    path = ws.root / "mutable.bin"
+    path.write_bytes(b"x" * (3 * 64 * 1024))
+    monkeypatch.setattr(routes_files, "workspace_for", lambda _: ws)
+    router = routes_files.build_router(agent)
+    download = next(r.endpoint for r in router.routes if r.path == "/api/files/download")
+    response = await download("mutable.bin")
+    protocol = h11.Connection(h11.SERVER)
+    protocol.receive_data(b"GET / HTTP/1.1\r\nHost: agent.test\r\n\r\n")
+    assert isinstance(protocol.next_event(), h11.Request)
+    assert isinstance(protocol.next_event(), h11.EndOfMessage)
+    truncated = False
+    finished = False
+
+    async def send(message):
+        nonlocal truncated, finished
+        if message["type"] == "http.response.start":
+            protocol.send(h11.Response(status_code=message["status"], headers=message["headers"]))
+        elif message["type"] == "http.response.body":
+            protocol.send(h11.Data(data=message.get("body", b"")))
+            if message.get("body") and not truncated:
+                with path.open("wb"):
+                    pass
+                truncated = True
+            if not message.get("more_body", False):
+                protocol.send(h11.EndOfMessage())
+                finished = True
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    await response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)
+    assert truncated and finished
+
+
 def test_preview_only_real_images(client):
     # .png name with HTML body → 415
     client.put(
@@ -187,3 +242,105 @@ def test_upload_refuses_symlink_dest(client):
     detail = response.json()["detail"].lower()
     assert "outside" in detail or "symbolic" in detail
     assert (root / "link.txt").is_symlink()
+
+
+@pytest.mark.parametrize("spec_version", ["2.0", "2.4"])
+async def test_download_closes_reader_when_client_disconnects(make_agent, monkeypatch, spec_version):
+    from starlette.requests import ClientDisconnect
+
+    from agent.web import routes_files
+
+    agent = make_agent()
+    ws = routes_files.workspace_for(agent)
+    ws.ensure()
+    (ws.root / "chunks.bin").write_bytes(b"x" * (3 * 64 * 1024))
+    opened = []
+    real_open = ws.open_read
+
+    def track_open(path):
+        handle = real_open(path)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(ws, "open_read", track_open)
+    monkeypatch.setattr(routes_files, "workspace_for", lambda _: ws)
+    router = routes_files.build_router(agent)
+    download = next(r.endpoint for r in router.routes if r.path == "/api/files/download")
+    response = await download("chunks.bin")
+    disconnected = asyncio.Event()
+
+    async def send(message):
+        if message["type"] == "http.response.body" and message.get("body"):
+            if spec_version == "2.4":
+                raise OSError("client disconnected")
+            disconnected.set()
+
+    async def receive():
+        await disconnected.wait()
+        return {"type": "http.disconnect"}
+
+    scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+    if spec_version == "2.4":
+        with pytest.raises(ClientDisconnect):
+            await response(scope, receive, send)
+    else:
+        await response(scope, receive, send)
+    assert opened and all(handle.closed for handle in opened)
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="matches the Linux core memory limit")
+def test_large_download_and_hash_fit_below_core_memory_limit(tmp_path):
+    # A sparse file larger than core's 640 MiB cap; the child cannot buffer it.
+    root = tmp_path / "large-workspace"
+    root.mkdir()
+    size = 768 * 1024 * 1024
+    with (root / "large.bin").open("wb") as handle:
+        handle.truncate(size)
+    probe = textwrap.dedent(
+        """
+        import asyncio
+        import resource
+        import sys
+        from pathlib import Path
+        from types import SimpleNamespace
+        from agent.web.routes_files import build_router
+        from agent.workspace import Workspace
+
+        root = Path(sys.argv[1])
+        config = SimpleNamespace(workspace=root, workspace_quota_mb=8192,
+            workspace_reserve_mb=1, workspace_max_files=50000,
+            upload_max_mb=100, trash_keep_days=7)
+        router = build_router(SimpleNamespace(config=config, memory=None))
+        download = next(r.endpoint for r in router.routes if r.path == '/api/files/download')
+        resource.setrlimit(resource.RLIMIT_AS, (192 * 1024 * 1024, 192 * 1024 * 1024))
+
+        async def run():
+            response = await download('large.bin')
+            assert 'content-length' not in response.headers
+            # Discard chunks and disconnect early; never collect the response in a client.
+            disconnected = asyncio.Event()
+            count = 0
+            async def send(message):
+                nonlocal count
+                if message['type'] == 'http.response.body' and message.get('body'):
+                    assert len(message['body']) <= 64 * 1024
+                    count += 1
+                    if count == 2:
+                        disconnected.set()
+            async def receive():
+                await disconnected.wait()
+                return {'type': 'http.disconnect'}
+            await response({'type': 'http', 'asgi': {'spec_version': '2.0'}}, receive, send)
+            assert count >= 2
+            # file_info uses the same bounded hash reader on an unindexed large file.
+            info = Workspace(root).info('large.bin')
+            assert info['size'] == 768 * 1024 * 1024
+            assert len(info['sha256']) == 64
+
+        asyncio.run(run())
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, str(root)], capture_output=True, text=True, timeout=30
+    )
+    assert completed.returncode == 0, completed.stderr
