@@ -3,8 +3,10 @@
 ## 2.0.0 — Unreleased
 
 M9 release candidate. Host acceptance and restart recovery passed at `bb76263` on
-9 October 2026. Final polish PR #65 is merged at `a32bbf8`; release PR #66 tracks final
-CI, a focused polish deploy check and the `v2` → `main` review. Release acceptance and
+9 October 2026. Final polish PR #65 is merged at `a32bbf8` and verified build fix
+PR #67 at `6146038`; all seven integration jobs passed. Their extra branches and temporary
+cleanup workflows are removed. Release PR #66 records final-head CI, a focused deploy
+check and the `v2` → `main` review. Release acceptance and
 the main merge remain pending. Training stays off. See the approved M9 acceptance note and known
 model-reporting, phone and training-data follow-ups in the project records.
 

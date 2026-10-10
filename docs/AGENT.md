@@ -1,6 +1,6 @@
 # roland-agent — master status
 
-> Snapshot: 2026-10-09. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 is merged at `a32bbf8`, with all seven checks passed at `3478d3b`. The merged branch and temporary cleanup workflow are removed. Final integration CI, the focused polish deploy and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
+> Snapshot: 2026-10-10. Tested deployment: **`bb76263`** (M9 on `v2`), schema 3, `qwen3-4b-q4km-base` current, browser/screen on, training off. M6/M7/M8 are accepted. M9 host checks passed: verify 12/0/2, copy-only restore, isolation, external ports/TLS, actual browser/VNC sockets, benchmark, loaded watch, 30-minute soak and restart recovery. See §12 and [the approved acceptance note](releases/m9-acceptance-2026-10-09.md). Roland approved publishing the note, merging PR #65 and deleting its branch on 9 October. PR #65 is merged at `a32bbf8`, with all seven checks passed at `3478d3b`. The merged branch and temporary cleanup workflow are removed. Build fix PR #67 is merged at `6146038`, with all seven integration jobs passed; its extra branch and temporary workflow are also removed. Final integration CI, the focused polish deploy and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66). `v2` → `main` has not been merged. Keep capture/weekly training/trainer off, context 3072, model memory 3840m, threads 3 and tool steps 6.
 
 > **Standing rule:** every PR, every edit on that branch, and every squash merge updates this file, `docs/NEXT.md`, and `README.md` in that same PR before merge when code, deploy state, plans, or instructions change. Do not leave plans only in chat. Update `docs/SECURITY.md` in that PR when an accepted limit changes. After squash-merge, the tip line names the new `v2` tip.
 
@@ -201,25 +201,23 @@ Grammar/constrained decoding is **formatting**, not authorization. Untrusted too
 
 ## 8. Next coding order
 
-Fresh GitHub release builds failed resolving the earlier Caddy OCI index, before application
-checks. The M9 Caddy-index follow-up pins Docker's current official `2.11.7-alpine` index
-`d8542f48…`; old and new indexes reference the same Linux/amd64 image `173b2630…`.
-Registry GET/HEAD and manifest hashes were checked. Docker Hub then returned an anonymous
-pull-limit 429 on the current index. The fix uses Amazon ECR Public's official Docker image
-copy, verified to serve the exact same pinned index and Linux/amd64 manifest. The existing
-policy test still requires that trusted source, Caddy version, digest and non-root rules.
-The Caddy mirror resolved that pull step; the runner then hit a Docker Hub Python-token
-504. All six Python-based builds now use the official mirror with the unchanged `dddfd7e0…`
-index, whose complete manifest bytes were also verified. Core, sandbox, relay, tester,
-installer and optional trainer keep the same Python base contents. Policy checks still
-require the exact source/version/digest and matching core/relay base. The fix must pass CI
-before integration; host policy and resource/training settings are unchanged.
-A one-use workflow will delete only this unchanged feature branch after its verified merge;
-remove the workflow after success. Release PR #66 remains pending final CI and the focused deploy.
+Build fix PR #67 is merged at `6146038`. All seven jobs passed at that merged `v2`
+integration tip: [CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994798247)
+and [CPU/model switch](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994798251).
+Verified Docker Official Image copies on Amazon ECR Public bypass the observed Docker Hub
+metadata, pull-limit and token failures. Caddy remains `2.11.7-alpine`; its current index
+`d8542f48…` and the earlier index select the identical Linux/amd64 image `173b2630…`.
+All six Python builds retain the complete `dddfd7e0…` index and base contents. Manifest
+hashes, the exact mirror namespace, versions, digest pins and non-root policy were checked.
+Host controls, resource limits and training settings are unchanged.
+The unchanged merged `v2-m9-caddy-index` branch was deleted by guarded
+[cleanup run 37994793408](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994793408);
+its temporary workflow is removed. Release PR #66 records checks on the final cleanup head
+and the focused deploy. The tested host checkpoint remains `bb76263`.
 
 
-1. M9 implementation #64 and approved polish #65 are merged into `v2`; their extra
-   branches and cleanup workflows are removed. The host acceptance checkpoint is `bb76263`.
+1. M9 implementation #64, approved polish #65 and verified build fix #67 are merged
+   into `v2`; their extra branches and cleanup workflows are removed. The host acceptance checkpoint is `bb76263`.
 2. [Release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66) tracks A9.1:
    all seven jobs must pass on its final `v2` head. Record exact head and run URLs there.
 3. Roland deploys the merged polish, retaining context 3072, model memory 3840m, threads 3,

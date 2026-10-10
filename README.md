@@ -8,6 +8,8 @@ chats, files and browser snapshots are never sent to a hosted inference service.
 **`bb76263`** passed the host acceptance checks and restart recovery on 9 October 2026.
 Roland approved publishing the results; PR #65 is merged at `a32bbf8`, with all seven
 checks passed at `3478d3b`. Its merged branch is deleted and the cleanup workflow removed.
+Build fix PR #67 is merged at `6146038`, with all seven integration jobs passed;
+its extra branch and temporary workflow are also removed.
 See [the acceptance record](docs/releases/m9-acceptance-2026-10-09.md).
 Final integration CI and release acceptance are tracked in [release PR #66](https://github.com/rolandmraiha-cmd/roland-agent/pull/66).
 `v2` → `main` has not been merged; training stays off.
@@ -138,21 +140,19 @@ computer. Never set `SANDBOX_REAP_ALL` on a host. CI runs lint, unit, frontend,
 
 ## Project records
 
-Fresh GitHub release builds failed resolving the earlier Caddy OCI index, before application
-checks. The M9 Caddy-index follow-up pins Docker's current official `2.11.7-alpine` index
-`d8542f48…`; old and new indexes reference the same Linux/amd64 image `173b2630…`.
-Registry GET/HEAD and manifest hashes were checked. Docker Hub then returned an anonymous
-pull-limit 429 on the current index. The fix uses Amazon ECR Public's official Docker image
-copy, verified to serve the exact same pinned index and Linux/amd64 manifest. The existing
-policy test still requires that trusted source, Caddy version, digest and non-root rules.
-The Caddy mirror resolved that pull step; the runner then hit a Docker Hub Python-token
-504. All six Python-based builds now use the official mirror with the unchanged `dddfd7e0…`
-index, whose complete manifest bytes were also verified. Core, sandbox, relay, tester,
-installer and optional trainer keep the same Python base contents. Policy checks still
-require the exact source/version/digest and matching core/relay base. The fix must pass CI
-before integration; host policy and resource/training settings are unchanged.
-A one-use workflow will delete only this unchanged feature branch after its verified merge;
-remove the workflow after success. Release PR #66 remains pending final CI and the focused deploy.
+Build fix PR #67 is merged at `6146038`. All seven jobs passed at that merged `v2`
+integration tip: [CI](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994798247)
+and [CPU/model switch](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994798251).
+Verified Docker Official Image copies on Amazon ECR Public bypass the observed Docker Hub
+metadata, pull-limit and token failures. Caddy remains `2.11.7-alpine`; its current index
+`d8542f48…` and the earlier index select the identical Linux/amd64 image `173b2630…`.
+All six Python builds retain the complete `dddfd7e0…` index and base contents. Manifest
+hashes, the exact mirror namespace, versions, digest pins and non-root policy were checked.
+Host controls, resource limits and training settings are unchanged.
+The unchanged merged `v2-m9-caddy-index` branch was deleted by guarded
+[cleanup run 37994793408](https://github.com/rolandmraiha-cmd/roland-agent/actions/runs/37994793408);
+its temporary workflow is removed. Release PR #66 records checks on the final cleanup head
+and the focused deploy. The tested host checkpoint remains `bb76263`.
 
 
 [Master status and rules](docs/AGENT.md) · [Remaining release work](docs/NEXT.md) ·
